@@ -1,0 +1,20 @@
+:root {
+  --bg-app: #090D16;
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --accent-gold: #F59E0B;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  min-height: 100vh;
+  line-height: 1.5;
+}
