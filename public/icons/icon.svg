@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#D97706"/>
+    </linearGradient>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B1120"/>
+      <stop offset="100%" stop-color="#040711"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="#F59E0B" stroke-opacity="0.3" stroke-width="4"/>
+  <g transform="translate(96, 80)" stroke="url(#goldGrad)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <circle cx="160" cy="60" r="36" stroke-width="20" fill="#1E293B"/>
+    <line x1="160" y1="96" x2="160" y2="290" stroke-width="24"/>
+    <path d="M40 180 Q160 360 280 180" stroke-width="26"/>
+    <line x1="40" y1="180" x2="24" y2="195" stroke-width="20"/>
+    <line x1="280" y1="180" x2="296" y2="195" stroke-width="20"/>
+    <path d="M110 280 L210 280 L185 330 L135 330 Z" fill="#F59E0B" stroke="#D97706" stroke-width="12"/>
+  </g>
+  <text x="256" y="455" text-anchor="middle" font-family="'Plus Jakarta Sans', sans-serif" font-weight="800" font-size="38" fill="#F8FAFC" letter-spacing="4">DREDGEOPS</text>
+</svg>
