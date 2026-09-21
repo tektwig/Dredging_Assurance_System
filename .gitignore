@@ -27,8 +27,8 @@ scratch/
 
 # Environment files
 .env
-.env.local
-.env.*.local
+.env.*
+# Only explicitly named example templates may be version-controlled.
 !.env.example
 
 # OCR Traineddata
