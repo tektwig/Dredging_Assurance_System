@@ -188,3 +188,47 @@ export interface DraftTrip {
   captured_at: string;
   notes?: string;
 }
+
+export interface InvoiceItem {
+  id: string;
+  trip_id?: string;
+  trip_number?: string;
+  truck_plate?: string;
+  description: string;
+  sand_type: string;
+  quantity: number;
+  unit: 'm3' | 'tonnes' | 'truckloads';
+  unit_price: number;
+  amount: number;
+}
+
+export interface Invoice {
+  id: string;
+  invoice_number: string;
+  issue_date: string;
+  due_date: string;
+  customer_name: string;
+  customer_email?: string;
+  customer_phone?: string;
+  customer_address?: string;
+  customer_tin?: string;
+  project_site_name?: string;
+  status: 'draft' | 'issued' | 'paid' | 'overdue' | 'cancelled';
+  items: InvoiceItem[];
+  subtotal: number;
+  tax_rate: number; // 7.5% standard VAT
+  tax_amount: number;
+  discount_amount: number;
+  total_amount: number;
+  currency: string;
+  payment_terms: string;
+  bank_name: string;
+  bank_account_name: string;
+  bank_account_number: string;
+  paystack_payment_link?: string;
+  notes?: string;
+  created_at: string;
+  paid_at?: string;
+  paid_reference?: string;
+}
+

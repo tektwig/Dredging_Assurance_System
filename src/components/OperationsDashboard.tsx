@@ -9,14 +9,18 @@ import {
   ChevronRight,
   Download,
   Eye,
+  FileText,
 } from 'lucide-react';
 import { TripDetailModal } from './TripDetailModal';
+import { InvoiceModal } from './InvoiceModal';
 
 export const OperationsDashboard: React.FC = () => {
   const { trips, exceptions, auditLogs } = useAppStore();
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [periodFilter, setPeriodFilter] = useState<'today' | 'all'>('all');
   const [selectedTripForModal, setSelectedTripForModal] = useState<Trip | null>(null);
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState<boolean>(false);
+  const [selectedTripForInvoice, setSelectedTripForInvoice] = useState<Trip | null>(null);
 
   // Compute live KPIs
   const activeTrips = trips.filter((t) => t.status === 'open').length;
@@ -314,6 +318,20 @@ export const OperationsDashboard: React.FC = () => {
             >
               <Download size={14} /> Export CSV
             </button>
+
+            {/* Commercial Invoice Generator Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedTripForInvoice(null);
+                setIsInvoiceModalOpen(true);
+              }}
+              className="btn btn-primary btn-sm"
+              title="Create Commercial Tax Invoice"
+              style={{ fontSize: '0.78rem' }}
+            >
+              <FileText size={14} /> Create Invoice
+            </button>
           </div>
         </div>
 
@@ -389,17 +407,40 @@ export const OperationsDashboard: React.FC = () => {
                   </td>
                   <td>{getStatusBadge(tr.status)}</td>
                   <td>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedTripForModal(tr);
-                      }}
-                      className="btn btn-secondary btn-sm"
-                      style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                    >
-                      <Eye size={13} /> View
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedTripForModal(tr);
+                        }}
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                      >
+                        <Eye size={13} /> View
+                      </button>
+
+                      {tr.status === 'closed' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedTripForInvoice(tr);
+                            setIsInvoiceModalOpen(true);
+                          }}
+                          className="btn btn-secondary btn-sm"
+                          style={{
+                            padding: '0.25rem 0.5rem',
+                            fontSize: '0.75rem',
+                            color: 'var(--accent-gold)',
+                            borderColor: 'rgba(245, 158, 11, 0.3)',
+                          }}
+                          title="Generate Commercial Invoice for this closed trip"
+                        >
+                          <FileText size={13} /> Invoice
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -413,6 +454,16 @@ export const OperationsDashboard: React.FC = () => {
         trip={selectedTripForModal}
         onClose={() => setSelectedTripForModal(null)}
         auditLogs={auditLogs}
+      />
+
+      {/* Commercial Invoice Modal */}
+      <InvoiceModal
+        isOpen={isInvoiceModalOpen}
+        onClose={() => {
+          setIsInvoiceModalOpen(false);
+          setSelectedTripForInvoice(null);
+        }}
+        preselectedTrip={selectedTripForInvoice}
       />
     </div>
   );

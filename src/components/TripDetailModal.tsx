@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Trip, AuditLogEntry } from '../types';
 import {
   X,
   Lock,
+  FileText,
 } from 'lucide-react';
+import { InvoiceModal } from './InvoiceModal';
 
 interface TripDetailModalProps {
   trip: Trip | null;
@@ -12,6 +14,8 @@ interface TripDetailModalProps {
 }
 
 export const TripDetailModal: React.FC<TripDetailModalProps> = ({ trip, onClose, auditLogs }) => {
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState<boolean>(false);
+
   if (!trip) return null;
 
   const tripAuditLogs = auditLogs.filter((l) => l.entity_id === trip.id || l.reason.includes(trip.trip_number));
@@ -68,13 +72,33 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({ trip, onClose,
             </p>
           </div>
 
-          <button
-            onClick={onClose}
-            className="btn btn-secondary btn-sm"
-            style={{ padding: '0.4rem', borderRadius: '50%' }}
-          >
-            <X size={18} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            {trip.status === 'closed' && (
+              <button
+                type="button"
+                onClick={() => setIsInvoiceModalOpen(true)}
+                className="btn btn-primary btn-sm"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  fontSize: '0.78rem',
+                  padding: '0.4rem 0.75rem',
+                }}
+                title="Generate Commercial Tax Invoice for this verified haulage"
+              >
+                <FileText size={14} /> Generate Invoice
+              </button>
+            )}
+
+            <button
+              onClick={onClose}
+              className="btn btn-secondary btn-sm"
+              style={{ padding: '0.4rem', borderRadius: '50%' }}
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Vehicle & Corridor Banner */}
@@ -285,6 +309,13 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({ trip, onClose,
           </div>
         </div>
       </div>
+
+      {/* Commercial Invoice Modal */}
+      <InvoiceModal
+        isOpen={isInvoiceModalOpen}
+        onClose={() => setIsInvoiceModalOpen(false)}
+        preselectedTrip={trip}
+      />
     </div>
   );
 };

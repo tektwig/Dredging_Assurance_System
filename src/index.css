@@ -418,3 +418,131 @@ h1, h2, h3, h4, h5, h6 {
   z-index: 2;
 }
 
+/* Commercial Invoice Document Styling */
+.invoice-paper {
+  background: #0B1120;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  padding: 2.5rem;
+  position: relative;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  color: #F8FAFC;
+}
+
+.invoice-stamp {
+  position: absolute;
+  top: 2.2rem;
+  right: 2.5rem;
+  border: 3px dashed;
+  border-radius: 8px;
+  padding: 0.35rem 1rem;
+  font-weight: 900;
+  font-size: 1.15rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  transform: rotate(-8deg);
+  user-select: none;
+}
+
+.invoice-stamp-paid {
+  border-color: #10B981;
+  color: #10B981;
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.invoice-stamp-issued {
+  border-color: var(--accent-gold);
+  color: var(--accent-gold);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.invoice-stamp-overdue {
+  border-color: #F43F5E;
+  color: #F43F5E;
+  background: rgba(244, 63, 94, 0.08);
+}
+
+/* Media Print Rules for Flawless A4 Invoices */
+@media print {
+  body {
+    background: #FFFFFF !important;
+    color: #000000 !important;
+    font-size: 12pt;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  header,
+  .role-switcher-container,
+  .no-print,
+  button,
+  .btn,
+  .modal-backdrop {
+    display: none !important;
+  }
+
+  .invoice-modal-content {
+    position: static !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #FFFFFF !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .invoice-paper {
+    background: #FFFFFF !important;
+    color: #0F172A !important;
+    border: 1px solid #E2E8F0 !important;
+    box-shadow: none !important;
+    padding: 20mm !important;
+    width: 100% !important;
+    border-radius: 0 !important;
+  }
+
+  .invoice-paper * {
+    color: #0F172A !important;
+    border-color: #CBD5E1 !important;
+  }
+
+  .invoice-paper .mono {
+    font-family: 'Courier New', Courier, monospace !important;
+  }
+
+  .invoice-stamp-paid {
+    border-color: #059669 !important;
+    color: #059669 !important;
+    background: rgba(5, 150, 105, 0.05) !important;
+  }
+
+  .invoice-stamp-issued {
+    border-color: #D97706 !important;
+    color: #D97706 !important;
+    background: rgba(217, 119, 6, 0.05) !important;
+  }
+
+  .invoice-paper table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  .invoice-paper th {
+    background: #F1F5F9 !important;
+    color: #1E293B !important;
+    font-weight: 700 !important;
+  }
+
+  .invoice-paper th,
+  .invoice-paper td {
+    border: 1px solid #CBD5E1 !important;
+    padding: 8px 12px !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+}
+
+

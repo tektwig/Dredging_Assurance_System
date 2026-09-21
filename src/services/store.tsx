@@ -10,6 +10,8 @@ import {
   BusinessComplianceDoc,
   AuditLogEntry,
   DraftTrip,
+  Invoice,
+  InvoiceItem,
 } from '../types';
 import {
   INITIAL_SITES,
@@ -20,6 +22,7 @@ import {
   INITIAL_PAYOUT_BATCHES,
   INITIAL_COMPLIANCE_DOCS,
   INITIAL_AUDIT_LOGS,
+  INITIAL_INVOICES,
 } from './mockData';
 
 interface AppContextType {
@@ -36,6 +39,7 @@ interface AppContextType {
   complianceDocs: BusinessComplianceDoc[];
   auditLogs: AuditLogEntry[];
   draftTrips: DraftTrip[];
+  invoices: Invoice[];
   isOnline: boolean;
   setIsOnline: (online: boolean) => void;
   activeSite: Site | undefined;
@@ -87,6 +91,24 @@ interface AppContextType {
   approvePayoutBatch: (batch_id: string) => void;
   syncOfflineDrafts: () => void;
   addAuditLog: (entry: Omit<AuditLogEntry, 'id' | 'created_at'>) => void;
+
+  // Invoice Actions
+  createInvoice: (params: {
+    customer_name: string;
+    customer_email?: string;
+    customer_phone?: string;
+    customer_address?: string;
+    customer_tin?: string;
+    project_site_name?: string;
+    items: InvoiceItem[];
+    tax_rate?: number;
+    discount_amount?: number;
+    payment_terms?: string;
+    notes?: string;
+    due_date?: string;
+  }) => { success: boolean; invoice?: Invoice; error?: string };
+  markInvoiceAsPaid: (invoiceId: string, paymentReference: string) => void;
+  cancelInvoice: (invoiceId: string, reason: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -120,6 +142,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return saved ? JSON.parse(saved) : INITIAL_PAYOUT_BATCHES;
   });
 
+  const [invoices, setInvoices] = useState<Invoice[]>(() => {
+    const saved = localStorage.getItem('adams_invoices');
+    return saved ? JSON.parse(saved) : INITIAL_INVOICES;
+  });
+
   const [complianceDocs] = useState<BusinessComplianceDoc[]>(INITIAL_COMPLIANCE_DOCS);
 
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() => {
@@ -129,6 +156,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const [draftTrips, setDraftTrips] = useState<DraftTrip[]>([]);
   const [isOnline, setIsOnline] = useState<boolean>(true);
+
+  // Sync to localStorage
+  useEffect(() => {
+    localStorage.setItem('adams_invoices', JSON.stringify(invoices));
+  }, [invoices]);
 
   // Sync to localStorage
   useEffect(() => {
@@ -557,6 +589,138 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setDraftTrips([]);
   };
 
+  // Invoice Management Actions
+  const createInvoice = (params: {
+    customer_name: string;
+    customer_email?: string;
+    customer_phone?: string;
+    customer_address?: string;
+    customer_tin?: string;
+    project_site_name?: string;
+    items: InvoiceItem[];
+    tax_rate?: number;
+    discount_amount?: number;
+    payment_terms?: string;
+    notes?: string;
+    due_date?: string;
+  }): { success: boolean; invoice?: Invoice; error?: string } => {
+    if (!params.customer_name?.trim() || !params.items || params.items.length === 0) {
+      return { success: false, error: 'Customer name and at least one line item are required.' };
+    }
+
+    const subtotal = params.items.reduce(
+      (sum, it) => sum + (Number(it.amount) || Number(it.quantity) * Number(it.unit_price)),
+      0
+    );
+    const tax_rate = params.tax_rate !== undefined ? params.tax_rate : 7.5;
+    const tax_amount = Math.round((subtotal * (tax_rate / 100)) * 100) / 100;
+    const discount_amount = Number(params.discount_amount) || 0;
+    const total_amount = subtotal + tax_amount - discount_amount;
+
+    const invoiceNum = `INV-${new Date().getFullYear()}-${String(invoices.length + 95).padStart(4, '0')}`;
+    const issueDate = new Date().toISOString().split('T')[0];
+    const dueDate =
+      params.due_date ||
+      new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    const newInvoice: Invoice = {
+      id: `inv-${Date.now()}`,
+      invoice_number: invoiceNum,
+      issue_date: issueDate,
+      due_date: dueDate,
+      customer_name: params.customer_name.trim(),
+      customer_email: params.customer_email?.trim(),
+      customer_phone: params.customer_phone?.trim(),
+      customer_address: params.customer_address?.trim(),
+      customer_tin: params.customer_tin?.trim(),
+      project_site_name: params.project_site_name?.trim(),
+      status: 'issued',
+      items: params.items,
+      subtotal,
+      tax_rate,
+      tax_amount,
+      discount_amount,
+      total_amount,
+      currency: 'NGN',
+      payment_terms: params.payment_terms || 'Net 14 Days',
+      bank_name: 'Guaranty Trust Bank (GTBank)',
+      bank_account_name: 'Adams Dredging & Haulage Operations Ltd',
+      bank_account_number: '0192847581',
+      paystack_payment_link: `https://paystack.com/pay/dredgeops-${invoiceNum.toLowerCase()}`,
+      notes: params.notes,
+      created_at: new Date().toISOString(),
+    };
+
+    setInvoices((prev) => [newInvoice, ...prev]);
+
+    addAuditLog({
+      entity_name: 'invoices',
+      entity_id: newInvoice.id,
+      action: 'INVOICE_GENERATED',
+      reason: `Commercial Tax Invoice ${newInvoice.invoice_number} generated for ${newInvoice.customer_name} (Total: ₦${newInvoice.total_amount.toLocaleString()})`,
+      actor_role: currentRole,
+      new_value: {
+        invoice_number: newInvoice.invoice_number,
+        total_amount: newInvoice.total_amount,
+        customer_name: newInvoice.customer_name,
+        item_count: newInvoice.items.length,
+      },
+    });
+
+    return { success: true, invoice: newInvoice };
+  };
+
+  const markInvoiceAsPaid = (invoiceId: string, paymentReference: string) => {
+    setInvoices((prev) =>
+      prev.map((inv) => {
+        if (inv.id === invoiceId) {
+          const updated: Invoice = {
+            ...inv,
+            status: 'paid',
+            paid_at: new Date().toISOString(),
+            paid_reference: paymentReference || `NIBSS-PAY-${Date.now()}`,
+          };
+
+          addAuditLog({
+            entity_name: 'invoices',
+            entity_id: inv.id,
+            action: 'INVOICE_PAID',
+            reason: `Payment verified & credited for Invoice ${inv.invoice_number}. Payment Reference: ${paymentReference || 'Direct Bank Settlement'}`,
+            actor_role: currentRole,
+            old_value: { status: inv.status },
+            new_value: { status: 'paid', paid_reference: updated.paid_reference, paid_at: updated.paid_at },
+          });
+
+          return updated;
+        }
+        return inv;
+      })
+    );
+  };
+
+  const cancelInvoice = (invoiceId: string, reason: string) => {
+    setInvoices((prev) =>
+      prev.map((inv) => {
+        if (inv.id === invoiceId) {
+          const updated: Invoice = { ...inv, status: 'cancelled' };
+
+          addAuditLog({
+            entity_name: 'invoices',
+            entity_id: inv.id,
+            action: 'INVOICE_CANCELLED',
+            reason: `Invoice ${inv.invoice_number} marked as cancelled. Reason: ${reason}`,
+            actor_role: currentRole,
+            old_value: { status: inv.status },
+            new_value: { status: 'cancelled', cancellation_reason: reason },
+          });
+
+          return updated;
+        }
+        return inv;
+      })
+    );
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -573,6 +737,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         complianceDocs,
         auditLogs,
         draftTrips,
+        invoices,
         isOnline,
         setIsOnline,
         activeSite,
@@ -585,6 +750,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         addAuditLog,
         addTruck,
         addDriver,
+        createInvoice,
+        markInvoiceAsPaid,
+        cancelInvoice,
       }}
     >
       {children}
