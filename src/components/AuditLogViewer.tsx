@@ -14,10 +14,10 @@ export const AuditLogViewer: React.FC = () => {
   const filteredLogs = auditLogs.filter((log) => {
     const search = searchTerm.toLowerCase();
     return (
-      log.entity_name.toLowerCase().includes(search) ||
+      (log.entity_name || '').toLowerCase().includes(search) ||
       log.action.toLowerCase().includes(search) ||
-      log.reason.toLowerCase().includes(search) ||
-      log.actor_role.toLowerCase().includes(search)
+      (log.reason || '').toLowerCase().includes(search) ||
+      (String(log.actor_role) || '').toLowerCase().includes(search)
     );
   });
 
@@ -106,10 +106,10 @@ export const AuditLogViewer: React.FC = () => {
                 <tr key={log.id}>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <div style={{ fontSize: '0.85rem' }}>
-                      {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      {new Date(log.created_at || log.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                      {new Date(log.created_at).toLocaleDateString()}
+                      {new Date(log.created_at || log.timestamp || Date.now()).toLocaleDateString()}
                     </div>
                   </td>
                   <td>
@@ -117,7 +117,7 @@ export const AuditLogViewer: React.FC = () => {
                       {log.entity_name}
                     </span>
                     <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }} className="mono">
-                      {log.entity_id.slice(0, 18)}...
+                      {(log.entity_id || '').slice(0, 18)}...
                     </div>
                   </td>
                   <td>

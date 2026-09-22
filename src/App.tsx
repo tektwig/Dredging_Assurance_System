@@ -8,11 +8,19 @@ import { ExceptionPortal } from './components/ExceptionPortal';
 import { FinancePortal } from './components/FinancePortal';
 import { AuditLogViewer } from './components/AuditLogViewer';
 import { MasterDataPortal } from './components/MasterDataPortal';
+import { LandingPage } from './components/landing/LandingPage';
+import { SiteAgentTerminal } from './components/field/SiteAgentTerminal';
+import { AdminAuditView } from './components/admin/AdminAuditView';
 import { useAppStore } from './services/store';
+import { AppStateProvider } from './context/AppStateContext';
 
-export const App: React.FC = () => {
+export const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('operations_manager');
   const { currentRole } = useAppStore();
+
+  if (activeTab === 'landing') {
+    return <LandingPage onSignIn={(role) => setActiveTab(role)} />;
+  }
 
   const renderCurrentView = () => {
     switch (activeTab) {
@@ -30,6 +38,10 @@ export const App: React.FC = () => {
         return <AuditLogViewer />;
       case 'master_data':
         return <MasterDataPortal />;
+      case 'site_terminal':
+        return <SiteAgentTerminal />;
+      case 'admin_audit':
+        return <AdminAuditView />;
       default:
         return <OperationsDashboard />;
     }
@@ -38,7 +50,7 @@ export const App: React.FC = () => {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* Top Header */}
-      <Navbar />
+      <Navbar onOpenLanding={() => setActiveTab('landing')} />
 
       {/* Role and Screen Switcher Navigation */}
       <RoleSwitcher activeTab={activeTab} setActiveTab={setActiveTab} />
@@ -87,4 +99,10 @@ export const App: React.FC = () => {
   );
 };
 
-export default App;
+export default function App() {
+  return (
+    <AppStateProvider>
+      <AppContent />
+    </AppStateProvider>
+  );
+}

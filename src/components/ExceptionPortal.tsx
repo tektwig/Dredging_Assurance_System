@@ -90,7 +90,7 @@ export const ExceptionPortal: React.FC = () => {
                     key={exc.id}
                     onClick={() => {
                       setSelectedExcId(exc.id);
-                      if (relatedTrip?.truck) setCorrectedVolume(relatedTrip.truck.capacity);
+                      if (relatedTrip?.truck) setCorrectedVolume(relatedTrip.truck.capacity || relatedTrip.truck.capacity_tonnes || 30);
                     }}
                     style={{
                       background: isSelected ? 'rgba(244, 63, 94, 0.12)' : 'rgba(255, 255, 255, 0.03)',

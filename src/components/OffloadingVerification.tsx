@@ -44,8 +44,8 @@ export const OffloadingVerification: React.FC = () => {
     setSelectedTripId(tripId);
     const tr = trips.find((t) => t.id === tripId);
     if (tr?.truck) {
-      setDeliveredQuantity(tr.truck.capacity);
-      setUnit(tr.truck.capacity_unit);
+      setDeliveredQuantity(tr.truck.capacity || tr.truck.capacity_tonnes || 30);
+      setUnit(tr.truck.capacity_unit || 'm3');
     }
   };
 

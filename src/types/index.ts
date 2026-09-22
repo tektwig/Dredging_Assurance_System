@@ -1,10 +1,56 @@
+// Domain Models for Adams Sand Dredging Truck Movement Waybill & Revenue Assurance System
+// Unifying Field Operations, ANPR OCR, Commercial Invoices, Paystack Settlement, and Governance
+
 export type UserRole =
   | 'loading_officer'
   | 'offloading_officer'
   | 'operations_manager'
   | 'finance_officer'
+  | 'admin'
   | 'system_admin'
   | 'audit_reviewer';
+
+export type SiteType = 'loading' | 'offloading' | 'hybrid';
+
+export interface Site {
+  id: string;
+  name: string;
+  code?: string;
+  site_code?: string;
+  site_type: SiteType;
+  status: 'active' | 'inactive';
+  location?: string;
+  location_description?: string;
+  timezone: string;
+  daily_target_tonnes?: number;
+}
+
+export interface Truck {
+  id: string;
+  registration_number: string;
+  normalized_registration: string; // Canonical format (no spaces/hyphens, uppercase)
+  capacity?: number;
+  capacity_tonnes?: number;
+  capacity_unit?: 'm3' | 'tonnes' | 'truckloads';
+  truck_type: string; // e.g., '10-Wheeler Tipper', 'Sino 30T', 'Mack 35T'
+  owner_name: string;
+  owner_phone?: string;
+  status: 'active' | 'maintenance' | 'flagged' | 'suspended';
+  created_at?: string;
+}
+
+export interface Driver {
+  id: string;
+  full_name: string;
+  phone: string;
+  license_number: string;
+  status: 'active' | 'suspended' | 'inactive';
+  assigned_truck_id?: string;
+  payment_profile_id?: string;
+  bank_name?: string;
+  account_number_last4?: string;
+  paystack_recipient_code?: string;
+}
 
 export type TripStatus =
   | 'draft_capture'
@@ -14,46 +60,24 @@ export type TripStatus =
   | 'cancelled'
   | 'sync_failed';
 
-export interface Site {
-  id: string;
-  name: string;
-  site_code: string;
-  site_type: 'loading' | 'offloading' | 'hybrid';
-  location_description: string;
-  status: 'active' | 'inactive';
-  timezone: string;
-}
-
-export interface Truck {
-  id: string;
-  registration_number: string;
-  normalized_registration: string;
-  capacity: number;
-  capacity_unit: 'm3' | 'tonnes' | 'truckloads';
-  truck_type: string;
-  owner_name: string;
-  status: 'active' | 'suspended';
-}
-
-export interface Driver {
-  id: string;
-  full_name: string;
-  phone: string;
-  license_number: string;
-  status: 'active' | 'suspended';
-  payment_profile_id?: string;
-}
+export type QuantityUnit = 'tonnes' | 'm3' | 'truckloads';
 
 export interface TripLoadingEvent {
   id: string;
   trip_id: string;
   plate_image_file_id?: string;
   plate_image_url?: string;
-  extracted_number: string;
-  confirmed_number: string;
-  confidence_score: number;
-  captured_by: string;
+  extracted_number?: string;
+  confirmed_number?: string;
+  extracted_plate?: string;
+  confirmed_plate?: string;
+  confidence_score: number; // 0 to 100
+  captured_by?: string;
+  captured_by_name?: string;
+  captured_by_id?: string;
   operator_notes?: string;
+  notes?: string;
+  estimated_tonnes?: number;
   captured_at: string;
 }
 
@@ -61,18 +85,55 @@ export interface TripOffloadingEvent {
   id: string;
   trip_id: string;
   quantity: number;
-  unit: 'm3' | 'tonnes' | 'truckloads';
+  unit: QuantityUnit;
   weighed_at: string;
   evidence_file_id?: string;
   ticket_image_url?: string;
-  closed_by: string;
+  scale_ticket_number?: string;
+  scale_ticket_url?: string;
+  closed_by?: string;
+  closed_by_name?: string;
+  closed_by_id?: string;
   variance_percentage?: number;
+  variance_from_estimate?: number;
   operator_notes?: string;
+  notes?: string;
+}
+
+export type ExceptionType =
+  | 'unlisted_truck'
+  | 'quantity_mismatch'
+  | 'plate_discrepancy'
+  | 'gate_timeout'
+  | 'diversion_suspected'
+  | 'damaged_cargo'
+  | 'volume_variance'
+  | 'plate_mismatch'
+  | 'unregistered_vehicle'
+  | 'route_anomaly'
+  | 'damaged_seal'
+  | 'other';
+
+export interface TripException {
+  id: string;
+  trip_id: string;
+  trip_number: string;
+  exception_type: ExceptionType;
+  description: string;
+  severity?: 'low' | 'medium' | 'high' | 'critical';
+  status: 'open' | 'in_review' | 'resolved' | 'cancelled' | 'pending' | 'under_review' | 'dismissed';
+  flagged_by?: string;
+  flagged_at?: string;
+  resolution_notes?: string;
+  reason_code?: string;
+  resolved_by?: string;
+  resolved_at?: string;
+  adjusted_quantity?: number;
 }
 
 export interface Trip {
   id: string;
-  trip_number: string;
+  trip_number: string; // e.g. TRP-2026-08192
   truck_id: string;
   driver_id: string;
   loading_site_id: string;
@@ -81,8 +142,8 @@ export interface Trip {
   loaded_at: string;
   closed_at?: string;
   idempotency_key?: string;
-  created_at: string;
-  updated_at: string;
+  created_at?: string;
+  updated_at?: string;
 
   // Joined relations for UI convenience
   truck?: Truck;
@@ -91,6 +152,7 @@ export interface Trip {
   offloading_site?: Site;
   loading_event?: TripLoadingEvent;
   offloading_event?: TripOffloadingEvent;
+  exceptions?: TripException[];
 }
 
 export interface ExceptionItem {
@@ -119,24 +181,33 @@ export interface PayoutItem {
   id: string;
   payout_batch_id: string;
   driver_id: string;
-  driver_name?: string;
+  driver_name: string;
+  bank_name?: string;
+  account_last4?: string;
   trip_count: number;
-  quantity_total: number;
-  rate_per_unit: number;
-  amount: number;
-  status: 'pending' | 'queued' | 'success' | 'failed';
+  quantity_total?: number;
+  quantity_total_tonnes?: number;
+  rate_per_unit?: number;
+  rate_per_tonne_ngn?: number;
+  amount?: number;
+  amount_ngn?: number;
+  status: 'pending' | 'queued' | 'processing' | 'success' | 'failed';
   transfer_code?: string;
+  paystack_transfer_code?: string;
   failure_reason?: string;
 }
 
 export interface PayoutBatch {
   id: string;
-  batch_number: string;
+  batch_number?: string;
+  batch_reference?: string;
   period_start: string;
   period_end: string;
-  gross_amount: number;
+  gross_amount?: number;
+  gross_amount_ngn?: number;
   total_trips: number;
-  status: 'draft' | 'approved' | 'processing' | 'completed' | 'failed';
+  total_tonnes?: number;
+  status: 'draft' | 'approved' | 'processing' | 'completed' | 'failed' | 'pending_approval' | 'disbursed';
   approved_by?: string;
   approved_at?: string;
   paystack_transfer_reference?: string;
@@ -166,17 +237,39 @@ export interface BusinessComplianceDoc {
   created_at: string;
 }
 
+export interface ComplianceDocument {
+  id: string;
+  document_type:
+    | 'cac_certificate'
+    | 'tin_certificate'
+    | 'director_kyc'
+    | 'proof_of_address'
+    | 'scuml_certificate'
+    | 'bank_mandate';
+  title: string;
+  registration_number?: string;
+  file_name?: string;
+  file_size?: string;
+  status: 'verified' | 'pending_review' | 'rejected' | 'missing';
+  uploaded_at?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  expiry_date?: string;
+}
+
 export interface AuditLogEntry {
   id: string;
-  entity_name: string;
+  entity_name?: string;
   entity_id: string;
   action: string;
   old_value?: Record<string, unknown> | null;
   new_value?: Record<string, unknown> | null;
-  reason: string;
+  reason?: string;
   actor_id?: string;
-  actor_role: string;
-  created_at: string;
+  actor_name?: string;
+  actor_role?: UserRole | string;
+  created_at?: string;
+  timestamp?: string;
 }
 
 export interface DraftTrip {
@@ -231,4 +324,3 @@ export interface Invoice {
   paid_at?: string;
   paid_reference?: string;
 }
-

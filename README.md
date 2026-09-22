@@ -303,14 +303,20 @@ To meet Nigerian regulatory compliance and Paystack business verification criter
    ```
 
 2. **Configure Environment Variables**
-   Create a `.env` file in the root directory:
+   Create an ignored `.env.local` file in the root directory from `.env.example`.
+   Do not overwrite an existing developer's environment file. Only browser-safe
+   Supabase configuration belongs here:
    ```ini
-   VITE_SUPABASE_URL=http://localhost:54321
-   VITE_SUPABASE_ANON_KEY=your-local-anon-key
-   SUPABASE_SERVICE_ROLE_KEY=your-local-service-role-key
-   PAYSTACK_SECRET_KEY=sk_test_xxxxxxxxxxxxxxxxxxxxxxxx
-   PAYSTACK_PUBLIC_KEY=pk_test_xxxxxxxxxxxxxxxxxxxxxxxx
+   VITE_SUPABASE_URL=http://127.0.0.1:54321
+   VITE_SUPABASE_ANON_KEY=your_public_supabase_anon_key_here
    ```
+
+   Configure email-worker values separately in ignored `supabase/functions/.env`,
+   using `supabase/functions/.env.example` as the placeholder-only reference.
+   The Supabase Edge Runtime supplies its own `SUPABASE_URL` and
+   `SUPABASE_SERVICE_ROLE_KEY`; never put the service-role key in a `VITE_`
+   variable or frontend code. See [backend environment setup](docs/backend-foundation.md#environment-files-and-local-setup)
+   for the exact variable names and the current MVP setup.
 
 3. **Start Local Supabase Services**
    ```bash

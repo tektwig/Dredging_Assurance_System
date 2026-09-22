@@ -18,7 +18,7 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({ trip, onClose,
 
   if (!trip) return null;
 
-  const tripAuditLogs = auditLogs.filter((l) => l.entity_id === trip.id || l.reason.includes(trip.trip_number));
+  const tripAuditLogs = auditLogs.filter((l) => l.entity_id === trip.id || (l.reason && l.reason.includes(trip.trip_number)));
 
   return (
     <div
@@ -301,7 +301,7 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({ trip, onClose,
                     <span style={{ color: 'var(--text-secondary)' }}>{log.reason}</span>
                   </div>
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({log.actor_role})
+                    {new Date(log.created_at || log.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({log.actor_role})
                   </span>
                 </div>
               ))

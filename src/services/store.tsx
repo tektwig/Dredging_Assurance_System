@@ -281,7 +281,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         truck_plate: confirmed_plate,
         driver_id,
         loading_site_id,
-        capacity: truck.capacity,
+        capacity: truck.capacity || truck.capacity_tonnes || 30,
         captured_at: new Date().toISOString(),
         notes,
       };

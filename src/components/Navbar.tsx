@@ -11,7 +11,11 @@ import {
   Download,
 } from 'lucide-react';
 
-export const Navbar: React.FC = () => {
+interface NavbarProps {
+  onOpenLanding?: () => void;
+}
+
+export const Navbar: React.FC<NavbarProps> = ({ onOpenLanding }) => {
   const {
     currentRole,
     sites,
@@ -219,6 +223,19 @@ export const Navbar: React.FC = () => {
               {roleInfo.label}
             </span>
           </div>
+
+          {/* Public Portal / Landing Page Switcher */}
+          {onOpenLanding && (
+            <button
+              type="button"
+              onClick={onOpenLanding}
+              className="btn btn-secondary btn-sm"
+              style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem' }}
+              title="View Public Landing Page & Role Sign-In"
+            >
+              Public Portal
+            </button>
+          )}
         </div>
       </div>
     </header>

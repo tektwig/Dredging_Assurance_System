@@ -590,7 +590,7 @@ export const FinancePortal: React.FC = () => {
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
                         <span style={{ color: 'var(--text-secondary)' }}>{batch.total_trips} Verified Trips</span>
                         <span style={{ fontWeight: 800, color: 'var(--accent-gold)' }}>
-                          ₦{batch.gross_amount.toLocaleString()}
+                          ₦{(batch.gross_amount || batch.gross_amount_ngn || 0).toLocaleString()}
                         </span>
                       </div>
 
@@ -632,7 +632,7 @@ export const FinancePortal: React.FC = () => {
                             <td>{item.trip_count}</td>
                             <td>{item.quantity_total} m³</td>
                             <td style={{ fontWeight: 700, color: 'var(--accent-gold)' }}>
-                              ₦{item.amount.toLocaleString()}
+                              ₦{(item.amount || item.amount_ngn || 0).toLocaleString()}
                             </td>
                             <td>
                               <span className={`badge ${item.status === 'success' ? 'badge-closed' : 'badge-open'}`}>
@@ -653,7 +653,7 @@ export const FinancePortal: React.FC = () => {
                       className="btn btn-primary"
                       style={{ width: '100%' }}
                     >
-                      <Send size={16} /> Authorize & Send Paystack Bulk Transfer (₦{selectedBatch.gross_amount.toLocaleString()})
+                      <Send size={16} /> Authorize & Send Paystack Bulk Transfer (₦{(selectedBatch.gross_amount || selectedBatch.gross_amount_ngn || 0).toLocaleString()})
                     </button>
                   ) : (
                     <div
