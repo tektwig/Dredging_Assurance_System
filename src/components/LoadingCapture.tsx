@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '../services/store';
 import {
   Camera,
-  Upload,
   ScanLine,
   Check,
   Truck as TruckIcon,
@@ -60,7 +59,6 @@ export const LoadingCapture: React.FC = () => {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const currentTruck = trucks.find((t) => t.id === selectedTruckId);
 
@@ -249,23 +247,6 @@ export const LoadingCapture: React.FC = () => {
     stopLiveCamera();
     setCapturedImagePreview(dataUrl);
     runActualOCR(dataUrl);
-  };
-
-  const handleUploadButtonClick = () => {
-    if (isLiveCameraActive) {
-      stopLiveCamera();
-    }
-    fileInputRef.current?.click();
-  };
-
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const url = URL.createObjectURL(file);
-      setCapturedImagePreview(url);
-      runActualOCR(file);
-    }
-    e.target.value = '';
   };
 
   const handleSimulateSampleScan = () => {
@@ -542,7 +523,7 @@ export const LoadingCapture: React.FC = () => {
                 </div>
               )}
 
-              {/* 3 Distinct Buttons */}
+              {/* Capture Controls */}
               <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
                 {/* Button 1: Take Live Photo */}
                 <button
@@ -555,28 +536,6 @@ export const LoadingCapture: React.FC = () => {
                   <Camera size={16} />
                   {isCameraStarting ? 'Opening Camera...' : 'Take Live Photo'}
                 </button>
-
-                {/* Button 2: Upload Photo */}
-                <button
-                  type="button"
-                  onClick={handleUploadButtonClick}
-                  className="btn btn-secondary"
-                  id="btn-upload-photo"
-                  style={{ borderColor: 'var(--border-medium)' }}
-                >
-                  <Upload size={16} />
-                  Upload Photo
-                </button>
-
-                {/* Hidden File Input for Upload Photo */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  style={{ display: 'none' }}
-                  onChange={handlePhotoUpload}
-                  id="gate-photo-file-input"
-                />
 
                 {/* Button 3: Test Sample Plate */}
                 <button

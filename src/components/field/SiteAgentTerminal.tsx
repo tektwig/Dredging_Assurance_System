@@ -14,7 +14,6 @@ import {
   Clock,
   FileText,
   AlertTriangle,
-  Upload,
   Check,
   Video,
   VideoOff,
@@ -78,9 +77,8 @@ export const SiteAgentTerminal: React.FC = () => {
     addDriver,
   } = useAppState();
 
-  // Hidden file input refs
+  // Live hardware camera input ref
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const cameraRequestIdRef = useRef(0);
@@ -746,7 +744,7 @@ export const SiteAgentTerminal: React.FC = () => {
         </div>
       )}
 
-      {/* Hidden File/Camera Inputs */}
+      {/* Hidden Hardware Camera Input (forces live environment camera on mobile) */}
       <input
         ref={cameraInputRef}
         type="file"
@@ -754,15 +752,7 @@ export const SiteAgentTerminal: React.FC = () => {
         capture="environment"
         style={{ display: 'none' }}
         onChange={handleCameraCapture}
-        aria-label="Capture Truck Photo via Camera App"
-      />
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        style={{ display: 'none' }}
-        onChange={handleCameraCapture}
-        aria-label="Upload Truck Photo"
+        aria-label="Capture Truck Photo via Camera"
       />
 
       {/* TOP SCAN LAUNCHER CARD */}
@@ -839,7 +829,7 @@ export const SiteAgentTerminal: React.FC = () => {
             </button>
           )}
 
-          {/* Native Mobile Camera / File Picker */}
+          {/* Native Live Camera Trigger (Direct Hardware Capture) */}
           <button
             type="button"
             onClick={() => cameraInputRef.current?.click()}
@@ -861,34 +851,10 @@ export const SiteAgentTerminal: React.FC = () => {
               fontWeight: 700,
               boxShadow: 'var(--shadow-xs)',
             }}
+            title="Open device camera to snap live plate photo"
           >
             <Camera size={19} color="#B45309" />
-            <span>Mobile Camera App</span>
-          </button>
-
-          {/* Upload Photo */}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            style={{
-              minHeight: '56px',
-              padding: '0.75rem 1rem',
-              backgroundColor: '#FFFFFF',
-              color: 'var(--text-secondary)',
-              borderRadius: 'var(--radius-lg)',
-              border: '1.5px solid var(--border-subtle)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.5rem',
-              cursor: 'pointer',
-              fontSize: '0.875rem',
-              fontWeight: 600,
-            }}
-            title="Upload photo from disk"
-          >
-            <Upload size={17} />
-            <span>Upload Photo</span>
+            <span>Snap with Device Camera</span>
           </button>
 
           {hasScanned && (
@@ -898,12 +864,31 @@ export const SiteAgentTerminal: React.FC = () => {
               disabled={isScanning || isCameraStarting}
               className="btn btn-secondary"
               style={{ minHeight: '56px', padding: '0.75rem 1rem', fontWeight: 700 }}
-              title="Clear this scan and take another plate photo"
+              title="Clear this scan and take another live plate photo"
             >
               <RotateCcw size={17} />
-              <span>{isCameraStarting ? 'Restarting Camera...' : 'Retake Camera'}</span>
+              <span>{isCameraStarting ? 'Restarting Camera...' : 'Retake Live Photo'}</span>
             </button>
           )}
+        </div>
+
+        {/* Anti-Fraud Security Guarantee Banner */}
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.45rem',
+            padding: '0.35rem 0.85rem',
+            backgroundColor: '#FEF3C7',
+            border: '1px solid #FCD34D',
+            borderRadius: 'var(--radius-full)',
+            color: '#92400E',
+            fontSize: '0.74rem',
+            fontWeight: 700,
+          }}
+        >
+          <ShieldCheck size={14} color="#B45309" />
+          <span>Anti-Fraud Lock: Live Camera Capture Only • Pre-existing File Uploads Disabled</span>
         </div>
 
         {cameraError && (
@@ -915,11 +900,11 @@ export const SiteAgentTerminal: React.FC = () => {
         <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0, maxWidth: '580px', lineHeight: 1.4 }}>
           {hasScanned ? (
             <>
-              Plate <strong style={{ color: '#0F172A' }}>{confirmedPlate}</strong> verified ({confidenceScore}% confidence). Select <strong>Pickup (Gate 1 Dispatch)</strong> or <strong>Delivery (Gate 2 Weighbridge)</strong> below.
+              Plate <strong style={{ color: '#0F172A' }}>{confirmedPlate}</strong> verified live ({confidenceScore}% confidence). Select <strong>Pickup (Gate 1 Dispatch)</strong> or <strong>Delivery (Gate 2 Weighbridge)</strong> below.
             </>
           ) : (
             <>
-              Stream live video feed or snap photo. Tesseract WebAssembly engine automatically extracts characters and cross-references master fleet records.
+              Live video or direct hardware camera snapshot is required at the gate. Pre-saved photo uploads are prohibited to prevent fraud and ensure audit integrity.
             </>
           )}
         </p>
@@ -2205,9 +2190,10 @@ export const SiteAgentTerminal: React.FC = () => {
                             'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=80'
                           )
                         }
+                        title="Capture scale ticket live via camera"
                       >
-                        <Upload size={12} />
-                        Attach
+                        <Camera size={12} />
+                        Snap Ticket
                       </button>
                     </div>
                   </div>
