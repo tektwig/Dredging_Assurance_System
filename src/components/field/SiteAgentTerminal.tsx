@@ -83,6 +83,8 @@ export const SiteAgentTerminal: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const cameraRequestIdRef = useRef(0);
+  const previewObjectUrlRef = useRef<string | null>(null);
 
   const [hasScanned, setHasScanned] = useState(false);
 
@@ -107,6 +109,7 @@ export const SiteAgentTerminal: React.FC = () => {
   const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isCameraStarting, setIsCameraStarting] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
 
   // 2. Driver Selection & Onboarding State (Multidriver & Unregistered Truck Support)
   const [isUnregisteredModalOpen, setIsUnregisteredModalOpen] = useState(false);
@@ -139,8 +142,26 @@ export const SiteAgentTerminal: React.FC = () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
       }
+      if (previewObjectUrlRef.current) {
+        URL.revokeObjectURL(previewObjectUrlRef.current);
+      }
     };
   }, []);
+
+  // getUserMedia resolves before the conditional <video> is mounted. Attach the
+  // stream after React has rendered it; otherwise the first launch stays blank
+  // and only starts after a camera flip causes another request.
+  useEffect(() => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!isLiveCameraActive || !video || !stream) return;
+
+    video.srcObject = stream;
+    video.play().catch((err) => {
+      console.warn('Camera preview playback failed:', err);
+      setCameraError('The camera opened but the preview could not start. Tap Retake Camera to try again.');
+    });
+  }, [isLiveCameraActive]);
 
   // 3. Movement Type State: 'pickup' vs 'delivery'
   const [movementType, setMovementType] = useState<'pickup' | 'delivery'>('pickup');
@@ -178,13 +199,18 @@ export const SiteAgentTerminal: React.FC = () => {
 
   // Live Camera Controls
   const startLiveCamera = async (mode: 'environment' | 'user' = cameraFacingMode) => {
+    const requestId = ++cameraRequestIdRef.current;
     setIsCameraStarting(true);
+    setIsCameraReady(false);
     setCameraError(null);
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera access requires a supported browser over HTTPS.');
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: mode,
@@ -193,13 +219,28 @@ export const SiteAgentTerminal: React.FC = () => {
         },
         audio: false,
       });
+      if (requestId !== cameraRequestIdRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
+      setCameraFacingMode(mode);
+      setIsLiveCameraActive(true);
+      // On camera flips the video is already mounted, so replace its stream now.
+      // First launch is handled by the effect after the conditional video mounts.
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        void videoRef.current.play().catch((playError) => {
+          console.warn('Camera preview playback failed after switching:', playError);
+        });
       }
-      setIsLiveCameraActive(true);
-    } catch (err: any) {
-      setCameraError('Camera access unavailable. Using high-resolution photo file upload.');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setCameraError(
+        /NotAllowed|Permission/i.test(message)
+          ? 'Camera permission is blocked. Allow camera access in the browser, then tap Retake Camera.'
+          : `Camera could not start: ${message}`
+      );
       setIsLiveCameraActive(false);
     } finally {
       setIsCameraStarting(false);
@@ -207,6 +248,7 @@ export const SiteAgentTerminal: React.FC = () => {
   };
 
   const stopLiveCamera = () => {
+    cameraRequestIdRef.current += 1;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -214,6 +256,7 @@ export const SiteAgentTerminal: React.FC = () => {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    setIsCameraReady(false);
     setIsLiveCameraActive(false);
   };
 
@@ -226,7 +269,10 @@ export const SiteAgentTerminal: React.FC = () => {
   };
 
   const snapPhotoFromLiveFeed = () => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || !isCameraReady) {
+      setCameraError('Camera is still starting. Wait for the live preview, then capture again.');
+      return;
+    }
     const video = videoRef.current;
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth || 640;
@@ -237,6 +283,19 @@ export const SiteAgentTerminal: React.FC = () => {
     const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
     stopLiveCamera();
     runPlateOCR(dataUrl);
+  };
+
+  const retakePlatePhoto = () => {
+    stopLiveCamera();
+    setHasScanned(false);
+    setIsScanning(false);
+    setOcrProgress(0);
+    setOcrStatus('Ready for capture');
+    setOcrMatchType(null);
+    setPreprocessedImageUrl(null);
+    setCameraError(null);
+    setIsUnregisteredModalOpen(false);
+    void startLiveCamera(cameraFacingMode);
   };
 
   // Realistic Nigerian plate canvas generator for instant local testing
@@ -277,7 +336,12 @@ export const SiteAgentTerminal: React.FC = () => {
     setOcrProgress(0.05);
     setOcrStatus('Initializing ANPR neural engine...');
 
+    if (previewObjectUrlRef.current) {
+      URL.revokeObjectURL(previewObjectUrlRef.current);
+      previewObjectUrlRef.current = null;
+    }
     const previewUrl = typeof imageSource === 'string' ? imageSource : URL.createObjectURL(imageSource);
+    if (typeof imageSource !== 'string') previewObjectUrlRef.current = previewUrl;
     setPhotoUrl(previewUrl);
 
     try {
@@ -826,6 +890,20 @@ export const SiteAgentTerminal: React.FC = () => {
             <Upload size={17} />
             <span>Upload Photo</span>
           </button>
+
+          {hasScanned && (
+            <button
+              type="button"
+              onClick={retakePlatePhoto}
+              disabled={isScanning || isCameraStarting}
+              className="btn btn-secondary"
+              style={{ minHeight: '56px', padding: '0.75rem 1rem', fontWeight: 700 }}
+              title="Clear this scan and take another plate photo"
+            >
+              <RotateCcw size={17} />
+              <span>{isCameraStarting ? 'Restarting Camera...' : 'Retake Camera'}</span>
+            </button>
+          )}
         </div>
 
         {cameraError && (
@@ -865,7 +943,14 @@ export const SiteAgentTerminal: React.FC = () => {
           {/* Live Camera Viewfinder or Static Snapshot Viewfinder */}
           {isLiveCameraActive ? (
             <div className="camera-viewfinder-box">
-              <video ref={videoRef} autoPlay playsInline muted className="camera-video-feed" />
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="camera-video-feed"
+                onLoadedMetadata={() => setIsCameraReady(true)}
+              />
               <div className="camera-reticle-overlay">
                 <div className="camera-scanline-laser" />
                 <span className="camera-reticle-label">ALIGN NIGERIAN PLATE</span>
@@ -907,22 +992,23 @@ export const SiteAgentTerminal: React.FC = () => {
                 <button
                   type="button"
                   onClick={snapPhotoFromLiveFeed}
+                  disabled={!isCameraReady}
                   style={{
-                    backgroundColor: '#F59E0B',
+                    backgroundColor: isCameraReady ? '#F59E0B' : '#94A3B8',
                     color: '#0F172A',
                     border: 'none',
                     borderRadius: 'var(--radius-full)',
                     padding: '0.5rem 1.25rem',
                     fontWeight: 800,
                     fontSize: '0.85rem',
-                    cursor: 'pointer',
+                    cursor: isCameraReady ? 'pointer' : 'wait',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '0.5rem',
                     boxShadow: '0 4px 12px rgba(245, 158, 11, 0.4)',
                   }}
                 >
-                  <Zap size={16} /> Snap & Analyze Plate
+                  <Zap size={16} /> {isCameraReady ? 'Snap & Analyze Plate' : 'Starting Preview...'}
                 </button>
               </div>
             </div>

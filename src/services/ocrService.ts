@@ -1,5 +1,6 @@
 import { createWorker, PSM } from 'tesseract.js';
 import { Truck } from '../types';
+import { isSupabaseLive, supabase } from './supabase';
 
 export interface OCRProgress {
   status: string;
@@ -48,6 +49,55 @@ function correctPlatePrefix(prefix: string): string {
   }
 
   return distance === 1 ? closest : prefix;
+}
+
+interface CloudANPRResult {
+  success?: boolean;
+  extractedPlate?: string | null;
+  confidence?: number;
+  rawText?: string;
+  source?: string;
+}
+
+async function imageSourceToDataUrl(imageSource: File | Blob | string): Promise<string | null> {
+  if (typeof imageSource === 'string') {
+    return imageSource.startsWith('data:image/') ? imageSource : null;
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+    reader.onerror = () => reject(reader.error || new Error('Unable to read plate image'));
+    reader.readAsDataURL(imageSource);
+  });
+}
+
+async function recognizeWithCloudANPR(
+  imageSource: File | Blob | string,
+  registeredTrucks: Truck[]
+): Promise<PlateRecognitionResult | null> {
+  if (!isSupabaseLive || !supabase || (typeof navigator !== 'undefined' && !navigator.onLine)) return null;
+
+  const imageBase64 = await imageSourceToDataUrl(imageSource);
+  if (!imageBase64) return null;
+
+  const { data, error } = await supabase.functions.invoke<CloudANPRResult>('ocr-extract', {
+    body: { imageBase64, filename: imageSource instanceof File ? imageSource.name : 'plate.jpg' },
+  });
+  if (error || !data?.success || !data.extractedPlate) return null;
+
+  const extraction = extractNigerianPlateFromText(data.extractedPlate, registeredTrucks);
+  if (extraction.matchType === 'FALLBACK') return null;
+
+  return {
+    rawText: data.rawText || data.extractedPlate,
+    candidatePlate: extraction.candidatePlate,
+    normalizedPlate: extraction.normalizedPlate,
+    confidence: Math.min(99, Math.max(0, Math.round(data.confidence || extraction.confidence))),
+    isRecognizedMasterPlate: !!extraction.matchedTruck,
+    matchType: extraction.matchType,
+    matchedTruck: extraction.matchedTruck,
+  };
 }
 
 /**
@@ -425,6 +475,18 @@ export async function recognizeLicensePlate(
   registeredTrucks: Truck[],
   onProgress?: (progress: OCRProgress) => void
 ): Promise<PlateRecognitionResult> {
+  onProgress?.({ status: 'Checking precision cloud ANPR...', progress: 0.05 });
+
+  try {
+    const cloudResult = await recognizeWithCloudANPR(imageSource, registeredTrucks);
+    if (cloudResult) {
+      onProgress?.({ status: 'Precision ANPR recognition complete', progress: 1 });
+      return cloudResult;
+    }
+  } catch (error) {
+    console.warn('Cloud ANPR unavailable; using on-device recognition:', error);
+  }
+
   onProgress?.({ status: 'Optimizing plate image contrast & resolution...', progress: 0.1 });
 
   // Preprocess image
