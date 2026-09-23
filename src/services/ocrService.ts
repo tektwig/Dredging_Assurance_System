@@ -27,6 +27,29 @@ const NOISE_WORDS = [
   'GREATER', 'HEARTBEAT', 'NATION', 'PEACE', 'PROGRESS'
 ];
 
+// Lagos plate prefixes used to reject/correct OCR glyphs that cannot be LGA codes.
+// One-character correction is deliberately conservative (for example WSF -> KSF).
+const LAGOS_LGA_PREFIXES = [
+  'AAA', 'AGL', 'AKD', 'APP', 'BDG', 'EKY', 'FST', 'GGE', 'JJJ', 'KJA',
+  'KSF', 'LND', 'LSR', 'MUS', 'OJO', 'SMK', 'SSD', 'TUN',
+];
+
+function correctPlatePrefix(prefix: string): string {
+  if (LAGOS_LGA_PREFIXES.includes(prefix)) return prefix;
+
+  let closest = prefix;
+  let distance = Number.POSITIVE_INFINITY;
+  for (const known of LAGOS_LGA_PREFIXES) {
+    const currentDistance = [...known].filter((char, index) => char !== prefix[index]).length;
+    if (currentDistance < distance) {
+      closest = known;
+      distance = currentDistance;
+    }
+  }
+
+  return distance === 1 ? closest : prefix;
+}
+
 /**
  * Disambiguates letter and digit confusion by position in standard Nigerian plate:
  * Positions 0..2: MUST be letters (LGA Code)
@@ -35,9 +58,9 @@ const NOISE_WORDS = [
  */
 export function normalizePlateStructure(candidate: string): { formatted: string; normalized: string } | null {
   const clean = candidate.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (clean.length < 6 || clean.length > 10) return null;
+  if (clean.length < 7 || clean.length > 9) return null;
 
-  const prefixLen = clean.length >= 8 ? 3 : clean.length === 7 ? 3 : 2;
+  const prefixLen = 3;
   const suffixLen = 2;
   const middleLen = clean.length - prefixLen - suffixLen;
 
@@ -48,14 +71,14 @@ export function normalizePlateStructure(candidate: string): { formatted: string;
   const rawSuffix = clean.substring(clean.length - suffixLen);
 
   // Position 1..3: Strictly letters
-  const prefix = rawPrefix
+  const prefix = correctPlatePrefix(rawPrefix
     .replace(/0/g, 'O')
     .replace(/1/g, 'I')
     .replace(/8/g, 'B')
     .replace(/5/g, 'S')
     .replace(/2/g, 'Z')
     .replace(/6/g, 'G')
-    .replace(/4/g, 'A');
+    .replace(/4/g, 'A'));
 
   // Middle positions: Strictly digits
   const middle = rawMiddle
@@ -79,6 +102,12 @@ export function normalizePlateStructure(candidate: string): { formatted: string;
     .replace(/2/g, 'Z')
     .replace(/6/g, 'G')
     .replace(/4/g, 'A');
+
+  // Do not accept leftover letters in the numeric run (or digits in letter runs).
+  // The previous implementation formatted these malformed candidates as valid plates.
+  if (!/^[A-Z]{3}$/.test(prefix) || !/^\d{2,4}$/.test(middle) || !/^[A-Z]{2}$/.test(suffix)) {
+    return null;
+  }
 
   return {
     formatted: `${prefix}-${middle}-${suffix}`,
@@ -143,9 +172,25 @@ export async function preprocessImageForOCR(imageSource: File | Blob | string): 
     img.onload = () => {
       try {
         const canvas = document.createElement('canvas');
-        const maxDim = 1200;
-        let width = img.naturalWidth || img.width;
-        let height = img.naturalHeight || img.height;
+        const maxDim = 1600;
+        const sourceWidth = img.naturalWidth || img.width;
+        const sourceHeight = img.naturalHeight || img.height;
+        const isPortraitVehiclePhoto = sourceHeight > sourceWidth * 1.12;
+
+        // Phone uploads commonly include the whole front of the vehicle. In portrait
+        // captures the registration characters occupy the lower-centre band; removing
+        // the badge, grille and plate slogans prevents sparse-text OCR from winning.
+        const crop = isPortraitVehiclePhoto
+          ? {
+              x: Math.round(sourceWidth * 0.03),
+              y: Math.round(sourceHeight * 0.60),
+              width: Math.round(sourceWidth * 0.94),
+              height: Math.round(sourceHeight * 0.18),
+            }
+          : { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
+
+        let width = crop.width;
+        let height = crop.height;
 
         // Downscale large camera photos for speed and memory efficiency
         if (width > maxDim || height > maxDim) {
@@ -156,10 +201,12 @@ export async function preprocessImageForOCR(imageSource: File | Blob | string): 
             width = Math.round((width * maxDim) / height);
             height = maxDim;
           }
-        } else if (width < 500 && height < 500) {
-          // Upscale very small crops 2x for better character definition
-          width *= 2;
-          height *= 2;
+        } else if (height < 320) {
+          // Plate bands are short even in good phone photos. Upscale glyph height
+          // before thresholding so Tesseract retains character strokes.
+          const scale = Math.min(2.5, maxDim / width);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
         }
 
         canvas.width = width;
@@ -172,14 +219,13 @@ export async function preprocessImageForOCR(imageSource: File | Blob | string): 
           return;
         }
 
-        ctx.drawImage(img, 0, 0, width, height);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, crop.x, crop.y, crop.width, crop.height, 0, 0, width, height);
 
         // Pixel-level contrast boost & grayscale conversion
         const imageData = ctx.getImageData(0, 0, width, height);
         const data = imageData.data;
-
-        const contrast = 75; // +75% contrast
-        const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
 
         for (let i = 0; i < data.length; i += 4) {
           const r = data[i];
@@ -189,8 +235,9 @@ export async function preprocessImageForOCR(imageSource: File | Blob | string): 
           // Luminance
           const gray = 0.299 * r + 0.587 * g + 0.114 * b;
 
-          // Apply contrast curve
-          const enhanced = Math.min(255, Math.max(0, factor * (gray - 128) + 128));
+          // A binary plate-focused threshold separates blue/black glyphs from the
+          // white/green reflective Nigerian plate, including wet daytime captures.
+          const enhanced = gray > 130 ? 255 : 0;
 
           data[i] = enhanced;
           data[i + 1] = enhanced;
@@ -239,6 +286,24 @@ export function extractNigerianPlateFromText(
   const words = cleaned.split(' ').filter((w) => w.length >= 2);
 
   const candidateList: { formatted: string; normalized: string }[] = [];
+
+  const addCandidateWindows = (value: string) => {
+    const compact = value.replace(/[^A-Z0-9]/g, '');
+    for (const length of [8, 7, 9]) {
+      for (let start = 0; start <= compact.length - length; start++) {
+        const parsed = normalizePlateStructure(compact.slice(start, start + length));
+        if (parsed && !candidateList.some((item) => item.normalized === parsed.normalized)) {
+          candidateList.push(parsed);
+        }
+      }
+    }
+  };
+
+  // OCR often adds one character at an edge (e.g. IWSF135KS). Sliding valid-length
+  // windows recovers the plate rather than treating the entire noisy token as one.
+  words.forEach(addCandidateWindows);
+  const compactLine = cleaned.replace(/[^A-Z0-9]/g, '');
+  if (compactLine.length <= 12) addCandidateWindows(compactLine);
 
   // Strategy A: Check 3-token sequences (e.g. ["APP", "482", "XA"] or ["AP8", "4B2", "XA"])
   for (let i = 0; i <= words.length - 3; i++) {
@@ -319,7 +384,7 @@ export function extractNigerianPlateFromText(
     }
   }
 
-  if (highestSim >= 0.72 && bestMatchTruck) {
+  if (highestSim >= 0.875 && bestMatchTruck) {
     return {
       candidatePlate: bestMatchTruck.registration_number,
       normalizedPlate: bestMatchTruck.normalized_registration,
@@ -383,7 +448,8 @@ export async function recognizeLicensePlate(
     // Whitelist uppercase letters, digits, dashes and spaces to prevent punctuation noise
     await worker.setParameters({
       tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -',
-      tessedit_pageseg_mode: PSM.SPARSE_TEXT,
+      tessedit_pageseg_mode: PSM.SINGLE_LINE,
+      user_defined_dpi: '300',
     });
 
     onProgress?.({ status: 'Extracting plate text...', progress: 0.65 });

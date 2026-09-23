@@ -3,6 +3,69 @@
 -- Adams Project - Row-Level Security (RLS) Policies Migration
 -- ====================================================================
 
+-- ====================================================================
+-- SCHEMA REPAIR: Ensure pre-existing remote tables have all required
+-- columns. Uses ADD COLUMN IF NOT EXISTS so it is safe to run when the
+-- columns already exist.
+-- ====================================================================
+
+-- SITES
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS site_code VARCHAR(50);
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS site_type VARCHAR(50);
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS location_description TEXT;
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS gps_coordinates POINT;
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'active';
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS timezone VARCHAR(50) DEFAULT 'Africa/Lagos';
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+-- TRUCKS
+ALTER TABLE trucks ADD COLUMN IF NOT EXISTS normalized_registration VARCHAR(50);
+ALTER TABLE trucks ADD COLUMN IF NOT EXISTS capacity NUMERIC(10, 2);
+ALTER TABLE trucks ADD COLUMN IF NOT EXISTS capacity_unit VARCHAR(20) DEFAULT 'm3';
+ALTER TABLE trucks ADD COLUMN IF NOT EXISTS truck_type VARCHAR(100) DEFAULT 'tipping_trailer';
+ALTER TABLE trucks ADD COLUMN IF NOT EXISTS owner_name VARCHAR(255);
+ALTER TABLE trucks ADD COLUMN IF NOT EXISTS owner_contact VARCHAR(100);
+ALTER TABLE trucks ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'active';
+ALTER TABLE trucks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE trucks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+-- DRIVERS
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS license_number VARCHAR(100);
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'active';
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS payment_profile_id UUID;
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+-- TRIPS
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS trip_number VARCHAR(100);
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS driver_id UUID;
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS offloading_site_id UUID;
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'draft_capture';
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(100);
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS loaded_at TIMESTAMPTZ;
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE trips ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+-- EXCEPTIONS
+ALTER TABLE exceptions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'pending';
+ALTER TABLE exceptions ADD COLUMN IF NOT EXISTS owner_id UUID;
+ALTER TABLE exceptions ADD COLUMN IF NOT EXISTS resolution_notes TEXT;
+ALTER TABLE exceptions ADD COLUMN IF NOT EXISTS resolved_by UUID;
+ALTER TABLE exceptions ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+ALTER TABLE exceptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE exceptions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+-- AUDIT_LOG
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS old_value JSONB;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS new_value JSONB;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS reason TEXT;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS actor_id UUID;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS actor_role VARCHAR(100);
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+
+-- ====================================================================
 -- 1. Enable RLS on all operational and financial tables
 ALTER TABLE sites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE evidence_files ENABLE ROW LEVEL SECURITY;

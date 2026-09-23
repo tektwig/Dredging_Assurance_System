@@ -66,21 +66,18 @@ serve(async (req: Request) => {
       }
     }
 
-    // Heuristic & mock fallback
-    const mockPlates = ["APP-482-XA", "KJA-918-YD", "LSR-234-BC", "EKY-701-LG", "BDG-551-ZZ"];
-    const detectedPlate = mockPlates[Math.floor(Math.random() * mockPlates.length)];
-    const confidence = parseFloat((91 + Math.random() * 8).toFixed(2));
-
+    // Never invent a plate when the cloud OCR provider is not configured. The client
+    // can fall back to its on-device Tesseract pipeline or ask for manual confirmation.
     return new Response(
       JSON.stringify({
-        success: true,
-        extractedPlate: detectedPlate,
-        confidence,
-        rawMatches: [detectedPlate, detectedPlate.replace(/-/g, "")],
-        source: "edge_heuristic_matcher",
+        success: false,
+        error: "OCR provider unavailable",
+        extractedPlate: null,
+        confidence: 0,
+        source: "provider_unavailable",
         processedAt: new Date().toISOString(),
       }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
