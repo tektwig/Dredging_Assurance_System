@@ -1,20 +1,13 @@
 import React from 'react';
 import { useAppState } from '../../context/AppStateContext';
-import { UserRole } from '../../types';
 import {
-  Truck,
-  Activity,
-  CreditCard,
-  ShieldAlert,
   MapPin,
   LogOut,
-  Lock,
 } from 'lucide-react';
 import { TektwigLogo } from '../common/TektwigLogo';
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const {
-    activeRole,
     activeSiteId,
     setActiveSiteId,
     sites,
@@ -23,54 +16,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     draftTrips,
     syncOfflineDrafts,
   } = useAppState();
-
-  const roleMeta: Partial<Record<
-    UserRole,
-    { label: string; badge: string; color: string; bgTint: string; borderColor: string; icon: React.ReactNode }
-  >> = {
-    loading_officer: {
-      label: 'Site Agent',
-      badge: 'SITE AGENT TERMINAL',
-      color: '#B45309',
-      bgTint: '#FEF3C7',
-      borderColor: '#FCD34D',
-      icon: <Truck size={14} />,
-    },
-    offloading_officer: {
-      label: 'Site Agent',
-      badge: 'SITE AGENT TERMINAL',
-      color: '#B45309',
-      bgTint: '#FEF3C7',
-      borderColor: '#FCD34D',
-      icon: <Truck size={14} />,
-    },
-    operations_manager: {
-      label: 'Operations Manager',
-      badge: 'OPERATIONS CONTROL ROOM',
-      color: '#0369A1',
-      bgTint: '#E0F2FE',
-      borderColor: '#BAE6FD',
-      icon: <Activity size={14} />,
-    },
-    finance_officer: {
-      label: 'Finance Officer',
-      badge: 'FINANCE & COMMERCIAL INVOICING',
-      color: '#6D28D9',
-      bgTint: '#F5F3FF',
-      borderColor: '#DDD6FE',
-      icon: <CreditCard size={14} />,
-    },
-    admin: {
-      label: 'System Administrator',
-      badge: 'SYSTEM AUDIT & GOVERNANCE',
-      color: '#475569',
-      bgTint: '#F1F5F9',
-      borderColor: '#CBD5E1',
-      icon: <ShieldAlert size={14} />,
-    },
-  };
-
-  const currentRole = (roleMeta[activeRole] || roleMeta.loading_officer)!;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: '#FFFFFF' }}>
@@ -97,56 +42,13 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             gap: '0.75rem',
           }}
         >
-          {/* Brand Logo & Role Selector */}
+          {/* Brand Logo */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
             <TektwigLogo height={42} />
-            <div style={{ borderLeft: '1.5px solid var(--border-subtle)', paddingLeft: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ borderLeft: '1.5px solid var(--border-subtle)', paddingLeft: '0.65rem' }}>
               <h1 style={{ fontSize: '1.05rem', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)', lineHeight: 1 }}>
                 DredgeOps
               </h1>
-
-              {/* Authorized Terminal Badge (Locked to Signed-In Session) */}
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.45rem',
-                  minHeight: '28px',
-                  padding: '0.2rem 0.65rem',
-                  fontSize: '0.74rem',
-                  fontWeight: 800,
-                  backgroundColor: currentRole.bgTint,
-                  color: currentRole.color,
-                  border: `1px solid ${currentRole.borderColor}`,
-                  borderRadius: 'var(--radius-sm)',
-                  letterSpacing: '-0.01em',
-                  userSelect: 'none',
-                }}
-                title={`Authorized Session: ${currentRole.label} Terminal (Locked). Sign out to switch terminals.`}
-              >
-                {currentRole.icon}
-                <span>{currentRole.label} Terminal</span>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.25rem',
-                    padding: '0.1rem 0.4rem',
-                    fontSize: '0.62rem',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                    backgroundColor: '#FFFFFF',
-                    borderRadius: '4px',
-                    border: `1px solid ${currentRole.borderColor}`,
-                    color: currentRole.color,
-                    marginLeft: '0.25rem',
-                  }}
-                >
-                  <Lock size={10} />
-                  <span>Authorized</span>
-                </span>
-              </div>
             </div>
           </div>
 
