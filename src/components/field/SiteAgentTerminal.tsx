@@ -29,6 +29,7 @@ import {
   Phone,
   Building,
 } from 'lucide-react';
+import { SiteAgentModeSheet } from './SiteAgentModeSheet';
 import { QuantityUnit, ExceptionType } from '../../types';
 import { recognizeLicensePlate, OCRProgress } from '../../services/ocrService';
 
@@ -162,7 +163,34 @@ export const SiteAgentTerminal: React.FC = () => {
   }, [isLiveCameraActive]);
 
   // 3. Movement Type State: 'pickup' vs 'delivery'
-  const [movementType, setMovementType] = useState<'pickup' | 'delivery'>('pickup');
+  const [movementType, setMovementType] = useState<'pickup' | 'delivery'>(() => {
+    try {
+      const saved = sessionStorage.getItem('dredgeops_siteagent_mode');
+      return saved === 'delivery' ? 'delivery' : 'pickup';
+    } catch {
+      return 'pickup';
+    }
+  });
+
+  const [isModeSheetOpen, setIsModeSheetOpen] = useState<boolean>(() => {
+    try {
+      // Check if user has explicitly picked their initial shift mode in this session
+      return !sessionStorage.getItem('dredgeops_siteagent_mode_selected');
+    } catch {
+      return true;
+    }
+  });
+
+  const handleSelectTerminalMode = (mode: 'pickup' | 'delivery') => {
+    setMovementType(mode);
+    setIsModeSheetOpen(false);
+    try {
+      sessionStorage.setItem('dredgeops_siteagent_mode', mode);
+      sessionStorage.setItem('dredgeops_siteagent_mode_selected', 'true');
+    } catch {
+      // ignore
+    }
+  };
 
   // 4. Pickup Specific Form State
   const [destinationSiteId, setDestinationSiteId] = useState('site-lkk-01');
@@ -709,7 +737,27 @@ export const SiteAgentTerminal: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {/* Locked Assigned Mode Post Badge */}
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              padding: '0.35rem 0.75rem',
+              fontSize: '0.78rem',
+              fontWeight: 800,
+              borderRadius: 'var(--radius-full)',
+              backgroundColor: movementType === 'pickup' ? '#FEF3C7' : '#E0F2FE',
+              color: movementType === 'pickup' ? '#B45309' : '#0369A1',
+              border: `1.5px solid ${movementType === 'pickup' ? '#FCD34D' : '#BAE6FD'}`,
+              minHeight: '32px',
+            }}
+          >
+            {movementType === 'pickup' ? <TruckIcon size={14} /> : <Scale size={14} />}
+            <span>Assigned Post: {movementType === 'pickup' ? 'Gate 1 (Pickup)' : 'Gate 2 (Delivery)'}</span>
+          </div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8125rem' }}>
             <Clock size={14} color="var(--text-muted)" />
             <span style={{ color: 'var(--text-muted)' }}>Active Queue:</span>
@@ -1792,111 +1840,66 @@ export const SiteAgentTerminal: React.FC = () => {
               2. Save Truck Movement Record
             </h3>
             <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-              Scan complete. Choose whether this input should be recorded as a <strong>Pickup</strong> or <strong>Delivery</strong>:
+              Terminal locked to your assigned operational post:
             </p>
           </div>
 
-          {/* THE MANDATORY CHOICE TOGGLE BUTTONS */}
+          {/* LOCKED ASSIGNED POST BANNER (NO TOGGLING ALLOWED) */}
           <div
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
+              padding: '0.9rem 1.1rem',
+              borderRadius: 'var(--radius-lg)',
+              border: `2px solid ${movementType === 'pickup' ? '#FCD34D' : '#6EE7B7'}`,
+              backgroundColor: movementType === 'pickup' ? '#FEF3C7' : '#D1FAE5',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
               gap: '0.75rem',
             }}
           >
-            {/* PICKUP BUTTON */}
-            <button
-              type="button"
-              onClick={() => setMovementType('pickup')}
-              style={{
-                padding: '0.875rem 1rem',
-                borderRadius: 'var(--radius-lg)',
-                border: movementType === 'pickup' ? '2.5px solid #B45309' : '1.5px solid var(--border-default)',
-                backgroundColor: movementType === 'pickup' ? '#FEF3C7' : '#FFFFFF',
-                color: movementType === 'pickup' ? '#B45309' : 'var(--text-primary)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-start',
-                gap: '0.35rem',
-                cursor: 'pointer',
-                textAlign: 'left',
-                boxShadow: movementType === 'pickup' ? 'var(--shadow-sm)' : 'none',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontWeight: 800, fontSize: '0.9375rem' }}>
-                  <TruckIcon size={18} />
-                  PICKUP
-                </span>
-                {movementType === 'pickup' && (
-                  <span
-                    style={{
-                      width: '20px',
-                      height: '20px',
-                      borderRadius: '50%',
-                      backgroundColor: '#B45309',
-                      color: '#FFFFFF',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Check size={12} />
-                  </span>
-                )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <div
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: '#FFFFFF',
+                  color: movementType === 'pickup' ? '#B45309' : '#047857',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: `1px solid ${movementType === 'pickup' ? '#FCD34D' : '#6EE7B7'}`,
+                  flexShrink: 0,
+                }}
+              >
+                {movementType === 'pickup' ? <TruckIcon size={18} /> : <Scale size={18} />}
               </div>
-              <span style={{ fontSize: '0.725rem', color: movementType === 'pickup' ? '#92400E' : 'var(--text-muted)', lineHeight: 1.3 }}>
-                Gate 1 Dredge Pit loading & digital waybill issuance
-              </span>
-            </button>
+              <div>
+                <strong style={{ display: 'block', fontSize: '0.92rem', color: movementType === 'pickup' ? '#92400E' : '#065F46' }}>
+                  {movementType === 'pickup' ? 'Gate 1 Dredge Pit — Pickup Dispatch' : 'Gate 2 Weighbridge — Delivery Check'}
+                </strong>
+                <span style={{ fontSize: '0.72rem', color: movementType === 'pickup' ? '#B45309' : '#047857' }}>
+                  {movementType === 'pickup' ? 'Digital waybill & haulage authorization' : 'Scale ticket verification & trip closure'}
+                </span>
+              </div>
+            </div>
 
-            {/* DELIVERY BUTTON */}
-            <button
-              type="button"
-              onClick={() => setMovementType('delivery')}
+            <span
               style={{
-                padding: '0.875rem 1rem',
-                borderRadius: 'var(--radius-lg)',
-                border: movementType === 'delivery' ? '2.5px solid #047857' : '1.5px solid var(--border-default)',
-                backgroundColor: movementType === 'delivery' ? '#D1FAE5' : '#FFFFFF',
-                color: movementType === 'delivery' ? '#047857' : 'var(--text-primary)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-start',
-                gap: '0.35rem',
-                cursor: 'pointer',
-                textAlign: 'left',
-                boxShadow: movementType === 'delivery' ? 'var(--shadow-sm)' : 'none',
-                transition: 'all 0.15s ease',
+                fontSize: '0.68rem',
+                fontWeight: 800,
+                backgroundColor: '#FFFFFF',
+                color: movementType === 'pickup' ? '#B45309' : '#047857',
+                border: `1px solid ${movementType === 'pickup' ? '#FCD34D' : '#6EE7B7'}`,
+                padding: '0.25rem 0.55rem',
+                borderRadius: 'var(--radius-sm)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                flexShrink: 0,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontWeight: 800, fontSize: '0.9375rem' }}>
-                  <Scale size={18} />
-                  DELIVERY
-                </span>
-                {movementType === 'delivery' && (
-                  <span
-                    style={{
-                      width: '20px',
-                      height: '20px',
-                      borderRadius: '50%',
-                      backgroundColor: '#047857',
-                      color: '#FFFFFF',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Check size={12} />
-                  </span>
-                )}
-              </div>
-              <span style={{ fontSize: '0.725rem', color: movementType === 'delivery' ? '#065F46' : 'var(--text-muted)', lineHeight: 1.3 }}>
-                Gate 2 Depot weighbridge scale check & trip closure
-              </span>
-            </button>
+              LOCKED POST
+            </span>
           </div>
 
           {/* SUB-FORM A: PICKUP WORKFLOW */}
@@ -2660,6 +2663,19 @@ export const SiteAgentTerminal: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Mode Selection Prompt Bottom Sheet */}
+      <SiteAgentModeSheet
+        isOpen={isModeSheetOpen}
+        onSelectMode={handleSelectTerminalMode}
+        onClose={() => {
+          // Can only close if an initial mode has already been picked in this session
+          if (sessionStorage.getItem('dredgeops_siteagent_mode_selected')) {
+            setIsModeSheetOpen(false);
+          }
+        }}
+        isMandatory={!sessionStorage.getItem('dredgeops_siteagent_mode_selected')}
+      />
     </div>
   );
 };
