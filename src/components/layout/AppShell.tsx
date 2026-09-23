@@ -1,11 +1,6 @@
 import React from 'react';
 import { useAppState } from '../../context/AppStateContext';
-import { UserRole } from '../../types';
 import {
-  Truck,
-  Activity,
-  CreditCard,
-  ShieldAlert,
   MapPin,
   LogOut,
 } from 'lucide-react';
@@ -13,8 +8,6 @@ import { TektwigLogo } from '../common/TektwigLogo';
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const {
-    activeRole,
-    setActiveRole,
     activeSiteId,
     setActiveSiteId,
     sites,
@@ -23,54 +16,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     draftTrips,
     syncOfflineDrafts,
   } = useAppState();
-
-  const roleMeta: Partial<Record<
-    UserRole,
-    { label: string; badge: string; color: string; bgTint: string; borderColor: string; icon: React.ReactNode }
-  >> = {
-    loading_officer: {
-      label: 'Site Agent',
-      badge: 'SITE AGENT TERMINAL',
-      color: '#B45309',
-      bgTint: '#FEF3C7',
-      borderColor: '#FCD34D',
-      icon: <Truck size={14} />,
-    },
-    offloading_officer: {
-      label: 'Site Agent',
-      badge: 'SITE AGENT TERMINAL',
-      color: '#B45309',
-      bgTint: '#FEF3C7',
-      borderColor: '#FCD34D',
-      icon: <Truck size={14} />,
-    },
-    operations_manager: {
-      label: 'Operations Manager',
-      badge: 'OPERATIONS CONTROL ROOM',
-      color: '#0369A1',
-      bgTint: '#E0F2FE',
-      borderColor: '#BAE6FD',
-      icon: <Activity size={14} />,
-    },
-    finance_officer: {
-      label: 'Finance Officer',
-      badge: 'FINANCE & COMMERCIAL INVOICING',
-      color: '#6D28D9',
-      bgTint: '#F5F3FF',
-      borderColor: '#DDD6FE',
-      icon: <CreditCard size={14} />,
-    },
-    admin: {
-      label: 'System Administrator',
-      badge: 'SYSTEM AUDIT & GOVERNANCE',
-      color: '#475569',
-      bgTint: '#F1F5F9',
-      borderColor: '#CBD5E1',
-      icon: <ShieldAlert size={14} />,
-    },
-  };
-
-  const currentRole = (roleMeta[activeRole] || roleMeta.loading_officer)!;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: '#FFFFFF' }}>
@@ -97,37 +42,13 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             gap: '0.75rem',
           }}
         >
-          {/* Brand Logo & Role Selector */}
+          {/* Brand Logo */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
             <TektwigLogo height={42} />
-            <div style={{ borderLeft: '1.5px solid var(--border-subtle)', paddingLeft: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ borderLeft: '1.5px solid var(--border-subtle)', paddingLeft: '0.65rem' }}>
               <h1 style={{ fontSize: '1.05rem', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)', lineHeight: 1 }}>
                 DredgeOps
               </h1>
-
-              {/* Portal Role Switcher Dropdown */}
-              <select
-                className="form-select"
-                style={{
-                  minHeight: '28px',
-                  padding: '0.15rem 0.5rem',
-                  fontSize: '0.72rem',
-                  fontWeight: 800,
-                  backgroundColor: currentRole.bgTint,
-                  color: currentRole.color,
-                  border: `1px solid ${currentRole.borderColor}`,
-                  borderRadius: 'var(--radius-sm)',
-                  cursor: 'pointer',
-                }}
-                value={activeRole}
-                onChange={(e) => setActiveRole(e.target.value as UserRole)}
-                title="Switch between operational portals"
-              >
-                <option value="loading_officer">Site Agent Terminal</option>
-                <option value="operations_manager">Operations Manager</option>
-                <option value="finance_officer">Finance & Commercial Invoicing</option>
-                <option value="admin">System Administration</option>
-              </select>
             </div>
           </div>
 
@@ -210,35 +131,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
       <main className="app-container" style={{ flex: 1, paddingTop: '0.85rem', paddingBottom: '2rem' }}>
         {children}
       </main>
-
-      {/* System Footer */}
-      <footer
-        style={{
-          borderTop: '1px solid var(--border-subtle)',
-          backgroundColor: '#FFFFFF',
-          padding: '1rem 0',
-          fontSize: '0.8125rem',
-          color: 'var(--text-muted)',
-        }}
-      >
-        <div
-          className="app-container"
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '0.5rem',
-          }}
-        >
-          <span>
-            Adams Sand Dredging Assurance System • Real-Time ANPR OCR & Financial Reconciliation
-          </span>
-          <span>
-            Active Role: <strong>{activeRole.replace('_', ' ').toUpperCase()}</strong> • Unified Engine: <strong style={{ color: '#059669' }}>Tesseract ANPR + Commercial Invoicing</strong>
-          </span>
-        </div>
-      </footer>
     </div>
   );
 };
