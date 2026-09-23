@@ -6,13 +6,105 @@ import {
   Truck,
   MapPin,
   Search,
+  X,
+  CheckCircle2,
+  AlertCircle,
+  Users,
 } from 'lucide-react';
 
 export const AdminAuditView: React.FC = () => {
-  const { trucks, drivers, sites, auditLogs } = useAppState();
+  const { trucks, drivers, sites, auditLogs, addTruck, addDriver } = useAppState();
 
   const [activeTab, setActiveTab] = useState<'audit' | 'fleet' | 'sites'>('audit');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Modals state
+  const [showTruckModal, setShowTruckModal] = useState(false);
+  const [showDriverModal, setShowDriverModal] = useState(false);
+
+  // New Truck Form state
+  const [newPlate, setNewPlate] = useState('');
+  const [newCapacity, setNewCapacity] = useState(30);
+  const [newTruckType, setNewTruckType] = useState('10-Wheeler Heavy Tipper');
+  const [newOwner, setNewOwner] = useState('');
+  const [newOwnerPhone, setNewOwnerPhone] = useState('');
+  const [truckError, setTruckError] = useState('');
+  const [truckSuccess, setTruckSuccess] = useState('');
+
+  // New Driver Form state
+  const [newDriverName, setNewDriverName] = useState('');
+  const [newDriverPhone, setNewDriverPhone] = useState('');
+  const [newDriverLicense, setNewDriverLicense] = useState('');
+  const [newDriverBank, setNewDriverBank] = useState('Zenith Bank PLC');
+  const [newDriverLast4, setNewDriverLast4] = useState('');
+  const [driverError, setDriverError] = useState('');
+  const [driverSuccess, setDriverSuccess] = useState('');
+
+  const handleAddTruckSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setTruckError('');
+    setTruckSuccess('');
+
+    if (!newPlate.trim() || !newOwner.trim()) {
+      setTruckError('Registration plate number and owner/haulier name are required.');
+      return;
+    }
+
+    const res = addTruck({
+      registration_number: newPlate.trim(),
+      capacity: Number(newCapacity),
+      capacity_unit: 'tonnes',
+      truck_type: newTruckType,
+      owner_name: newOwner.trim(),
+      owner_phone: newOwnerPhone.trim() || '+234 800 000 0000',
+    });
+
+    if (res.success) {
+      setTruckSuccess(`Truck [${newPlate.toUpperCase()}] registered into master fleet successfully!`);
+      setTimeout(() => {
+        setShowTruckModal(false);
+        setNewPlate('');
+        setNewOwner('');
+        setNewOwnerPhone('');
+        setTruckSuccess('');
+      }, 1600);
+    } else {
+      setTruckError(res.error || 'Failed to register truck.');
+    }
+  };
+
+  const handleAddDriverSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setDriverError('');
+    setDriverSuccess('');
+
+    if (!newDriverName.trim() || !newDriverPhone.trim()) {
+      setDriverError('Driver full name and phone number are required.');
+      return;
+    }
+
+    const res = addDriver({
+      full_name: newDriverName.trim(),
+      phone: newDriverPhone.trim(),
+      license_number: newDriverLicense.trim() || 'FRSC-PENDING',
+      bank_name: newDriverBank,
+      account_number_last4: newDriverLast4.trim() || '0000',
+    });
+
+    if (res.success) {
+      setDriverSuccess(`Driver [${newDriverName}] enrolled in verified registry successfully!`);
+      setTimeout(() => {
+        setShowDriverModal(false);
+        setNewDriverName('');
+        setNewDriverPhone('');
+        setNewDriverLicense('');
+        setNewDriverLast4('');
+        setDriverSuccess('');
+      }, 1600);
+    } else {
+      setDriverError(res.error || 'Failed to register driver.');
+    }
+  };
 
   const filteredLogs = auditLogs.filter((log) => {
     const query = searchQuery.toLowerCase();
@@ -216,7 +308,12 @@ export const AdminAuditView: React.FC = () => {
               <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>
                 Authorized Haulage Fleet ({trucks.length} Trucks)
               </h3>
-              <button type="button" className="btn btn-primary" style={{ minHeight: '34px', fontSize: '0.75rem', padding: '0.3rem 0.75rem' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowTruckModal(true)}
+                style={{ minHeight: '34px', fontSize: '0.75rem', padding: '0.3rem 0.75rem' }}
+              >
                 + Register Truck
               </button>
             </div>
@@ -238,7 +335,7 @@ export const AdminAuditView: React.FC = () => {
                         <PlateDisplay plate={t.registration_number} size="sm" />
                       </td>
                       <td style={{ fontSize: '0.8125rem' }}>{t.truck_type}</td>
-                      <td className="mono" style={{ fontWeight: 700 }}>{t.capacity_tonnes} T</td>
+                      <td className="mono" style={{ fontWeight: 700 }}>{t.capacity_tonnes || t.capacity} T</td>
                       <td style={{ fontSize: '0.8125rem' }}>{t.owner_name}</td>
                       <td>
                         <span className="badge badge-closed" style={{ fontSize: '0.65rem' }}>
@@ -258,7 +355,12 @@ export const AdminAuditView: React.FC = () => {
               <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>
                 Haulage Drivers ({drivers.length})
               </h3>
-              <button type="button" className="btn btn-secondary" style={{ minHeight: '34px', fontSize: '0.75rem', padding: '0.3rem 0.75rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowDriverModal(true)}
+                style={{ minHeight: '34px', fontSize: '0.75rem', padding: '0.3rem 0.75rem' }}
+              >
                 + Add Driver
               </button>
             </div>
@@ -277,22 +379,25 @@ export const AdminAuditView: React.FC = () => {
                     <tr key={d.id}>
                       <td>
                         <div style={{ fontWeight: 700 }}>{d.full_name}</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                          Status: {d.status.toUpperCase()}
+                        </div>
                       </td>
-                      <td style={{ fontSize: '0.8125rem' }}>
-                        <div>{d.phone}</div>
+                      <td>
+                        <div style={{ fontSize: '0.8125rem' }}>{d.phone}</div>
                         <div className="mono" style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                           {d.license_number}
                         </div>
                       </td>
-                      <td style={{ fontSize: '0.8125rem' }}>
-                        <div>{d.bank_name}</div>
+                      <td>
+                        <div style={{ fontSize: '0.8125rem', fontWeight: 600 }}>{d.bank_name || 'Zenith Bank PLC'}</div>
                         <div className="mono" style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                          •••• {d.account_number_last4}
+                          Acct: •••• {d.account_number_last4 || '1234'}
                         </div>
                       </td>
                       <td>
-                        <span className="mono" style={{ fontSize: '0.7rem', color: 'var(--brand-primary)' }}>
-                          {d.paystack_recipient_code}
+                        <span className="badge badge-open mono" style={{ fontSize: '0.65rem' }}>
+                          {d.paystack_recipient_code || 'RCP_VERIFIED'}
                         </span>
                       </td>
                     </tr>
@@ -359,6 +464,239 @@ export const AdminAuditView: React.FC = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Register Truck Modal */}
+      {showTruckModal && (
+        <div className="modal-overlay" onClick={() => setShowTruckModal(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Truck size={20} color="#B45309" />
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 800 }}>Register New Fleet Vehicle</h3>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ padding: '0.25rem', minHeight: 'auto' }}
+                onClick={() => setShowTruckModal(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddTruckSubmit} style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {truckError && (
+                <div style={{ padding: '0.6rem 0.85rem', backgroundColor: '#FEE2E2', border: '1px solid #FCA5A5', borderRadius: 'var(--radius-md)', color: '#991B1B', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <AlertCircle size={16} /> {truckError}
+                </div>
+              )}
+              {truckSuccess && (
+                <div style={{ padding: '0.6rem 0.85rem', backgroundColor: '#D1FAE5', border: '1px solid #6EE7B7', borderRadius: 'var(--radius-md)', color: '#065F46', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <CheckCircle2 size={16} /> {truckSuccess}
+                </div>
+              )}
+
+              <div>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '0.8rem' }}>Vehicle License Plate *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. KJA-482XY"
+                  value={newPlate}
+                  onChange={(e) => setNewPlate(e.target.value.toUpperCase())}
+                  style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, textTransform: 'uppercase' }}
+                  required
+                />
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Automatically normalized for FRSC ANPR OCR cross-referencing.</span>
+              </div>
+
+              <div className="grid-2">
+                <div>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '0.8rem' }}>Rated Capacity (Tonnes) *</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    className="form-input"
+                    value={newCapacity}
+                    onChange={(e) => setNewCapacity(Number(e.target.value))}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '0.8rem' }}>Vehicle Spec</label>
+                  <select
+                    className="form-select"
+                    value={newTruckType}
+                    onChange={(e) => setNewTruckType(e.target.value)}
+                  >
+                    <option value="10-Wheeler Heavy Tipper">10-Wheeler Heavy Tipper</option>
+                    <option value="Sino 35T Heavy Dump">Sino 35T Heavy Dump</option>
+                    <option value="Mercedes Actros 28T">Mercedes Actros 28T</option>
+                    <option value="HOWO Sinotruk 32T">HOWO Sinotruk 32T</option>
+                    <option value="DAF CF Tipper 30T">DAF CF Tipper 30T</option>
+                    <option value="Mack Granite 30T">Mack Granite 30T</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '0.8rem' }}>Owner / Haulage Contractor *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Alhaji Bello Haulage Ent."
+                  value={newOwner}
+                  onChange={(e) => setNewOwner(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '0.8rem' }}>Owner Phone Number</label>
+                <input
+                  type="tel"
+                  className="form-input"
+                  placeholder="e.g. +234 803 551 0921"
+                  value={newOwnerPhone}
+                  onChange={(e) => setNewOwnerPhone(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowTruckModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                >
+                  Save & Enroll Truck
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Driver Modal */}
+      {showDriverModal && (
+        <div className="modal-overlay" onClick={() => setShowDriverModal(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Users size={20} color="#0284C7" />
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 800 }}>Enroll Haulage Driver</h3>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ padding: '0.25rem', minHeight: 'auto' }}
+                onClick={() => setShowDriverModal(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddDriverSubmit} style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {driverError && (
+                <div style={{ padding: '0.6rem 0.85rem', backgroundColor: '#FEE2E2', border: '1px solid #FCA5A5', borderRadius: 'var(--radius-md)', color: '#991B1B', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <AlertCircle size={16} /> {driverError}
+                </div>
+              )}
+              {driverSuccess && (
+                <div style={{ padding: '0.6rem 0.85rem', backgroundColor: '#D1FAE5', border: '1px solid #6EE7B7', borderRadius: 'var(--radius-md)', color: '#065F46', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <CheckCircle2 size={16} /> {driverSuccess}
+                </div>
+              )}
+
+              <div>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '0.8rem' }}>Driver Full Name *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Ibrahim Babangida"
+                  value={newDriverName}
+                  onChange={(e) => setNewDriverName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="grid-2">
+                <div>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '0.8rem' }}>Phone Number *</label>
+                  <input
+                    type="tel"
+                    className="form-input"
+                    placeholder="+234 803 000 0000"
+                    value={newDriverPhone}
+                    onChange={(e) => setNewDriverPhone(e.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '0.8rem' }}>FRSC Driver License</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="FRSC-LAG-XXXX"
+                    value={newDriverLicense}
+                    onChange={(e) => setNewDriverLicense(e.target.value.toUpperCase())}
+                  />
+                </div>
+              </div>
+
+              <div className="grid-2">
+                <div>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '0.8rem' }}>Settlement Bank</label>
+                  <select
+                    className="form-select"
+                    value={newDriverBank}
+                    onChange={(e) => setNewDriverBank(e.target.value)}
+                  >
+                    <option value="Zenith Bank PLC">Zenith Bank PLC</option>
+                    <option value="Access Bank PLC">Access Bank PLC</option>
+                    <option value="Guaranty Trust Bank (GTB)">Guaranty Trust Bank (GTB)</option>
+                    <option value="First Bank of Nigeria">First Bank of Nigeria</option>
+                    <option value="United Bank for Africa (UBA)">United Bank for Africa (UBA)</option>
+                    <option value="Stanbic IBTC Bank">Stanbic IBTC Bank</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '0.8rem' }}>Account No. (Last 4)</label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    className="form-input"
+                    placeholder="4912"
+                    value={newDriverLast4}
+                    onChange={(e) => setNewDriverLast4(e.target.value.replace(/\D/g, ''))}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowDriverModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                >
+                  Enroll Driver
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

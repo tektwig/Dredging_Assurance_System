@@ -4,6 +4,7 @@ import { StatCard } from '../common/StatCard';
 import { StatusBadge } from '../common/StatusBadge';
 import { PlateDisplay } from '../common/PlateDisplay';
 import { ExceptionTriageModal } from './ExceptionTriageModal';
+import { TripDetailModal } from '../TripDetailModal';
 import { Trip } from '../../types';
 import {
   Truck,
@@ -12,17 +13,18 @@ import {
   Clock,
   Search,
   Filter,
-  CheckCircle2,
   FileSpreadsheet,
   Layers,
+  Eye,
 } from 'lucide-react';
 
 export const OperationsDashboard: React.FC = () => {
-  const { trips, resolveTripException } = useAppState();
+  const { trips, auditLogs, resolveTripException } = useAppState();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [triagingTrip, setTriagingTrip] = useState<Trip | null>(null);
+  const [inspectedTrip, setInspectedTrip] = useState<Trip | null>(null);
 
   // Derived Metrics
   const openCount = trips.filter((t) => t.status === 'open').length;
@@ -45,6 +47,54 @@ export const OperationsDashboard: React.FC = () => {
     return matchesSearch && matchesStatus;
   });
 
+  const handleExportCSV = () => {
+    const headers = [
+      'Waybill Number',
+      'Truck Plate',
+      'Driver Name',
+      'Loading Site',
+      'Offloading Site',
+      'Status',
+      'Est Tonnes',
+      'Delivered Quantity',
+      'Unit',
+      'Scale Ticket No',
+      'Dispatched Time (UTC)',
+      'Closed Time (UTC)',
+      'Variance',
+      'Notes',
+    ];
+
+    const rows = filteredTrips.map((t) => [
+      `"${t.trip_number || ''}"`,
+      `"${t.truck?.registration_number || ''}"`,
+      `"${t.driver?.full_name || ''}"`,
+      `"${t.loading_site?.name || ''}"`,
+      `"${t.offloading_site?.name || ''}"`,
+      `"${t.status.toUpperCase()}"`,
+      t.loading_event?.estimated_tonnes || 0,
+      t.offloading_event?.quantity || '',
+      `"${t.offloading_event?.unit || 'tonnes'}"`,
+      `"${t.offloading_event?.scale_ticket_number || ''}"`,
+      `"${t.loaded_at || ''}"`,
+      `"${t.closed_at || ''}"`,
+      t.offloading_event?.variance_from_estimate ?? '',
+      `"${(t.offloading_event?.notes || t.loading_event?.notes || '').replace(/"/g, '""')}"`,
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const dateStr = new Date().toISOString().split('T')[0];
+    link.setAttribute('href', url);
+    link.setAttribute('download', `dredgeops_daily_ledger_${dateStr}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       {/* Top Operations Header */}
@@ -59,7 +109,7 @@ export const OperationsDashboard: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button type="button" className="btn btn-secondary">
+          <button type="button" className="btn btn-secondary" onClick={handleExportCSV}>
             <FileSpreadsheet size={16} />
             Export Daily Ledger (CSV)
           </button>
@@ -183,7 +233,23 @@ export const OperationsDashboard: React.FC = () => {
                   return (
                     <tr key={trip.id}>
                       <td className="mono" style={{ fontWeight: 700, color: 'var(--brand-primary)' }}>
-                        {trip.trip_number}
+                        <button
+                          type="button"
+                          onClick={() => setInspectedTrip(trip)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            cursor: 'pointer',
+                            color: 'var(--brand-primary)',
+                            fontWeight: 800,
+                            fontFamily: 'var(--font-mono)',
+                            textDecoration: 'underline',
+                          }}
+                          title="Click to view full digital waybill"
+                        >
+                          {trip.trip_number}
+                        </button>
                       </td>
                       <td>
                         <PlateDisplay plate={trip.truck?.registration_number || 'N/A'} size="sm" />
@@ -227,22 +293,28 @@ export const OperationsDashboard: React.FC = () => {
                         <StatusBadge status={trip.status} size="sm" />
                       </td>
                       <td>
-                        {hasException && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                           <button
                             type="button"
-                            className="btn btn-danger"
-                            style={{ minHeight: '32px', padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
-                            onClick={() => setTriagingTrip(trip)}
+                            className="btn btn-secondary"
+                            style={{ minHeight: '30px', padding: '0.2rem 0.55rem', fontSize: '0.72rem' }}
+                            onClick={() => setInspectedTrip(trip)}
+                            title="Inspect Digital Waybill & Audit Logs"
                           >
-                            <AlertTriangle size={12} />
-                            Triage Dispute
+                            <Eye size={12} /> Waybill
                           </button>
-                        )}
-                        {trip.status === 'closed' && (
-                          <span style={{ fontSize: '0.75rem', color: '#059669', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                            <CheckCircle2 size={13} /> Audited
-                          </span>
-                        )}
+                          {hasException && (
+                            <button
+                              type="button"
+                              className="btn btn-danger"
+                              style={{ minHeight: '30px', padding: '0.2rem 0.55rem', fontSize: '0.72rem' }}
+                              onClick={() => setTriagingTrip(trip)}
+                            >
+                              <AlertTriangle size={12} />
+                              Dispute
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -260,6 +332,15 @@ export const OperationsDashboard: React.FC = () => {
           exception={triagingTrip.exceptions[0]}
           onClose={() => setTriagingTrip(null)}
           onResolve={resolveTripException}
+        />
+      )}
+
+      {/* Waybill Inspection & Audit Modal */}
+      {inspectedTrip && (
+        <TripDetailModal
+          trip={inspectedTrip}
+          onClose={() => setInspectedTrip(null)}
+          auditLogs={auditLogs}
         />
       )}
     </div>

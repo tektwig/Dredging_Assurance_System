@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useAppState } from '../../context/AppStateContext';
 import { StatCard } from '../common/StatCard';
+import { Invoice } from '../../types';
+import { InvoiceModal } from '../InvoiceModal';
 import {
   CreditCard,
   Building2,
@@ -8,6 +10,13 @@ import {
   CheckCircle2,
   DollarSign,
   Download,
+  FileText,
+  Plus,
+  Printer,
+  Clock,
+  TrendingUp,
+  Search,
+  Check,
 } from 'lucide-react';
 
 export const FinanceView: React.FC = () => {
@@ -17,12 +26,21 @@ export const FinanceView: React.FC = () => {
     createPayoutBatch,
     approvePayoutBatch,
     complianceDocs,
+    invoices,
+    markInvoiceAsPaid,
   } = useAppState();
 
-  const [activeSubTab, setActiveSubTab] = useState<'batches' | 'compliance'>('batches');
+  const [activeSubTab, setActiveSubTab] = useState<'invoices' | 'batches' | 'compliance'>('invoices');
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(
     payoutBatches.length > 0 ? payoutBatches[0].id : null
   );
+
+  // Invoicing state
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState<boolean>(false);
+  const [selectedInvoiceForModal, setSelectedInvoiceForModal] = useState<Invoice | null>(null);
+  const [paymentSuccessMsg, setPaymentSuccessMsg] = useState<string | null>(null);
 
   // Available trips not yet added to a batch
   const unbatchedClosedTrips = closedTrips;
@@ -38,23 +56,174 @@ export const FinanceView: React.FC = () => {
     setSelectedBatchId(batch.id);
   };
 
+  const handleQuickMarkPaid = (inv: Invoice, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const reference = `ZENITH-EFT-${Date.now().toString().slice(-6)}`;
+    markInvoiceAsPaid(inv.id, reference);
+    setPaymentSuccessMsg(`Invoice ${inv.invoice_number} marked as Paid (Ref: ${reference})`);
+    setTimeout(() => setPaymentSuccessMsg(null), 4000);
+  };
+
+  const openCreateInvoiceModal = () => {
+    setSelectedInvoiceForModal(null);
+    setIsInvoiceModalOpen(true);
+  };
+
+  const openViewInvoiceModal = (inv: Invoice) => {
+    setSelectedInvoiceForModal(inv);
+    setIsInvoiceModalOpen(true);
+  };
+
+  // Accounts Receivable Calculations
+  const nonCancelledInvoices = invoices.filter((i) => i.status !== 'cancelled');
+  const totalBilled = nonCancelledInvoices.reduce((sum, i) => sum + i.total_amount, 0);
+  const outstandingReceivables = invoices
+    .filter((i) => i.status === 'issued' || i.status === 'overdue')
+    .reduce((sum, i) => sum + i.total_amount, 0);
+  const totalCollected = invoices
+    .filter((i) => i.status === 'paid')
+    .reduce((sum, i) => sum + i.total_amount, 0);
+  const totalVatAccrued = nonCancelledInvoices.reduce((sum, i) => sum + i.tax_amount, 0);
+
+  const filteredInvoices = invoices.filter((inv) => {
+    const matchesStatus = invoiceStatusFilter === 'all' || inv.status === invoiceStatusFilter;
+    const matchesQuery =
+      searchQuery === '' ||
+      inv.invoice_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      inv.customer_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (inv.project_site_name || '').toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesStatus && matchesQuery;
+  });
+
+  const getInvoiceStatusBadge = (status: Invoice['status']) => {
+    switch (status) {
+      case 'paid':
+        return (
+          <span
+            style={{
+              backgroundColor: '#D1FAE5',
+              color: '#065F46',
+              border: '1px solid #6EE7B7',
+              fontSize: '0.7rem',
+              fontWeight: 800,
+              padding: '0.2rem 0.55rem',
+              borderRadius: 'var(--radius-sm)',
+              letterSpacing: '0.04em',
+            }}
+          >
+            PAID & SETTLED
+          </span>
+        );
+      case 'issued':
+        return (
+          <span
+            style={{
+              backgroundColor: '#FEF3C7',
+              color: '#B45309',
+              border: '1px solid #FCD34D',
+              fontSize: '0.7rem',
+              fontWeight: 800,
+              padding: '0.2rem 0.55rem',
+              borderRadius: 'var(--radius-sm)',
+              letterSpacing: '0.04em',
+            }}
+          >
+            ISSUED / DUE
+          </span>
+        );
+      case 'overdue':
+        return (
+          <span
+            style={{
+              backgroundColor: '#FEE2E2',
+              color: '#991B1B',
+              border: '1px solid #FCA5A5',
+              fontSize: '0.7rem',
+              fontWeight: 800,
+              padding: '0.2rem 0.55rem',
+              borderRadius: 'var(--radius-sm)',
+              letterSpacing: '0.04em',
+            }}
+          >
+            OVERDUE
+          </span>
+        );
+      case 'draft':
+        return (
+          <span
+            style={{
+              backgroundColor: '#F1F5F9',
+              color: '#475569',
+              border: '1px solid #CBD5E1',
+              fontSize: '0.7rem',
+              fontWeight: 800,
+              padding: '0.2rem 0.55rem',
+              borderRadius: 'var(--radius-sm)',
+              letterSpacing: '0.04em',
+            }}
+          >
+            DRAFT
+          </span>
+        );
+      default:
+        return <span className="badge">{status}</span>;
+    }
+  };
+
   const selectedBatch = payoutBatches.find((b) => b.id === selectedBatchId) || payoutBatches[0];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* Payment Success Notification Toast */}
+      {paymentSuccessMsg && (
+        <div
+          style={{
+            padding: '0.875rem 1.25rem',
+            backgroundColor: '#D1FAE5',
+            border: '1px solid #6EE7B7',
+            borderRadius: 'var(--radius-md)',
+            color: '#065F46',
+            fontWeight: 600,
+            fontSize: '0.875rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+          }}
+        >
+          <CheckCircle2 size={18} color="#059669" />
+          <span>{paymentSuccessMsg}</span>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
-            Financial Assurance & Paystack Automation
+            Financial Assurance & Revenue Operations
           </h2>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-            Verified trip aggregations, automated Paystack bulk transfers, and corporate KYC governance.
+            Commercial invoicing, Accounts Receivable, automated Paystack bulk transfers, and corporate KYC governance.
           </p>
         </div>
 
         {/* Sub-tab toggle */}
         <div style={{ display: 'flex', backgroundColor: '#F1F5F9', padding: '0.25rem', borderRadius: 'var(--radius-md)' }}>
+          <button
+            type="button"
+            className="btn"
+            style={{
+              padding: '0.4rem 1rem',
+              minHeight: '34px',
+              fontSize: '0.8125rem',
+              backgroundColor: activeSubTab === 'invoices' ? '#FFFFFF' : 'transparent',
+              boxShadow: activeSubTab === 'invoices' ? 'var(--shadow-xs)' : 'none',
+              color: activeSubTab === 'invoices' ? 'var(--text-primary)' : 'var(--text-secondary)',
+            }}
+            onClick={() => setActiveSubTab('invoices')}
+          >
+            <FileText size={14} />
+            Commercial Invoices ({invoices.length})
+          </button>
           <button
             type="button"
             className="btn"
@@ -69,7 +238,7 @@ export const FinanceView: React.FC = () => {
             onClick={() => setActiveSubTab('batches')}
           >
             <CreditCard size={14} />
-            Payout Batches
+            Payout Batches ({payoutBatches.length})
           </button>
           <button
             type="button"
@@ -89,6 +258,227 @@ export const FinanceView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* TAB 1: COMMERCIAL INVOICING & ACCOUNTS RECEIVABLE */}
+      {activeSubTab === 'invoices' && (
+        <>
+          {/* AR Stat Cards */}
+          <div className="grid-4">
+            <StatCard
+              title="BILLED REVENUE (GROSS)"
+              value={`₦${totalBilled.toLocaleString()}`}
+              subtitle={`${nonCancelledInvoices.length} active commercial invoices`}
+              icon={<TrendingUp size={20} />}
+              highlightColor="blue"
+            />
+            <StatCard
+              title="OUTSTANDING RECEIVABLES"
+              value={`₦${outstandingReceivables.toLocaleString()}`}
+              subtitle={`${invoices.filter((i) => i.status === 'issued' || i.status === 'overdue').length} awaiting customer remittance`}
+              icon={<Clock size={20} />}
+              highlightColor="amber"
+            />
+            <StatCard
+              title="COLLECTIONS SETTLED"
+              value={`₦${totalCollected.toLocaleString()}`}
+              subtitle={`${invoices.filter((i) => i.status === 'paid').length} payments reconciled`}
+              icon={<CheckCircle2 size={20} />}
+              highlightColor="emerald"
+            />
+            <StatCard
+              title="ACCRUED 7.5% FIRS VAT"
+              value={`₦${totalVatAccrued.toLocaleString()}`}
+              subtitle="Statutory tax compliance withholding"
+              icon={<ShieldCheck size={20} />}
+              highlightColor="blue"
+            />
+          </div>
+
+          {/* Invoices List Card */}
+          <div className="card" style={{ padding: '1.25rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '1rem',
+                marginBottom: '1.25rem',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {/* Status Filter Buttons */}
+                {[
+                  { id: 'all', label: `All (${invoices.length})` },
+                  { id: 'issued', label: `Issued / Due (${invoices.filter((i) => i.status === 'issued').length})` },
+                  { id: 'paid', label: `Paid (${invoices.filter((i) => i.status === 'paid').length})` },
+                  { id: 'overdue', label: `Overdue (${invoices.filter((i) => i.status === 'overdue').length})` },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    className="btn"
+                    style={{
+                      padding: '0.3rem 0.75rem',
+                      minHeight: '30px',
+                      fontSize: '0.75rem',
+                      backgroundColor: invoiceStatusFilter === f.id ? '#0F172A' : '#F1F5F9',
+                      color: invoiceStatusFilter === f.id ? '#FFFFFF' : 'var(--text-secondary)',
+                      borderRadius: 'var(--radius-full)',
+                    }}
+                    onClick={() => setInvoiceStatusFilter(f.id)}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                {/* Search Bar */}
+                <div style={{ position: 'relative' }}>
+                  <Search
+                    size={14}
+                    style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
+                  />
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Search invoice or client..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    style={{ paddingLeft: '2rem', minHeight: '34px', fontSize: '0.8rem', width: '220px' }}
+                  />
+                </div>
+
+                {/* Generate New Invoice Button */}
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ minHeight: '36px', padding: '0.4rem 1rem', fontSize: '0.8125rem' }}
+                  onClick={openCreateInvoiceModal}
+                >
+                  <Plus size={15} />
+                  + Create Commercial Invoice
+                </button>
+              </div>
+            </div>
+
+            {/* Invoices Table */}
+            <div className="table-wrapper">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Invoice #</th>
+                    <th>Customer & Project Site</th>
+                    <th>Issue Date</th>
+                    <th>Due Date</th>
+                    <th>Subtotal (NGN)</th>
+                    <th>7.5% VAT</th>
+                    <th>Total Amount</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredInvoices.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-muted)' }}>
+                        <FileText size={36} style={{ margin: '0 auto 0.5rem', opacity: 0.5 }} />
+                        <p style={{ fontWeight: 600 }}>No invoices match this filter</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredInvoices.map((inv) => (
+                      <tr key={inv.id}>
+                        <td>
+                          <button
+                            type="button"
+                            onClick={() => openViewInvoiceModal(inv)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              cursor: 'pointer',
+                              fontWeight: 800,
+                              color: 'var(--brand-primary)',
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: '0.85rem',
+                              textAlign: 'left',
+                            }}
+                          >
+                            {inv.invoice_number}
+                          </button>
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{inv.customer_name}</div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            {inv.project_site_name || 'Standard Dredging Supply'}
+                          </div>
+                        </td>
+                        <td style={{ fontSize: '0.8125rem' }}>{inv.issue_date}</td>
+                        <td style={{ fontSize: '0.8125rem', color: inv.status === 'overdue' ? '#DC2626' : 'inherit' }}>
+                          {inv.due_date}
+                        </td>
+                        <td className="mono" style={{ fontSize: '0.8125rem' }}>
+                          ₦{inv.subtotal.toLocaleString()}
+                        </td>
+                        <td className="mono" style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                          ₦{inv.tax_amount.toLocaleString()}
+                        </td>
+                        <td className="mono" style={{ fontWeight: 800, fontSize: '0.875rem', color: '#0F172A' }}>
+                          ₦{inv.total_amount.toLocaleString()}
+                        </td>
+                        <td>{getInvoiceStatusBadge(inv.status)}</td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ minHeight: '30px', padding: '0.2rem 0.55rem', fontSize: '0.72rem' }}
+                              onClick={() => openViewInvoiceModal(inv)}
+                              title="View and Print Official Invoice"
+                            >
+                              <Printer size={13} /> Print
+                            </button>
+                            {inv.status !== 'paid' && inv.status !== 'cancelled' && (
+                              <button
+                                type="button"
+                                className="btn"
+                                style={{
+                                  minHeight: '30px',
+                                  padding: '0.2rem 0.55rem',
+                                  fontSize: '0.72rem',
+                                  backgroundColor: '#D1FAE5',
+                                  color: '#065F46',
+                                  border: '1px solid #6EE7B7',
+                                }}
+                                onClick={(e) => handleQuickMarkPaid(inv, e)}
+                                title="Record Direct Payment Remittance"
+                              >
+                                <Check size={13} /> Mark Paid
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Invoice Modal for Creating and Printing */}
+      <InvoiceModal
+        isOpen={isInvoiceModalOpen}
+        onClose={() => {
+          setIsInvoiceModalOpen(false);
+          setSelectedInvoiceForModal(null);
+        }}
+        invoice={selectedInvoiceForModal}
+      />
 
       {activeSubTab === 'batches' ? (
         <>

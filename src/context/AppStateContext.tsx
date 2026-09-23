@@ -10,7 +10,11 @@ import {
   UserRole,
   QuantityUnit,
   ExceptionType,
+  Invoice,
+  InvoiceItem,
+  DraftTrip,
 } from '../types';
+import { INITIAL_INVOICES, INITIAL_PAYOUT_BATCHES } from '../services/mockData';
 
 interface AppStateContextType {
   // Authentication & Role
@@ -34,6 +38,13 @@ interface AppStateContextType {
   payoutBatches: PayoutBatch[];
   complianceDocs: ComplianceDocument[];
   auditLogs: AuditLogEntry[];
+  invoices: Invoice[];
+
+  // Offline / PWA
+  isOnline: boolean;
+  setIsOnline: (online: boolean) => void;
+  draftTrips: DraftTrip[];
+  syncOfflineDrafts: () => void;
 
   // Helper Lookups
   activeSite?: Site;
@@ -84,6 +95,43 @@ interface AppStateContextType {
 
   createPayoutBatch: (tripIds: string[]) => PayoutBatch;
   approvePayoutBatch: (batchId: string) => void;
+
+  // Invoice Actions (Commercial Revenue Assurance)
+  createInvoice: (params: {
+    customer_name: string;
+    customer_email?: string;
+    customer_phone?: string;
+    customer_address?: string;
+    customer_tin?: string;
+    project_site_name?: string;
+    items: InvoiceItem[];
+    tax_rate?: number;
+    discount_amount?: number;
+    payment_terms?: string;
+    notes?: string;
+    due_date?: string;
+  }) => { success: boolean; invoice?: Invoice; error?: string };
+  markInvoiceAsPaid: (invoiceId: string, paymentReference: string) => void;
+  cancelInvoice: (invoiceId: string, reason: string) => void;
+
+  // Master Data Registration
+  addTruck: (truck: {
+    registration_number: string;
+    capacity: number;
+    capacity_unit?: 'm3' | 'tonnes' | 'truckloads';
+    truck_type: string;
+    owner_name: string;
+    owner_phone?: string;
+  }) => { success: boolean; error?: string; truck?: Truck };
+  addDriver: (driver: {
+    full_name: string;
+    phone: string;
+    license_number: string;
+    bank_name?: string;
+    account_number?: string;
+    account_number_last4?: string;
+    assigned_truck_id?: string;
+  }) => { success: boolean; error?: string; driver?: Driver };
 }
 
 const AppStateContext = createContext<AppStateContextType | undefined>(undefined);
@@ -475,12 +523,72 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const [sites] = useState<Site[]>(INITIAL_SITES);
-  const [trucks] = useState<Truck[]>(INITIAL_TRUCKS);
-  const [drivers] = useState<Driver[]>(INITIAL_DRIVERS);
-  const [trips, setTrips] = useState<Trip[]>(INITIAL_TRIPS);
-  const [payoutBatches, setPayoutBatches] = useState<PayoutBatch[]>([]);
+  const [trucks, setTrucks] = useState<Truck[]>(() => {
+    const saved = localStorage.getItem('dredgeops_trucks');
+    return saved ? JSON.parse(saved) : INITIAL_TRUCKS;
+  });
+  const [drivers, setDrivers] = useState<Driver[]>(() => {
+    const saved = localStorage.getItem('dredgeops_drivers');
+    return saved ? JSON.parse(saved) : INITIAL_DRIVERS;
+  });
+  const [trips, setTrips] = useState<Trip[]>(() => {
+    const saved = localStorage.getItem('dredgeops_trips');
+    return saved ? JSON.parse(saved) : INITIAL_TRIPS;
+  });
+  const [invoices, setInvoices] = useState<Invoice[]>(() => {
+    const saved = localStorage.getItem('dredgeops_invoices');
+    return saved ? JSON.parse(saved) : INITIAL_INVOICES;
+  });
+  const [payoutBatches, setPayoutBatches] = useState<PayoutBatch[]>(() => {
+    const saved = localStorage.getItem('dredgeops_payout_batches');
+    return saved ? JSON.parse(saved) : INITIAL_PAYOUT_BATCHES;
+  });
   const [complianceDocs] = useState<ComplianceDocument[]>(INITIAL_COMPLIANCE_DOCS);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(INITIAL_AUDIT_LOG);
+
+  // Offline / PWA queue state
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [draftTrips, setDraftTrips] = useState<DraftTrip[]>(() => {
+    const saved = localStorage.getItem('dredgeops_draft_trips');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Listen to network status
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Save changes to localStorage
+  useEffect(() => {
+    localStorage.setItem('dredgeops_trucks', JSON.stringify(trucks));
+  }, [trucks]);
+
+  useEffect(() => {
+    localStorage.setItem('dredgeops_drivers', JSON.stringify(drivers));
+  }, [drivers]);
+
+  useEffect(() => {
+    localStorage.setItem('dredgeops_trips', JSON.stringify(trips));
+  }, [trips]);
+
+  useEffect(() => {
+    localStorage.setItem('dredgeops_invoices', JSON.stringify(invoices));
+  }, [invoices]);
+
+  useEffect(() => {
+    localStorage.setItem('dredgeops_payout_batches', JSON.stringify(payoutBatches));
+  }, [payoutBatches]);
+
+  useEffect(() => {
+    localStorage.setItem('dredgeops_draft_trips', JSON.stringify(draftTrips));
+  }, [draftTrips]);
 
   // Sync activeTab when role changes to give an immediate relevant view
   useEffect(() => {
@@ -830,7 +938,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           ? {
               ...b,
               status: 'disbursed',
-              approved_by: 'Head of Finance (Faith)',
+              approved_by: 'Head of Finance',
               approved_at: now,
               paystack_transfer_reference: `PST_TRF_${Math.random().toString(36).substring(2, 12).toUpperCase()}`,
               items: (b.items || []).map((i) => ({ ...i, status: 'success' as const })),
@@ -838,6 +946,261 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           : b
       )
     );
+  };
+
+  // Commercial Invoicing Actions
+  const createInvoice: AppStateContextType['createInvoice'] = (params) => {
+    try {
+      const now = new Date();
+      const year = now.getFullYear();
+      const count = invoices.length + 1;
+      const invoiceNumber = `INV-${year}-${count.toString().padStart(4, '0')}`;
+
+      const subtotal = params.items.reduce((sum, item) => sum + (item.amount || item.quantity * item.unit_price), 0);
+      const taxRate = params.tax_rate !== undefined ? params.tax_rate : 7.5;
+      const taxAmount = (subtotal * taxRate) / 100;
+      const discount = params.discount_amount || 0;
+      const totalAmount = subtotal + taxAmount - discount;
+
+      const issueDate = now.toISOString().split('T')[0];
+      const dueDate = params.due_date || new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      const newInvoice: Invoice = {
+        id: `inv-${Date.now()}`,
+        invoice_number: invoiceNumber,
+        issue_date: issueDate,
+        due_date: dueDate,
+        customer_name: params.customer_name,
+        customer_email: params.customer_email,
+        customer_phone: params.customer_phone,
+        customer_address: params.customer_address,
+        customer_tin: params.customer_tin,
+        project_site_name: params.project_site_name,
+        status: 'issued',
+        items: params.items,
+        subtotal,
+        tax_rate: taxRate,
+        tax_amount: taxAmount,
+        discount_amount: discount,
+        total_amount: totalAmount,
+        currency: 'NGN',
+        payment_terms: params.payment_terms || 'Net 14 Days',
+        bank_name: 'Zenith Bank PLC',
+        bank_account_name: 'Tektwig Dredging Solutions Ltd - Ops Escrow',
+        bank_account_number: '1019283741',
+        paystack_payment_link: `https://paystack.com/pay/dredgeops-${invoiceNumber.toLowerCase()}`,
+        notes: params.notes,
+        created_at: now.toISOString(),
+      };
+
+      setInvoices((prev) => [newInvoice, ...prev]);
+
+      // Audit Log
+      setAuditLogs((prev) => [
+        {
+          id: `aud-${Date.now()}`,
+          entity_name: 'invoices',
+          entity_id: newInvoice.id,
+          action: 'INVOICE_CREATE',
+          new_value: {
+            invoice_number: invoiceNumber,
+            customer: params.customer_name,
+            total: totalAmount,
+            items_count: params.items.length,
+          },
+          reason: `Commercial invoice ${invoiceNumber} issued for ${params.customer_name}. Total: ₦${totalAmount.toLocaleString()}`,
+          actor_id: 'usr-fin-01',
+          actor_name: 'Finance Officer',
+          actor_role: 'finance_officer',
+          timestamp: now.toISOString(),
+        },
+        ...prev,
+      ]);
+
+      return { success: true, invoice: newInvoice };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to generate commercial invoice.' };
+    }
+  };
+
+  const markInvoiceAsPaid = (invoiceId: string, paymentReference: string) => {
+    const now = new Date().toISOString();
+    setInvoices((prev) =>
+      prev.map((inv) =>
+        inv.id === invoiceId
+          ? {
+              ...inv,
+              status: 'paid',
+              paid_at: now,
+              paid_reference: paymentReference,
+            }
+          : inv
+      )
+    );
+
+    const inv = invoices.find((i) => i.id === invoiceId);
+    setAuditLogs((prev) => [
+      {
+        id: `aud-${Date.now()}`,
+        entity_name: 'invoices',
+        entity_id: invoiceId,
+        action: 'INVOICE_SETTLE',
+        new_value: { status: 'paid', reference: paymentReference },
+        reason: `Payment confirmed for ${inv?.invoice_number || invoiceId}. Remittance Ref: ${paymentReference}`,
+        actor_id: 'usr-fin-01',
+        actor_name: 'Finance Officer',
+        actor_role: 'finance_officer',
+        timestamp: now,
+      },
+      ...prev,
+    ]);
+  };
+
+  const cancelInvoice = (invoiceId: string, reason: string) => {
+    setInvoices((prev) =>
+      prev.map((inv) => (inv.id === invoiceId ? { ...inv, status: 'cancelled' } : inv))
+    );
+
+    const inv = invoices.find((i) => i.id === invoiceId);
+    setAuditLogs((prev) => [
+      {
+        id: `aud-${Date.now()}`,
+        entity_name: 'invoices',
+        entity_id: invoiceId,
+        action: 'INVOICE_CANCEL',
+        new_value: { status: 'cancelled' },
+        reason: `Commercial invoice ${inv?.invoice_number || invoiceId} voided: ${reason}`,
+        actor_id: 'usr-fin-01',
+        actor_name: 'Finance Officer',
+        actor_role: 'finance_officer',
+        timestamp: new Date().toISOString(),
+      },
+      ...prev,
+    ]);
+  };
+
+  // Master Data Registration Actions
+  const addTruck: AppStateContextType['addTruck'] = (truckData) => {
+    const cleanPlate = truckData.registration_number.toUpperCase().trim();
+    const normalized = cleanPlate.replace(/[^A-Z0-9]/g, '');
+
+    if (!normalized || normalized.length < 5) {
+      return { success: false, error: 'Registration number must be at least 5 alphanumeric characters.' };
+    }
+
+    if (trucks.some((t) => t.normalized_registration === normalized)) {
+      return { success: false, error: `Truck with plate number ${cleanPlate} is already registered in master fleet.` };
+    }
+
+    const now = new Date().toISOString();
+    const newTruck: Truck = {
+      id: `trk-${Date.now()}`,
+      registration_number: cleanPlate,
+      normalized_registration: normalized,
+      capacity: truckData.capacity,
+      capacity_tonnes: truckData.capacity,
+      capacity_unit: truckData.capacity_unit || 'tonnes',
+      truck_type: truckData.truck_type || 'Tipper Truck',
+      owner_name: truckData.owner_name,
+      owner_phone: truckData.owner_phone || '+234 800 000 0000',
+      status: 'active',
+      created_at: now,
+    };
+
+    setTrucks((prev) => [newTruck, ...prev]);
+
+    setAuditLogs((prev) => [
+      {
+        id: `aud-${Date.now()}`,
+        entity_name: 'trucks',
+        entity_id: newTruck.id,
+        action: 'TRUCK_REGISTER',
+        new_value: { plate: cleanPlate, normalized, capacity: truckData.capacity, owner: truckData.owner_name },
+        reason: `New vehicle [${cleanPlate}] enrolled in fleet master database.`,
+        actor_id: 'usr-adm-01',
+        actor_name: 'System Admin',
+        actor_role: 'admin',
+        timestamp: now,
+      },
+      ...prev,
+    ]);
+
+    return { success: true, truck: newTruck };
+  };
+
+  const addDriver: AppStateContextType['addDriver'] = (driverData) => {
+    if (!driverData.full_name.trim() || !driverData.phone.trim()) {
+      return { success: false, error: 'Driver full name and phone number are required.' };
+    }
+
+    const now = new Date().toISOString();
+    const newDriver: Driver = {
+      id: `drv-${Date.now()}`,
+      full_name: driverData.full_name.trim(),
+      phone: driverData.phone.trim(),
+      license_number: driverData.license_number.trim() || 'FRSC-PENDING',
+      status: 'active',
+      bank_name: driverData.bank_name || 'Zenith Bank PLC',
+      account_number: driverData.account_number,
+      account_number_last4: driverData.account_number_last4 || (driverData.account_number ? driverData.account_number.slice(-4) : '1234'),
+      assigned_truck_id: driverData.assigned_truck_id,
+    };
+
+    setDrivers((prev) => [newDriver, ...prev]);
+
+    setAuditLogs((prev) => [
+      {
+        id: `aud-${Date.now()}`,
+        entity_name: 'drivers',
+        entity_id: newDriver.id,
+        action: 'DRIVER_REGISTER',
+        new_value: { name: driverData.full_name, phone: driverData.phone, license: driverData.license_number },
+        reason: `New hauler driver [${driverData.full_name}] enrolled in verified driver registry.`,
+        actor_id: 'usr-adm-01',
+        actor_name: 'System Admin',
+        actor_role: 'admin',
+        timestamp: now,
+      },
+      ...prev,
+    ]);
+
+    return { success: true, driver: newDriver };
+  };
+
+  // Offline Sync Actions
+  const syncOfflineDrafts = () => {
+    if (draftTrips.length === 0) return;
+    const now = new Date().toISOString();
+
+    draftTrips.forEach((draft) => {
+      createLoadingTrip({
+        plate: draft.truck_plate,
+        truckId: trucks.find((t) => t.registration_number === draft.truck_plate)?.id || trucks[0]?.id || 'trk-1',
+        driverId: draft.driver_id || drivers[0]?.id || 'drv-1',
+        offloadingSiteId: sites.find((s) => s.site_type === 'offloading')?.id || 'site-lkk-01',
+        estimatedTonnes: draft.capacity || 30,
+        plateImageUrl: 'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=600&auto=format&fit=crop&q=80',
+        confidenceScore: 95.0,
+        notes: `[OFFLINE SYNCED] ${draft.notes || ''}`,
+      });
+    });
+
+    setDraftTrips([]);
+    setAuditLogs((prev) => [
+      {
+        id: `aud-${Date.now()}`,
+        entity_name: 'offline_queue',
+        entity_id: 'sync-batch',
+        action: 'OFFLINE_SYNC_PWA',
+        new_value: { count: draftTrips.length },
+        reason: `PWA offline storage synced ${draftTrips.length} queued waybills to cloud ledger.`,
+        actor_id: 'usr-load-pwa',
+        actor_name: 'Site Agent Terminal (PWA)',
+        actor_role: 'loading_officer',
+        timestamp: now,
+      },
+      ...prev,
+    ]);
   };
 
   return (
@@ -859,6 +1222,11 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         payoutBatches,
         complianceDocs,
         auditLogs,
+        invoices,
+        isOnline,
+        setIsOnline,
+        draftTrips,
+        syncOfflineDrafts,
         activeSite,
         openTrips,
         closedTrips,
@@ -869,6 +1237,11 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         resolveTripException,
         createPayoutBatch,
         approvePayoutBatch,
+        createInvoice,
+        markInvoiceAsPaid,
+        cancelInvoice,
+        addTruck,
+        addDriver,
       }}
     >
       {children}

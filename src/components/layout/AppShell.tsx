@@ -14,10 +14,14 @@ import { TektwigLogo } from '../common/TektwigLogo';
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const {
     activeRole,
+    setActiveRole,
     activeSiteId,
     setActiveSiteId,
     sites,
     signOut,
+    isOnline,
+    draftTrips,
+    syncOfflineDrafts,
   } = useAppState();
 
   const roleMeta: Partial<Record<
@@ -50,7 +54,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     },
     finance_officer: {
       label: 'Finance Officer',
-      badge: 'FINANCE & PAYSTACK',
+      badge: 'FINANCE & COMMERCIAL INVOICING',
       color: '#6D28D9',
       bgTint: '#F5F3FF',
       borderColor: '#DDD6FE',
@@ -70,7 +74,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: '#FFFFFF' }}>
-      {/* Top Header Bar — Airtight, No Cross-Terminal Access */}
+      {/* Top Header Bar */}
       <header
         style={{
           backgroundColor: '#FFFFFF',
@@ -93,37 +97,70 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
             gap: '0.75rem',
           }}
         >
-          {/* Brand Logo & Active Terminal Badge */}
+          {/* Brand Logo & Role Selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
             <TektwigLogo height={42} />
             <div style={{ borderLeft: '1.5px solid var(--border-subtle)', paddingLeft: '0.65rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <h1 style={{ fontSize: '1.05rem', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)', lineHeight: 1 }}>
                 DredgeOps
               </h1>
-              <span
+
+              {/* Portal Role Switcher Dropdown */}
+              <select
+                className="form-select"
                 style={{
+                  minHeight: '28px',
+                  padding: '0.15rem 0.5rem',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
                   backgroundColor: currentRole.bgTint,
                   color: currentRole.color,
                   border: `1px solid ${currentRole.borderColor}`,
-                  fontSize: '0.65rem',
-                  fontWeight: 800,
-                  padding: '0.2rem 0.5rem',
                   borderRadius: 'var(--radius-sm)',
-                  letterSpacing: '0.04em',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.3rem',
+                  cursor: 'pointer',
                 }}
+                value={activeRole}
+                onChange={(e) => setActiveRole(e.target.value as UserRole)}
+                title="Switch between operational portals"
               >
-                {currentRole.icon}
-                {currentRole.badge}
-              </span>
+                <option value="loading_officer">Site Agent Terminal</option>
+                <option value="operations_manager">Operations Manager</option>
+                <option value="finance_officer">Finance & Commercial Invoicing</option>
+                <option value="admin">System Administration</option>
+              </select>
             </div>
           </div>
 
-          {/* Right Header Controls (Airtight: Station + Sign Out Only) */}
+          {/* Right Header Controls */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-            {/* Site Picker (For Site Agent / Operations station context) */}
+            {/* PWA / Network Status Pill */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600 }}>
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  backgroundColor: isOnline ? '#10B981' : '#EF4444',
+                  boxShadow: isOnline ? '0 0 6px rgba(16, 185, 129, 0.6)' : '0 0 6px rgba(239, 68, 68, 0.6)',
+                }}
+              />
+              <span style={{ color: isOnline ? '#059669' : '#DC2626' }}>
+                {isOnline ? 'Online' : `Offline (${draftTrips.length})`}
+              </span>
+
+              {draftTrips.length > 0 && isOnline && (
+                <button
+                  type="button"
+                  onClick={syncOfflineDrafts}
+                  className="btn btn-secondary"
+                  style={{ minHeight: '24px', padding: '0.1rem 0.4rem', fontSize: '0.68rem', color: '#B45309' }}
+                >
+                  Sync ({draftTrips.length})
+                </button>
+              )}
+            </div>
+
+            {/* Site Picker */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
               <MapPin size={14} color="var(--brand-primary)" />
               <select
@@ -195,10 +232,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
           }}
         >
           <span>
-            Tektwig DredgeOps — Sand Haulage Waybill & Revenue Assurance System • Frontend v1.0.0
+            Adams Sand Dredging Assurance System • Real-Time ANPR OCR & Financial Reconciliation
           </span>
           <span>
-            Active Role: <strong>{activeRole.replace('_', ' ').toUpperCase()}</strong> • Branch: <strong className="mono">faith</strong>
+            Active Role: <strong>{activeRole.replace('_', ' ').toUpperCase()}</strong> • Unified Engine: <strong style={{ color: '#059669' }}>Tesseract ANPR + Commercial Invoicing</strong>
           </span>
         </div>
       </footer>

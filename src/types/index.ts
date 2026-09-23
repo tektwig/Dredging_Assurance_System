@@ -48,6 +48,7 @@ export interface Driver {
   assigned_truck_id?: string;
   payment_profile_id?: string;
   bank_name?: string;
+  account_number?: string;
   account_number_last4?: string;
   paystack_recipient_code?: string;
 }
