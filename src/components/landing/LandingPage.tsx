@@ -5,6 +5,7 @@ import { SignInModal } from './SignInModal';
 import {
   Truck,
   Activity,
+  CreditCard,
   ShieldCheck,
   ArrowRight,
   LogIn,
@@ -72,6 +73,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onSignIn }) => {
       color: '#0369A1',
       bgTint: '#E0F2FE',
       borderColor: '#BAE6FD',
+    },
+    {
+      role: 'finance_officer',
+      title: 'Finance & Commercial Invoicing',
+      subtitle: 'Commercial Invoicing & Paystack Payouts',
+      description: 'Client invoicing, VAT reconciliation, driver bank disbursements & KYC verification.',
+      icon: <CreditCard size={22} />,
+      color: '#6D28D9',
+      bgTint: '#F5F3FF',
+      borderColor: '#DDD6FE',
     },
     {
       role: 'admin',

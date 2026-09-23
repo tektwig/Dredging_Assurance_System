@@ -19,6 +19,7 @@ import { INITIAL_INVOICES, INITIAL_PAYOUT_BATCHES } from '../services/mockData';
 interface AppStateContextType {
   // Authentication & Role
   isAuthenticated: boolean;
+  authenticatedRole: UserRole | null;
   signIn: (role: UserRole) => void;
   signOut: () => void;
 
@@ -508,18 +509,69 @@ const INITIAL_AUDIT_LOG: AuditLogEntry[] = [
 ];
 
 export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [activeRole, setActiveRole] = useState<UserRole>('loading_officer');
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('dredgeops_authenticated') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const [authenticatedRole, setAuthenticatedRole] = useState<UserRole | null>(() => {
+    try {
+      return (sessionStorage.getItem('dredgeops_auth_role') as UserRole) || null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [activeRole, setActiveRoleState] = useState<UserRole>(() => {
+    try {
+      return (sessionStorage.getItem('dredgeops_auth_role') as UserRole) || 'loading_officer';
+    } catch {
+      return 'loading_officer';
+    }
+  });
+
   const [activeSiteId, setActiveSiteId] = useState<string>('site-epe-01');
   const [activeTab, setActiveTab] = useState<string>('loading');
 
   const signIn = (role: UserRole) => {
-    setActiveRole(role);
+    setAuthenticatedRole(role);
+    setActiveRoleState(role);
     setIsAuthenticated(true);
+    try {
+      sessionStorage.setItem('dredgeops_auth_role', role);
+      sessionStorage.setItem('dredgeops_authenticated', 'true');
+    } catch {
+      // ignore
+    }
   };
 
   const signOut = () => {
+    setAuthenticatedRole(null);
     setIsAuthenticated(false);
+    try {
+      sessionStorage.removeItem('dredgeops_auth_role');
+      sessionStorage.removeItem('dredgeops_authenticated');
+    } catch {
+      // ignore
+    }
+  };
+
+  const setActiveRole = (role: UserRole) => {
+    if (!authenticatedRole) return;
+    const isSiteAgent =
+      (authenticatedRole === 'loading_officer' || authenticatedRole === 'offloading_officer') &&
+      (role === 'loading_officer' || role === 'offloading_officer');
+
+    if (role === authenticatedRole || isSiteAgent) {
+      setActiveRoleState(role);
+    } else {
+      console.warn(
+        `RBAC Violation: Cannot switch to unauthorized terminal "${role}". Current session is locked to "${authenticatedRole}".`
+      );
+    }
   };
 
   const [sites] = useState<Site[]>(INITIAL_SITES);
@@ -1207,6 +1259,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     <AppStateContext.Provider
       value={{
         isAuthenticated,
+        authenticatedRole,
         signIn,
         signOut,
         activeRole,

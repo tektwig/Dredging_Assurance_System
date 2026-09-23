@@ -8,13 +8,13 @@ import {
   ShieldAlert,
   MapPin,
   LogOut,
+  Lock,
 } from 'lucide-react';
 import { TektwigLogo } from '../common/TektwigLogo';
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const {
     activeRole,
-    setActiveRole,
     activeSiteId,
     setActiveSiteId,
     sites,
@@ -105,29 +105,48 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                 DredgeOps
               </h1>
 
-              {/* Portal Role Switcher Dropdown */}
-              <select
-                className="form-select"
+              {/* Authorized Terminal Badge (Locked to Signed-In Session) */}
+              <div
                 style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
                   minHeight: '28px',
-                  padding: '0.15rem 0.5rem',
-                  fontSize: '0.72rem',
+                  padding: '0.2rem 0.65rem',
+                  fontSize: '0.74rem',
                   fontWeight: 800,
                   backgroundColor: currentRole.bgTint,
                   color: currentRole.color,
                   border: `1px solid ${currentRole.borderColor}`,
                   borderRadius: 'var(--radius-sm)',
-                  cursor: 'pointer',
+                  letterSpacing: '-0.01em',
+                  userSelect: 'none',
                 }}
-                value={activeRole}
-                onChange={(e) => setActiveRole(e.target.value as UserRole)}
-                title="Switch between operational portals"
+                title={`Authorized Session: ${currentRole.label} Terminal (Locked). Sign out to switch terminals.`}
               >
-                <option value="loading_officer">Site Agent Terminal</option>
-                <option value="operations_manager">Operations Manager</option>
-                <option value="finance_officer">Finance & Commercial Invoicing</option>
-                <option value="admin">System Administration</option>
-              </select>
+                {currentRole.icon}
+                <span>{currentRole.label} Terminal</span>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    padding: '0.1rem 0.4rem',
+                    fontSize: '0.62rem',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                    backgroundColor: '#FFFFFF',
+                    borderRadius: '4px',
+                    border: `1px solid ${currentRole.borderColor}`,
+                    color: currentRole.color,
+                    marginLeft: '0.25rem',
+                  }}
+                >
+                  <Lock size={10} />
+                  <span>Authorized</span>
+                </span>
+              </div>
             </div>
           </div>
 
@@ -210,35 +229,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
       <main className="app-container" style={{ flex: 1, paddingTop: '0.85rem', paddingBottom: '2rem' }}>
         {children}
       </main>
-
-      {/* System Footer */}
-      <footer
-        style={{
-          borderTop: '1px solid var(--border-subtle)',
-          backgroundColor: '#FFFFFF',
-          padding: '1rem 0',
-          fontSize: '0.8125rem',
-          color: 'var(--text-muted)',
-        }}
-      >
-        <div
-          className="app-container"
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '0.5rem',
-          }}
-        >
-          <span>
-            Adams Sand Dredging Assurance System • Real-Time ANPR OCR & Financial Reconciliation
-          </span>
-          <span>
-            Active Role: <strong>{activeRole.replace('_', ' ').toUpperCase()}</strong> • Unified Engine: <strong style={{ color: '#059669' }}>Tesseract ANPR + Commercial Invoicing</strong>
-          </span>
-        </div>
-      </footer>
     </div>
   );
 };
