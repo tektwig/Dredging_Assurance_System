@@ -72,6 +72,10 @@ interface AppStateContextType {
       unit: QuantityUnit;
       scaleTicketUrl?: string;
       scaleTicketNumber?: string;
+      deliveryPlateImageUrl?: string;
+      deliveryConfirmedPlate?: string;
+      deliveryPlateConfidence?: number;
+      deliveryPlateCapturedAt?: string;
       notes?: string;
     }
   ) => { success: boolean; varianceAlert?: boolean; message?: string };
@@ -747,7 +751,17 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // Close offloading trip
   const closeOffloadingTrip: AppStateContextType['closeOffloadingTrip'] = (
     tripId,
-    { quantity, unit, scaleTicketUrl, scaleTicketNumber, notes }
+    {
+      quantity,
+      unit,
+      scaleTicketUrl,
+      scaleTicketNumber,
+      deliveryPlateImageUrl,
+      deliveryConfirmedPlate,
+      deliveryPlateConfidence,
+      deliveryPlateCapturedAt,
+      notes,
+    }
   ) => {
     const targetTrip = trips.find((t) => t.id === tripId);
     if (!targetTrip) return { success: false, message: 'Trip not found' };
@@ -767,6 +781,11 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       unit,
       scale_ticket_number: scaleTicketNumber || `WB-${Math.floor(1000 + Math.random() * 9000)}`,
       scale_ticket_url: scaleTicketUrl,
+      delivery_plate_image_url: deliveryPlateImageUrl,
+      delivery_extracted_plate: deliveryConfirmedPlate,
+      delivery_confirmed_plate: deliveryConfirmedPlate,
+      delivery_plate_confidence: deliveryPlateConfidence,
+      delivery_plate_captured_at: deliveryPlateCapturedAt,
       weighed_at: now,
       closed_by_name: 'Depot Scale Officer (Faith)',
       closed_by_id: 'usr-faith-02',
@@ -799,6 +818,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         quantity,
         unit,
         ticket: offloadingEvent.scale_ticket_number,
+        delivery_plate: deliveryConfirmedPlate,
+        delivery_plate_confidence: deliveryPlateConfidence,
       },
       reason: `Weighment verified at offloading gate: ${quantity} ${unit} delivered.`,
       actor_id: 'usr-faith-02',
