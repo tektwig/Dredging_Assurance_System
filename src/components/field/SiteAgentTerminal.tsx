@@ -872,25 +872,6 @@ export const SiteAgentTerminal: React.FC = () => {
           )}
         </div>
 
-        {/* Anti-Fraud Security Guarantee Banner */}
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.45rem',
-            padding: '0.35rem 0.85rem',
-            backgroundColor: '#FEF3C7',
-            border: '1px solid #FCD34D',
-            borderRadius: 'var(--radius-full)',
-            color: '#92400E',
-            fontSize: '0.74rem',
-            fontWeight: 700,
-          }}
-        >
-          <ShieldCheck size={14} color="#B45309" />
-          <span>Anti-Fraud Lock: Live Camera Capture Only • Pre-existing File Uploads Disabled</span>
-        </div>
-
         {cameraError && (
           <p style={{ fontSize: '0.75rem', color: '#DC2626', margin: 0 }}>
             {cameraError}
@@ -900,11 +881,11 @@ export const SiteAgentTerminal: React.FC = () => {
         <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0, maxWidth: '580px', lineHeight: 1.4 }}>
           {hasScanned ? (
             <>
-              Plate <strong style={{ color: '#0F172A' }}>{confirmedPlate}</strong> verified live ({confidenceScore}% confidence). Select <strong>Pickup (Gate 1 Dispatch)</strong> or <strong>Delivery (Gate 2 Weighbridge)</strong> below.
+              Plate <strong style={{ color: '#0F172A' }}>{confirmedPlate}</strong> verified ({confidenceScore}% confidence). Select <strong>Pickup (Gate 1 Dispatch)</strong> or <strong>Delivery (Gate 2 Weighbridge)</strong> below.
             </>
           ) : (
             <>
-              Live video or direct hardware camera snapshot is required at the gate. Pre-saved photo uploads are prohibited to prevent fraud and ensure audit integrity.
+              Stream live video feed or snap photo with device camera. Tesseract WebAssembly engine automatically extracts characters and cross-references master fleet records.
             </>
           )}
         </p>
