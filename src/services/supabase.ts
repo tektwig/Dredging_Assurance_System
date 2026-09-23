@@ -1,7 +1,9 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'http://localhost:54321';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'dummy_anon_key';
+// Public browser configuration for this project's hosted Supabase instance.
+// Environment variables still override these values for local development.
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://pidxlopbxlapfmakmtjt.supabase.co';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_s8NvM6ZPe-N6VdR4tQC7Vg_syJ-Ckb9';
 
 let client: SupabaseClient | null = null;
 let isConfigured = false;

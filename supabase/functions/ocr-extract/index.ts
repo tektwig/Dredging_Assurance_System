@@ -22,6 +22,48 @@ serve(async (req: Request) => {
       );
     }
 
+    // Prefer a purpose-built ALPR model. Unlike generic OCR, this detects the plate
+    // bounding box before decoding its characters and supports Nigeria (`ng`).
+    const plateRecognizerToken = Deno.env.get("PLATE_RECOGNIZER_API_TOKEN");
+    if (plateRecognizerToken && imageBase64) {
+      try {
+        const base64Payload = imageBase64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
+        const binary = Uint8Array.from(atob(base64Payload), (char) => char.charCodeAt(0));
+        const form = new FormData();
+        form.append("upload", new Blob([binary], { type: "image/jpeg" }), filename || "plate.jpg");
+        form.append("regions", "ng");
+
+        const alprResponse = await fetch("https://api.platerecognizer.com/v1/plate-reader/", {
+          method: "POST",
+          headers: { Authorization: `Token ${plateRecognizerToken}` },
+          body: form,
+        });
+        const alprData = await alprResponse.json();
+        if (!alprResponse.ok) {
+          throw new Error(alprData?.detail || `Plate Recognizer returned ${alprResponse.status}`);
+        }
+
+        const result = alprData?.results?.[0];
+        if (result?.plate) {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              extractedPlate: String(result.plate).toUpperCase(),
+              confidence: Math.round(Number(result.score || 0) * 1000) / 10,
+              rawText: String(result.plate).toUpperCase(),
+              candidates: result.candidates || [],
+              boundingBox: result.box || null,
+              source: "plate_recognizer",
+              processedAt: new Date().toISOString(),
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      } catch (alprError) {
+        console.warn("Plate Recognizer failed, trying generic cloud OCR:", alprError);
+      }
+    }
+
     // If Google Cloud Vision API key is configured, invoke real vision API
     const visionApiKey = Deno.env.get("GOOGLE_CLOUD_VISION_API_KEY");
     if (visionApiKey && imageBase64) {
