@@ -10,7 +10,6 @@ import {
   ArrowRight,
   ShieldCheck,
   RotateCcw,
-  Sparkles,
   Clock,
   FileText,
   AlertTriangle,
@@ -18,8 +17,6 @@ import {
   Video,
   VideoOff,
   SwitchCamera,
-  Zap,
-  Layers,
   User,
   Users,
   UserPlus,
@@ -29,6 +26,7 @@ import {
   Phone,
   Building,
 } from 'lucide-react';
+import { SiteAgentModeSheet } from './SiteAgentModeSheet';
 import { QuantityUnit, ExceptionType } from '../../types';
 import { recognizeLicensePlate, OCRProgress } from '../../services/ocrService';
 
@@ -88,7 +86,6 @@ export const SiteAgentTerminal: React.FC = () => {
   const [hasScanned, setHasScanned] = useState(false);
 
   // 1. Camera & Scan State
-  const [candidatePlate, setCandidatePlate] = useState('KJA-482XY');
   const [confirmedPlate, setConfirmedPlate] = useState('KJA-482XY');
   const [confidenceScore, setConfidenceScore] = useState(97.6);
   const [selectedTruckId, setSelectedTruckId] = useState('trk-1');
@@ -99,11 +96,7 @@ export const SiteAgentTerminal: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [ocrStatus, setOcrStatus] = useState('Ready for capture');
   const [ocrProgress, setOcrProgress] = useState(0);
-  const [ocrMatchType, setOcrMatchType] = useState<'EXACT_FLEET' | 'FUZZY_FLEET' | 'SYNTACTIC_VALID' | 'FALLBACK' | null>('EXACT_FLEET');
-  const [preprocessedImageUrl, setPreprocessedImageUrl] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'warning' } | null>(null);
-
-  // Live Camera State
   const [isLiveCameraActive, setIsLiveCameraActive] = useState(false);
   const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -135,35 +128,58 @@ export const SiteAgentTerminal: React.FC = () => {
   const [quickDriverAccountNumber, setQuickDriverAccountNumber] = useState('');
   const [quickDriverLicense, setQuickDriverLicense] = useState('');
 
-  // Cleanup camera stream on unmount
+  // Cleanup camera resources and preview URL on unmount.
   useEffect(() => {
     return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-      }
+      streamRef.current?.getTracks().forEach((track) => track.stop());
       if (previewObjectUrlRef.current) {
         URL.revokeObjectURL(previewObjectUrlRef.current);
       }
     };
   }, []);
 
-  // getUserMedia resolves before the conditional <video> is mounted. Attach the
-  // stream after React has rendered it; otherwise the first launch stays blank
-  // and only starts after a camera flip causes another request.
+  // The video element mounts after getUserMedia resolves, so attach the saved
+  // stream after React renders the live viewfinder.
   useEffect(() => {
     const video = videoRef.current;
     const stream = streamRef.current;
     if (!isLiveCameraActive || !video || !stream) return;
 
     video.srcObject = stream;
-    video.play().catch((err) => {
-      console.warn('Camera preview playback failed:', err);
-      setCameraError('The camera opened but the preview could not start. Tap Retake Camera to try again.');
+    void video.play().catch(() => {
+      setCameraError('The camera opened, but the preview could not start. Close it and try again.');
     });
   }, [isLiveCameraActive]);
 
   // 3. Movement Type State: 'pickup' vs 'delivery'
-  const [movementType, setMovementType] = useState<'pickup' | 'delivery'>('pickup');
+  const [movementType, setMovementType] = useState<'pickup' | 'delivery'>(() => {
+    try {
+      const saved = sessionStorage.getItem('dredgeops_siteagent_mode');
+      return saved === 'delivery' ? 'delivery' : 'pickup';
+    } catch {
+      return 'pickup';
+    }
+  });
+
+  const [isModeSheetOpen, setIsModeSheetOpen] = useState<boolean>(() => {
+    try {
+      // Check if user has explicitly picked their initial shift mode in this session
+      return !sessionStorage.getItem('dredgeops_siteagent_mode_selected');
+    } catch {
+      return true;
+    }
+  });
+
+  const handleSelectTerminalMode = (mode: 'pickup' | 'delivery') => {
+    setMovementType(mode);
+    setIsModeSheetOpen(false);
+    try {
+      sessionStorage.setItem('dredgeops_siteagent_mode', mode);
+      sessionStorage.setItem('dredgeops_siteagent_mode_selected', 'true');
+    } catch {
+      // ignore
+    }
+  };
 
   // 4. Pickup Specific Form State
   const [destinationSiteId, setDestinationSiteId] = useState('site-lkk-01');
@@ -207,25 +223,37 @@ export const SiteAgentTerminal: React.FC = () => {
   const deliveryPlateMatchesTrip = !!deliveryPlateEvidence && !!matchingOpenTrip &&
     normalizePlate(deliveryPlateEvidence.plate) === normalizePlate(expectedDeliveryPlate);
 
-  // Live Camera Controls
-  const startLiveCamera = async (mode: 'environment' | 'user' = cameraFacingMode) => {
-    const requestId = ++cameraRequestIdRef.current;
-    setIsCameraStarting(true);
+  const stopLiveCamera = () => {
+    cameraRequestIdRef.current += 1;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
     setIsCameraReady(false);
+    setIsCameraStarting(false);
+    setIsLiveCameraActive(false);
+  };
+
+  const startLiveCamera = async (
+    purpose: 'general' | 'delivery' = movementType === 'delivery' ? 'delivery' : 'general',
+    facing: 'environment' | 'user' = cameraFacingMode
+  ) => {
+    const requestId = ++cameraRequestIdRef.current;
+    capturePurposeRef.current = purpose;
     setCameraError(null);
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
+    setIsCameraReady(false);
+    setIsCameraStarting(true);
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error('Camera access requires a supported browser over HTTPS.');
       }
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: mode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          facingMode: facing,
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
         },
         audio: false,
       });
@@ -234,21 +262,13 @@ export const SiteAgentTerminal: React.FC = () => {
         return;
       }
       streamRef.current = stream;
-      setCameraFacingMode(mode);
+      setCameraFacingMode(facing);
       setIsLiveCameraActive(true);
-      // On camera flips the video is already mounted, so replace its stream now.
-      // First launch is handled by the effect after the conditional video mounts.
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        void videoRef.current.play().catch((playError) => {
-          console.warn('Camera preview playback failed after switching:', playError);
-        });
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       setCameraError(
         /NotAllowed|Permission/i.test(message)
-          ? 'Camera permission is blocked. Allow camera access in the browser, then tap Retake Camera.'
+          ? 'Camera permission is blocked. Allow camera access in the browser, then try again.'
           : `Camera could not start: ${message}`
       );
       setIsLiveCameraActive(false);
@@ -257,105 +277,63 @@ export const SiteAgentTerminal: React.FC = () => {
     }
   };
 
-  const stopLiveCamera = () => {
-    cameraRequestIdRef.current += 1;
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setIsCameraReady(false);
-    setIsLiveCameraActive(false);
-  };
-
-  const toggleCameraFacingMode = () => {
-    const nextMode = cameraFacingMode === 'environment' ? 'user' : 'environment';
-    setCameraFacingMode(nextMode);
-    if (isLiveCameraActive) {
-      startLiveCamera(nextMode);
-    }
-  };
-
-  const snapPhotoFromLiveFeed = () => {
-    if (!videoRef.current || !isCameraReady) {
-      setCameraError('Camera is still starting. Wait for the live preview, then capture again.');
-      return;
-    }
-    const video = videoRef.current;
-    const vw = video.videoWidth || 640;
-    const vh = video.videoHeight || 480;
-
-    const canvas = document.createElement('canvas');
-    canvas.width = vw;
-    canvas.height = vh;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Preserve the complete camera frame as evidence. The OCR service performs
-    // its own plate-region preprocessing without discarding the original photo.
-    ctx.drawImage(video, 0, 0, vw, vh);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-    stopLiveCamera();
-    runPlateOCR(dataUrl);
-  };
-
-  const openWebsiteCamera = (purpose: 'general' | 'delivery' = movementType === 'delivery' ? 'delivery' : 'general') => {
-    capturePurposeRef.current = purpose;
-    setCameraError(null);
-    void startLiveCamera('environment');
-  };
-
-  const openDeviceCamera = (purpose: 'general' | 'delivery' = movementType === 'delivery' ? 'delivery' : 'general') => {
+  const openDeviceCamera = (
+    purpose: 'general' | 'delivery' = movementType === 'delivery' ? 'delivery' : 'general'
+  ) => {
     capturePurposeRef.current = purpose;
     stopLiveCamera();
     setCameraError(null);
     if (cameraInputRef.current) {
-      // Clearing the value lets the same newly-captured filename be selected again.
       cameraInputRef.current.value = '';
       cameraInputRef.current.click();
     }
   };
 
+  const switchWebsiteCamera = () => {
+    const facing = cameraFacingMode === 'environment' ? 'user' : 'environment';
+    void startLiveCamera(capturePurposeRef.current, facing);
+  };
+
+  const captureFullWebsiteFrame = () => {
+    const video = videoRef.current;
+    if (!video || !isCameraReady) {
+      setCameraError('Wait for the live preview to finish starting, then take the photo.');
+      return;
+    }
+
+    const width = video.videoWidth || 1280;
+    const height = video.videoHeight || 720;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+
+    // Retain the complete camera frame. OCR may preprocess a copy internally,
+    // while the full original remains the evidence photo and preview.
+    context.drawImage(video, 0, 0, width, height);
+    const image = canvas.toDataURL('image/jpeg', 0.95);
+    stopLiveCamera();
+    void runPlateOCR(image);
+  };
+
+  const retakePlatePhoto = () => {
+    capturePurposeRef.current = movementType === 'delivery' ? 'delivery' : 'general';
+    setHasScanned(false);
+    setIsScanning(false);
+    setOcrProgress(0);
+    setOcrStatus('Ready for capture');
+    setIsUnregisteredModalOpen(false);
+    openDeviceCamera();
+  };
+
   const captureDeliveryPlate = () => {
     capturePurposeRef.current = 'delivery';
     setDeliveryPlateEvidence(null);
-    stopLiveCamera();
     setHasScanned(false);
-    setCameraError(null);
-    openWebsiteCamera('delivery');
-  };
-
-  // Realistic Nigerian plate canvas generator for instant local testing
-  const createPlateCanvas = (plateNumber: string): string => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 440;
-    canvas.height = 150;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return '';
-    // Commercial yellow
-    ctx.fillStyle = '#FED766';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    // Dark border
-    ctx.strokeStyle = '#0F172A';
-    ctx.lineWidth = 8;
-    ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
-    // Top banner
-    ctx.fillStyle = '#065F46';
-    ctx.font = 'bold 16px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('FEDERAL REPUBLIC OF NIGERIA', canvas.width / 2, 28);
-    // Plate number
-    ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 44px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(plateNumber, canvas.width / 2, 90);
-    // Bottom LGA
-    ctx.fillStyle = '#B45309';
-    ctx.font = 'bold 13px sans-serif';
-    ctx.fillText('LAGOS STATE • COMMERCIAL HAULAGE', canvas.width / 2, 130);
-    return canvas.toDataURL('image/jpeg', 0.95);
+    setOcrProgress(0);
+    setOcrStatus('Ready for capture');
+    void startLiveCamera('delivery', 'environment');
   };
 
   // Real Tesseract OCR recognition pipeline
@@ -379,13 +357,8 @@ export const SiteAgentTerminal: React.FC = () => {
         setOcrProgress(p.progress);
       });
 
-      setCandidatePlate(result.candidatePlate);
       setConfirmedPlate(result.candidatePlate);
       setConfidenceScore(result.confidence);
-      setOcrMatchType(result.matchType);
-      if (result.preprocessedImageUrl) {
-        setPreprocessedImageUrl(result.preprocessedImageUrl);
-      }
 
       if (capturePurposeRef.current === 'delivery' || movementType === 'delivery') {
         setDeliveryPlateEvidence({
@@ -417,7 +390,7 @@ export const SiteAgentTerminal: React.FC = () => {
       }
 
       setToastMessage({
-        text: `Plate [${result.candidatePlate}] recognized! Match type: ${result.matchType} (${result.confidence}% confidence).`,
+        text: `Plate [${result.candidatePlate}] recognized (${result.confidence}% confidence).`,
         type: 'success',
       });
       setTimeout(() => setToastMessage(null), 5000);
@@ -440,39 +413,6 @@ export const SiteAgentTerminal: React.FC = () => {
     if (!file) return;
     runPlateOCR(file);
     e.target.value = '';
-  };
-
-  // Simulation handler when scanning different trucks (for testing)
-  const handleScanPreset = (plate: string, truckId: string, driverId: string, isUnregistered = false) => {
-    const dataUrl = createPlateCanvas(plate);
-    if (!isUnregistered) {
-      setSelectedTruckId(truckId);
-      setSelectedDriverId(driverId);
-      setIsUnregisteredModalOpen(false);
-    } else {
-      setSelectedTruckId('');
-      setSelectedDriverId('');
-      setNewTruckPlate(plate);
-    }
-    runPlateOCR(dataUrl);
-  };
-
-  const handleManualPlateEdit = (newPlate: string) => {
-    setConfirmedPlate(newPlate);
-    const normalized = newPlate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-    const matchedTruck = trucks.find((t) => t.normalized_registration === normalized);
-    if (matchedTruck) {
-      setSelectedTruckId(matchedTruck.id);
-      setEstimatedTonnes(matchedTruck.capacity_tonnes || matchedTruck.capacity || 30);
-      setDeliveredTonnes(matchedTruck.capacity_tonnes || matchedTruck.capacity || 30);
-      const matchedDriver = drivers.find((d) => d.assigned_truck_id === matchedTruck.id) || drivers[0];
-      if (matchedDriver) setSelectedDriverId(matchedDriver.id);
-      setIsUnregisteredModalOpen(false);
-    } else {
-      setSelectedTruckId('');
-      setSelectedDriverId('');
-      setNewTruckPlate(newPlate);
-    }
   };
 
   // Register Unregistered Truck and its Driver
@@ -531,7 +471,6 @@ export const SiteAgentTerminal: React.FC = () => {
     setSelectedTruckId(truckRes.truck.id);
     setSelectedDriverId(driverRes.driver.id);
     setConfirmedPlate(cleanPlate);
-    setCandidatePlate(cleanPlate);
     setEstimatedTonnes(Number(newTruckCapacity) || 30);
     setDeliveredTonnes(Number(newTruckCapacity) || 30);
     setIsUnregisteredModalOpen(false);
@@ -771,7 +710,27 @@ export const SiteAgentTerminal: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {/* Locked Assigned Mode Post Badge */}
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              padding: '0.35rem 0.75rem',
+              fontSize: '0.78rem',
+              fontWeight: 800,
+              borderRadius: 'var(--radius-full)',
+              backgroundColor: movementType === 'pickup' ? '#FEF3C7' : '#E0F2FE',
+              color: movementType === 'pickup' ? '#B45309' : '#0369A1',
+              border: `1.5px solid ${movementType === 'pickup' ? '#FCD34D' : '#BAE6FD'}`,
+              minHeight: '32px',
+            }}
+          >
+            {movementType === 'pickup' ? <TruckIcon size={14} /> : <Scale size={14} />}
+            <span>Assigned Post: {movementType === 'pickup' ? 'Gate 1 (Pickup)' : 'Gate 2 (Delivery)'}</span>
+          </div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8125rem' }}>
             <Clock size={14} color="var(--text-muted)" />
             <span style={{ color: 'var(--text-muted)' }}>Active Queue:</span>
@@ -806,7 +765,7 @@ export const SiteAgentTerminal: React.FC = () => {
         </div>
       )}
 
-      {/* Native device-camera input. Mobile browsers open the operating system camera. */}
+      {/* Native device-camera input. Mobile browsers open the operating-system camera. */}
       <input
         ref={cameraInputRef}
         type="file"
@@ -817,166 +776,48 @@ export const SiteAgentTerminal: React.FC = () => {
         aria-label="Take a full truck photo with the device camera"
       />
 
-      {/* TOP SCAN LAUNCHER CARD */}
-      <div
-        className="card"
-        style={{
-          padding: '1.25rem 1rem',
-          backgroundColor: '#FFFFFF',
-          border: '2px solid #F59E0B',
-          borderRadius: 'var(--radius-xl)',
-          boxShadow: 'var(--shadow-md)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          textAlign: 'center',
-          gap: '0.75rem',
-          background: 'linear-gradient(180deg, #FFFDF5 0%, #FFFFFF 100%)',
-        }}
-      >
-        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center', width: '100%', maxWidth: '640px' }}>
-          {/* Action 1: camera embedded inside the website */}
-          {!isLiveCameraActive ? (
-            <button
-              type="button"
-              onClick={() => openWebsiteCamera()}
-              disabled={isCameraStarting || isScanning}
-              style={{
-                flex: 1,
-                minWidth: '220px',
-                minHeight: '56px',
-                padding: '0.75rem 1.25rem',
-                backgroundColor: '#B45309',
-                color: '#FFFFFF',
-                borderRadius: 'var(--radius-lg)',
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.75rem',
-                cursor: 'pointer',
-                fontSize: '1rem',
-                fontWeight: 800,
-                boxShadow: '0 4px 14px rgba(180, 83, 9, 0.35)',
-                transition: 'all 0.15s ease',
-              }}
-              title="Open the camera inside this website"
-            >
-              <Video size={20} />
-              <span>{isCameraStarting ? 'Opening Website Camera...' : 'Open Camera on Website'}</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={stopLiveCamera}
-              style={{
-                flex: 1,
-                minWidth: '220px',
-                minHeight: '56px',
-                padding: '0.75rem 1.25rem',
-                backgroundColor: '#DC2626',
-                color: '#FFFFFF',
-                borderRadius: 'var(--radius-lg)',
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.75rem',
-                cursor: 'pointer',
-                fontSize: '1rem',
-                fontWeight: 800,
-              }}
-            >
-              <VideoOff size={20} />
-              <span>Close Live Camera</span>
-            </button>
-          )}
-
-          {/* Action 2: operating-system camera app, returning the full photo */}
-          <button
-            type="button"
-            onClick={() => openDeviceCamera()}
-            disabled={isScanning || isCameraStarting}
-            style={{
-              flex: 1,
-              minWidth: '200px',
-              minHeight: '56px',
-              padding: '0.75rem 1.25rem',
-              backgroundColor: '#FFFFFF',
-              color: '#0F172A',
-              borderRadius: 'var(--radius-lg)',
-              border: '1.5px solid var(--border-medium)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.65rem',
-              cursor: isScanning || isCameraStarting ? 'not-allowed' : 'pointer',
-              opacity: isScanning || isCameraStarting ? 0.65 : 1,
-              fontSize: '0.95rem',
-              fontWeight: 700,
-              boxShadow: 'var(--shadow-xs)',
-            }}
-            title="Open the device camera app and use the complete photo"
-          >
-            <Camera size={19} color="#B45309" />
-            <span>Take Photo with Device Camera</span>
-          </button>
-        </div>
-
-        {/* Anti-Fraud Security Guarantee Banner */}
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.45rem',
-            padding: '0.35rem 0.85rem',
-            backgroundColor: '#FEF3C7',
-            border: '1px solid #FCD34D',
-            borderRadius: 'var(--radius-full)',
-            color: '#92400E',
-            fontSize: '0.74rem',
-            fontWeight: 700,
-          }}
-        >
-          <ShieldCheck size={14} color="#B45309" />
-          <span>Two secure options: website camera or device camera • Complete photo retained</span>
-        </div>
-
-        {cameraError && (
-          <p style={{ fontSize: '0.75rem', color: '#DC2626', margin: 0 }}>
-            {cameraError}
-          </p>
-        )}
-
-        <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0, maxWidth: '580px', lineHeight: 1.4 }}>
-          {hasScanned ? (
-            <>
-              Plate <strong style={{ color: '#0F172A' }}>{confirmedPlate}</strong> verified live ({confidenceScore}% confidence). Select <strong>Pickup (Gate 1 Dispatch)</strong> or <strong>Delivery (Gate 2 Weighbridge)</strong> below.
-            </>
-          ) : (
-            <>
-              Choose <strong>Open Camera on Website</strong> for an in-page preview, or <strong>Take Photo with Device Camera</strong> to use the phone's camera app. Both options retain the complete image.
-            </>
-          )}
-        </p>
-      </div>
-
       {/* Main Two-Column Terminal Layout */}
       <div className="field-two-col">
         {/* Left Column: Camera Viewfinder & OCR Extraction */}
         <div className="card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
               <Camera size={18} color="#B45309" />
-              1. Real-Time ANPR Plate Recognition
+              <span>Plate Scanner</span>
             </h3>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--brand-primary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-              <Sparkles size={13} />
-              {isScanning ? 'OCR Processing...' : hasScanned ? 'ANPR Verified' : 'Engine Ready'}
-            </span>
+
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => void startLiveCamera()}
+                className="btn btn-primary"
+                disabled={isCameraStarting || isScanning}
+                style={{ minHeight: '38px', fontSize: '0.8rem', fontWeight: 700 }}
+                title="Open the camera inside this website"
+              >
+                <Video size={16} />
+                <span>{isCameraStarting ? 'Opening...' : 'Website Camera'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => openDeviceCamera()}
+                className="btn btn-secondary"
+                disabled={isCameraStarting || isScanning}
+                style={{ minHeight: '38px', fontSize: '0.8rem', fontWeight: 700 }}
+                title="Open the device camera app and use the complete photo"
+              >
+                <Camera size={16} />
+                <span>Device Camera</span>
+              </button>
+            </div>
           </div>
 
-          {/* Live Camera Viewfinder or Static Snapshot Viewfinder */}
+          {cameraError && (
+            <div style={{ padding: '0.65rem 0.8rem', borderRadius: 'var(--radius-md)', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', fontSize: '0.75rem' }}>
+              {cameraError}
+            </div>
+          )}
+
           {isLiveCameraActive ? (
             <div className="camera-viewfinder-box">
               <video
@@ -989,130 +830,87 @@ export const SiteAgentTerminal: React.FC = () => {
               />
               <div className="camera-reticle-overlay">
                 <div className="camera-scanline-laser" />
-                <span className="camera-reticle-label">ALIGN NIGERIAN PLATE</span>
+                <span className="camera-reticle-label">ALIGN PLATE — FULL FRAME SAVED</span>
               </div>
-              <div className="camera-live-pill">
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10B981', display: 'inline-block' }} />
-                LIVE STREAM
-              </div>
-
-              {/* Live Controls Overlay */}
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: '12px',
-                  left: '12px',
-                  right: '12px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  zIndex: 10,
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={toggleCameraFacingMode}
-                  className="btn btn-secondary"
-                  style={{
-                    backgroundColor: 'rgba(15, 23, 42, 0.85)',
-                    color: '#FFFFFF',
-                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                    fontSize: '0.75rem',
-                    padding: '0.35rem 0.65rem',
-                  }}
-                >
-                  <SwitchCamera size={14} /> Flip ({cameraFacingMode})
+              <div className="camera-live-pill">LIVE WEBSITE CAMERA</div>
+              <div style={{ position: 'absolute', zIndex: 10, left: 10, right: 10, bottom: 10, display: 'flex', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn-secondary" onClick={switchWebsiteCamera} style={{ backgroundColor: 'rgba(15, 23, 42, 0.88)', color: '#FFFFFF' }}>
+                  <SwitchCamera size={14} /> Flip
                 </button>
-
-                <button
-                  type="button"
-                  onClick={snapPhotoFromLiveFeed}
-                  disabled={!isCameraReady}
-                  style={{
-                    backgroundColor: isCameraReady ? '#F59E0B' : '#94A3B8',
-                    color: '#0F172A',
-                    border: 'none',
-                    borderRadius: 'var(--radius-full)',
-                    padding: '0.5rem 1.25rem',
-                    fontWeight: 800,
-                    fontSize: '0.85rem',
-                    cursor: isCameraReady ? 'pointer' : 'wait',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    boxShadow: '0 4px 12px rgba(245, 158, 11, 0.4)',
-                  }}
-                >
-                  <Zap size={16} /> {isCameraReady ? 'Snap & Analyze Plate' : 'Starting Preview...'}
+                <button type="button" className="btn btn-primary" onClick={captureFullWebsiteFrame} disabled={!isCameraReady}>
+                  <Camera size={16} /> {isCameraReady ? 'Take Full Photo' : 'Starting...'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={stopLiveCamera} style={{ backgroundColor: 'rgba(15, 23, 42, 0.88)', color: '#FFFFFF' }}>
+                  <VideoOff size={14} /> Close
                 </button>
               </div>
             </div>
           ) : (
-            <div className="viewfinder" style={{ position: 'relative', overflow: 'hidden' }}>
-              <img
-                src={photoUrl}
-                alt="Truck Plate Scan"
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: hasScanned ? 'contain' : 'cover',
-                  filter: isScanning ? 'blur(3px)' : !hasScanned ? 'brightness(0.65)' : 'none',
-                  transition: 'all 0.3s ease',
-                }}
-              />
-              <div className="viewfinder-target">
-                {isScanning && <div className="viewfinder-scanline" />}
-              </div>
+          <div className="viewfinder" style={{ position: 'relative', overflow: 'hidden' }}>
+            <img
+              src={photoUrl}
+              alt="Truck Plate Scan"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: hasScanned ? 'contain' : 'cover',
+                backgroundColor: '#0F172A',
+                filter: isScanning ? 'blur(3px)' : !hasScanned ? 'brightness(0.65)' : 'none',
+                transition: 'all 0.3s ease',
+              }}
+            />
+            <div className="viewfinder-target">
+              {isScanning && <div className="viewfinder-scanline" />}
+            </div>
 
-              {!hasScanned && !isScanning && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '0.5rem',
-                    backgroundColor: 'rgba(15, 23, 42, 0.45)',
-                    color: '#FFFFFF',
-                    padding: '1rem',
-                    textAlign: 'center',
-                  }}
-                >
-                  <Camera size={32} color="#FCD34D" />
-                  <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
-                    Camera Standby
-                  </span>
-                  <span style={{ fontSize: '0.75rem', opacity: 0.85 }}>
-                    Choose either camera option above
-                  </span>
-                </div>
-              )}
-
+            {!hasScanned && !isScanning && (
               <div
                 style={{
                   position: 'absolute',
-                  bottom: '10px',
-                  left: '10px',
-                  right: '10px',
-                  backgroundColor: 'rgba(15, 23, 42, 0.85)',
-                  padding: '0.4rem 0.75rem',
-                  borderRadius: 'var(--radius-sm)',
+                  inset: 0,
                   display: 'flex',
-                  justifyContent: 'space-between',
+                  flexDirection: 'column',
                   alignItems: 'center',
-                  fontSize: '0.75rem',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  backgroundColor: 'rgba(15, 23, 42, 0.45)',
                   color: '#FFFFFF',
+                  padding: '1rem',
+                  textAlign: 'center',
                 }}
               >
-                <span>{isScanning ? ocrStatus : hasScanned ? 'HD Snapshot Recorded' : 'Ready for plate analysis'}</span>
-                <span style={{ color: '#38BDF8', fontWeight: 700 }}>
-                  {hasScanned ? `${confidenceScore}% Confidence` : 'Standby'}
+                <Camera size={34} color="#FCD34D" />
+                <span style={{ fontSize: '0.875rem', fontWeight: 700 }}>
+                  Camera Ready
+                </span>
+                <span style={{ fontSize: '0.75rem', opacity: 0.85 }}>
+                  Choose Website Camera or Device Camera above
                 </span>
               </div>
+            )}
+
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '10px',
+                left: '10px',
+                right: '10px',
+                backgroundColor: 'rgba(15, 23, 42, 0.85)',
+                padding: '0.4rem 0.75rem',
+                borderRadius: 'var(--radius-sm)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontSize: '0.75rem',
+                color: '#FFFFFF',
+              }}
+            >
+              <span>{isScanning ? ocrStatus : hasScanned ? 'HD Snapshot Recorded' : 'Ready for plate analysis'}</span>
+              <span style={{ color: '#38BDF8', fontWeight: 700 }}>
+                {hasScanned ? `${confidenceScore}% Confidence` : 'Standby'}
+              </span>
             </div>
+          </div>
           )}
 
           {/* OCR Progress Bar Indicator */}
@@ -1154,184 +952,47 @@ export const SiteAgentTerminal: React.FC = () => {
             </div>
           )}
 
-          {/* Match Verification & Recognition Pills */}
+          {/* Plate Capture Confirmation Banner */}
           {hasScanned && (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                {ocrMatchType === 'EXACT_FLEET' && (
-                  <span
-                    style={{
-                      fontSize: '0.7rem',
-                      fontWeight: 800,
-                      backgroundColor: '#D1FAE5',
-                      color: '#065F46',
-                      border: '1px solid #6EE7B7',
-                      padding: '0.2rem 0.5rem',
-                      borderRadius: 'var(--radius-sm)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.3rem',
-                    }}
-                  >
-                    <CheckCircle2 size={12} /> MASTER FLEET MATCH (BR-01)
-                  </span>
-                )}
-                {ocrMatchType === 'FUZZY_FLEET' && (
-                  <span
-                    style={{
-                      fontSize: '0.7rem',
-                      fontWeight: 800,
-                      backgroundColor: '#FEF3C7',
-                      color: '#B45309',
-                      border: '1px solid #FCD34D',
-                      padding: '0.2rem 0.5rem',
-                      borderRadius: 'var(--radius-sm)',
-                    }}
-                  >
-                    FUZZY FLEET MATCH (LEVENSHTEIN)
-                  </span>
-                )}
-                {ocrMatchType === 'SYNTACTIC_VALID' && (
-                  <span
-                    style={{
-                      fontSize: '0.7rem',
-                      fontWeight: 800,
-                      backgroundColor: '#FEE2E2',
-                      color: '#991B1B',
-                      border: '1px solid #FCA5A5',
-                      padding: '0.2rem 0.5rem',
-                      borderRadius: 'var(--radius-sm)',
-                    }}
-                  >
-                    UNREGISTERED NIGERIAN VEHICLE (EXCEPTION BR-01)
-                  </span>
-                )}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.5rem 0.75rem',
+                backgroundColor: '#F8FAFC',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                fontSize: '0.75rem',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#047857', fontWeight: 700 }}>
+                <CheckCircle2 size={14} />
+                <span>Plate Scanned ({confidenceScore}% Confidence)</span>
               </div>
-
-              {preprocessedImageUrl && (
-                <span
-                  style={{
-                    fontSize: '0.7rem',
-                    color: 'var(--text-muted)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.3rem',
-                  }}
-                  title="Image preprocessed with pixel contrast curve boost"
-                >
-                  <Layers size={12} /> Contrast Preprocessed (75%)
-                </span>
-              )}
+              <button
+                type="button"
+                onClick={retakePlatePhoto}
+                disabled={isScanning}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.25rem',
+                }}
+              >
+                <RotateCcw size={12} />
+                <span>Retake</span>
+              </button>
             </div>
           )}
 
-          {/* Nigerian Test Plates (Canvas Rendered Real Tesseract OCR Verification) */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-              <label
-                style={{
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  color: 'var(--text-muted)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em',
-                }}
-              >
-                Instant ANPR OCR Plate Verification:
-              </label>
-              <span style={{ fontSize: '0.68rem', color: '#0284C7', fontWeight: 600 }}>
-                Executes Real Tesseract
-              </span>
-            </div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-                gap: '0.45rem',
-              }}
-            >
-              {[
-                {
-                  plate: 'KJA-482XY',
-                  truckId: 'trk-1',
-                  driverId: 'drv-1',
-                  label: 'Mack Granite (30T)',
-                  isUnregistered: false,
-                },
-                {
-                  plate: 'APP-914AA',
-                  truckId: 'trk-2',
-                  driverId: 'drv-2',
-                  label: 'Sino Dump (35T)',
-                  isUnregistered: false,
-                },
-                {
-                  plate: 'EPE-303ZZ',
-                  truckId: 'trk-3',
-                  driverId: 'drv-3',
-                  label: 'Actros (28T)',
-                  isUnregistered: false,
-                },
-                {
-                  plate: 'BDG-708BB',
-                  truckId: 'trk-4',
-                  driverId: 'drv-4',
-                  label: 'HOWO (32T)',
-                  isUnregistered: false,
-                },
-                {
-                  plate: 'IKD-882ZX',
-                  truckId: '',
-                  driverId: '',
-                  label: 'Unregistered Truck',
-                  isUnregistered: true,
-                },
-              ].map((p) => (
-                <button
-                  key={p.plate}
-                  type="button"
-                  onClick={() => handleScanPreset(p.plate, p.truckId, p.driverId, p.isUnregistered)}
-                  disabled={isScanning}
-                  style={{
-                    padding: '0.45rem 0.55rem',
-                    borderRadius: 'var(--radius-md)',
-                    border: confirmedPlate === p.plate
-                      ? '2px solid #B45309'
-                      : p.isUnregistered
-                      ? '1.5px dashed #EF4444'
-                      : '1px solid var(--border-subtle)',
-                    backgroundColor: confirmedPlate === p.plate
-                      ? '#FEF3C7'
-                      : p.isUnregistered
-                      ? '#FEF2F2'
-                      : '#FFFFFF',
-                    cursor: isScanning ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'flex-start',
-                    textAlign: 'left',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                    <strong style={{ fontSize: '0.78rem', color: confirmedPlate === p.plate ? '#B45309' : p.isUnregistered ? '#DC2626' : '#0F172A' }}>
-                      {p.plate}
-                    </strong>
-                    {p.isUnregistered && (
-                      <span style={{ fontSize: '0.55rem', fontWeight: 800, color: '#DC2626', backgroundColor: '#FEE2E2', padding: '0.05rem 0.25rem', borderRadius: '3px' }}>
-                        NEW
-                      </span>
-                    )}
-                  </div>
-                  <span style={{ fontSize: '0.65rem', color: p.isUnregistered ? '#B91C1C' : 'var(--text-muted)' }}>
-                    {p.label}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* OCR Result & Confirmed Registration */}
+          {/* Read-Only Verified Plate Display (Anti-Fraud Lock) */}
           <div
             style={{
               padding: '0.85rem 1rem',
@@ -1340,40 +1001,21 @@ export const SiteAgentTerminal: React.FC = () => {
               border: '1px solid var(--border-subtle)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '0.5rem',
+              gap: '0.6rem',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>
                 IDENTIFIED PLATE:
               </span>
-              <PlateDisplay plate={confirmedPlate} size="md" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', color: '#047857', fontWeight: 700 }}>
+                <ShieldCheck size={13} color="#059669" />
+                <span>Locked to Camera Scan</span>
+              </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <input
-                type="text"
-                className="form-input"
-                style={{
-                  minHeight: '38px',
-                  fontSize: '0.875rem',
-                  fontFamily: 'var(--font-mono)',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                }}
-                value={confirmedPlate}
-                onChange={(e) => handleManualPlateEdit(e.target.value)}
-                placeholder="Edit plate if OCR differs..."
-              />
-              <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ minHeight: '38px', padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
-                onClick={() => handleManualPlateEdit(candidatePlate)}
-                title="Reset to OCR candidate"
-              >
-                <RotateCcw size={14} />
-              </button>
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '0.4rem 0' }}>
+              <PlateDisplay plate={confirmedPlate} size="lg" />
             </div>
           </div>
 
@@ -1862,115 +1504,66 @@ export const SiteAgentTerminal: React.FC = () => {
               2. Save Truck Movement Record
             </h3>
             <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-              Scan complete. Choose whether this input should be recorded as a <strong>Pickup</strong> or <strong>Delivery</strong>:
+              Terminal locked to your assigned operational post:
             </p>
           </div>
 
-          {/* THE MANDATORY CHOICE TOGGLE BUTTONS */}
+          {/* LOCKED ASSIGNED POST BANNER (NO TOGGLING ALLOWED) */}
           <div
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
+              padding: '0.9rem 1.1rem',
+              borderRadius: 'var(--radius-lg)',
+              border: `2px solid ${movementType === 'pickup' ? '#FCD34D' : '#6EE7B7'}`,
+              backgroundColor: movementType === 'pickup' ? '#FEF3C7' : '#D1FAE5',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
               gap: '0.75rem',
             }}
           >
-            {/* PICKUP BUTTON */}
-            <button
-              type="button"
-              onClick={() => setMovementType('pickup')}
-              style={{
-                padding: '0.875rem 1rem',
-                borderRadius: 'var(--radius-lg)',
-                border: movementType === 'pickup' ? '2.5px solid #B45309' : '1.5px solid var(--border-default)',
-                backgroundColor: movementType === 'pickup' ? '#FEF3C7' : '#FFFFFF',
-                color: movementType === 'pickup' ? '#B45309' : 'var(--text-primary)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-start',
-                gap: '0.35rem',
-                cursor: 'pointer',
-                textAlign: 'left',
-                boxShadow: movementType === 'pickup' ? 'var(--shadow-sm)' : 'none',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontWeight: 800, fontSize: '0.9375rem' }}>
-                  <TruckIcon size={18} />
-                  PICKUP
-                </span>
-                {movementType === 'pickup' && (
-                  <span
-                    style={{
-                      width: '20px',
-                      height: '20px',
-                      borderRadius: '50%',
-                      backgroundColor: '#B45309',
-                      color: '#FFFFFF',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Check size={12} />
-                  </span>
-                )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <div
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: '#FFFFFF',
+                  color: movementType === 'pickup' ? '#B45309' : '#047857',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: `1px solid ${movementType === 'pickup' ? '#FCD34D' : '#6EE7B7'}`,
+                  flexShrink: 0,
+                }}
+              >
+                {movementType === 'pickup' ? <TruckIcon size={18} /> : <Scale size={18} />}
               </div>
-              <span style={{ fontSize: '0.725rem', color: movementType === 'pickup' ? '#92400E' : 'var(--text-muted)', lineHeight: 1.3 }}>
-                Gate 1 Dredge Pit loading & digital waybill issuance
-              </span>
-            </button>
+              <div>
+                <strong style={{ display: 'block', fontSize: '0.92rem', color: movementType === 'pickup' ? '#92400E' : '#065F46' }}>
+                  {movementType === 'pickup' ? 'Gate 1 Dredge Pit — Pickup Dispatch' : 'Gate 2 Weighbridge — Delivery Check'}
+                </strong>
+                <span style={{ fontSize: '0.72rem', color: movementType === 'pickup' ? '#B45309' : '#047857' }}>
+                  {movementType === 'pickup' ? 'Digital waybill & haulage authorization' : 'Scale ticket verification & trip closure'}
+                </span>
+              </div>
+            </div>
 
-            {/* DELIVERY BUTTON */}
-            <button
-              type="button"
-              onClick={() => {
-                setMovementType('delivery');
-                setDeliveryPlateEvidence(null);
-                capturePurposeRef.current = 'delivery';
-              }}
+            <span
               style={{
-                padding: '0.875rem 1rem',
-                borderRadius: 'var(--radius-lg)',
-                border: movementType === 'delivery' ? '2.5px solid #047857' : '1.5px solid var(--border-default)',
-                backgroundColor: movementType === 'delivery' ? '#D1FAE5' : '#FFFFFF',
-                color: movementType === 'delivery' ? '#047857' : 'var(--text-primary)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-start',
-                gap: '0.35rem',
-                cursor: 'pointer',
-                textAlign: 'left',
-                boxShadow: movementType === 'delivery' ? 'var(--shadow-sm)' : 'none',
-                transition: 'all 0.15s ease',
+                fontSize: '0.68rem',
+                fontWeight: 800,
+                backgroundColor: '#FFFFFF',
+                color: movementType === 'pickup' ? '#B45309' : '#047857',
+                border: `1px solid ${movementType === 'pickup' ? '#FCD34D' : '#6EE7B7'}`,
+                padding: '0.25rem 0.55rem',
+                borderRadius: 'var(--radius-sm)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                flexShrink: 0,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontWeight: 800, fontSize: '0.9375rem' }}>
-                  <Scale size={18} />
-                  DELIVERY
-                </span>
-                {movementType === 'delivery' && (
-                  <span
-                    style={{
-                      width: '20px',
-                      height: '20px',
-                      borderRadius: '50%',
-                      backgroundColor: '#047857',
-                      color: '#FFFFFF',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Check size={12} />
-                  </span>
-                )}
-              </div>
-              <span style={{ fontSize: '0.725rem', color: movementType === 'delivery' ? '#065F46' : 'var(--text-muted)', lineHeight: 1.3 }}>
-                Gate 2 Depot weighbridge scale check & trip closure
-              </span>
-            </button>
+              LOCKED POST
+            </span>
           </div>
 
           {/* SUB-FORM A: PICKUP WORKFLOW */}
@@ -2165,10 +1758,8 @@ export const SiteAgentTerminal: React.FC = () => {
                     onClick={captureDeliveryPlate}
                     disabled={isScanning || isCameraStarting}
                     style={{ minHeight: '42px' }}
-                    title="Open the camera inside this website"
                   >
-                    <Video size={16} />
-                    Website Camera
+                    <Video size={16} /> Website Camera
                   </button>
                   <button
                     type="button"
@@ -2180,10 +1771,8 @@ export const SiteAgentTerminal: React.FC = () => {
                     }}
                     disabled={isScanning || isCameraStarting}
                     style={{ minHeight: '42px' }}
-                    title="Use the device camera app and retain the complete photo"
                   >
-                    <Camera size={16} />
-                    Device Camera
+                    <Camera size={16} /> Device Camera
                   </button>
                 </div>
               </div>
@@ -2473,68 +2062,45 @@ export const SiteAgentTerminal: React.FC = () => {
           </div>
         </div>
 
-        <div className="table-wrapper">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Waybill #</th>
-                <th>Truck Plate</th>
-                <th>Type</th>
-                <th>Tonnes</th>
-                <th>Route / Facility</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRecentTrips.length === 0 ? (
-                <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
-                    No recent records matching filter.
-                  </td>
-                </tr>
-              ) : (
-                filteredRecentTrips.map((trip) => (
-                  <tr key={trip.id}>
-                    <td>
-                      <span className="mono" style={{ fontWeight: 700, color: 'var(--brand-primary)' }}>
-                        {trip.trip_number}
-                      </span>
-                    </td>
-                    <td>
-                      <PlateDisplay plate={trip.truck?.registration_number || 'UNKNOWN'} size="sm" />
-                    </td>
-                    <td>
-                      <span
-                        style={{
-                          fontSize: '0.7rem',
-                          fontWeight: 800,
-                          padding: '0.15rem 0.45rem',
-                          borderRadius: 'var(--radius-sm)',
-                          backgroundColor: trip.status === 'open' ? '#FEF3C7' : '#D1FAE5',
-                          color: trip.status === 'open' ? '#B45309' : '#047857',
-                        }}
-                      >
-                        {trip.status === 'open' ? 'PICKUP' : 'DELIVERY'}
-                      </span>
-                    </td>
-                    <td style={{ fontWeight: 700 }}>
-                      {trip.status === 'open'
-                        ? `${trip.loading_event?.estimated_tonnes || trip.truck?.capacity_tonnes || 30} T`
-                        : `${trip.offloading_event?.quantity || trip.loading_event?.estimated_tonnes || trip.truck?.capacity_tonnes || 30} T`}
-                    </td>
-                    <td style={{ fontSize: '0.8125rem' }}>
-                      {trip.status === 'open'
-                        ? `${trip.loading_site?.code} ➔ ${trip.offloading_site?.code}`
-                        : `Delivered at ${trip.offloading_site?.name}`}
-                    </td>
-                    <td>
-                      <StatusBadge status={trip.status} />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        {/* Mobile-Friendly Movement Cards */}
+        <div style={{ padding: '0.85rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+          {filteredRecentTrips.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+              No recent movement records.
+            </div>
+          ) : (
+            filteredRecentTrips.map((trip) => (
+              <div
+                key={trip.id}
+                style={{
+                  padding: '0.75rem 0.85rem',
+                  backgroundColor: '#F8FAFC',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.75rem',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0 }}>
+                  <PlateDisplay plate={trip.truck?.registration_number || 'UNKNOWN'} size="sm" />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--brand-primary)', fontFamily: 'var(--font-mono)' }}>
+                      #{trip.trip_number}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {trip.status === 'open' ? 'Dispatched' : 'Delivered'} • {trip.status === 'open' ? `${trip.loading_event?.estimated_tonnes || 30}T` : `${trip.offloading_event?.quantity || 30}T`}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ flexShrink: 0 }}>
+                  <StatusBadge status={trip.status} />
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
@@ -2633,15 +2199,20 @@ export const SiteAgentTerminal: React.FC = () => {
 
                 <div className="grid-2" style={{ gap: '0.75rem' }}>
                   <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label" style={{ fontSize: '0.75rem' }}>License Plate Number *</label>
+                    <label className="form-label" style={{ fontSize: '0.75rem' }}>License Plate Number (Scanned)</label>
                     <input
                       type="text"
                       className="form-input"
-                      required
+                      readOnly
                       value={newTruckPlate}
-                      onChange={(e) => setNewTruckPlate(e.target.value.toUpperCase())}
-                      placeholder="e.g. IKD-882ZX"
-                      style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}
+                      style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontWeight: 700,
+                        backgroundColor: '#F1F5F9',
+                        color: '#0F172A',
+                        cursor: 'not-allowed',
+                      }}
+                      title="Locked to scanned plate to prevent fraud"
                     />
                   </div>
 
@@ -2813,6 +2384,19 @@ export const SiteAgentTerminal: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Mode Selection Prompt Bottom Sheet */}
+      <SiteAgentModeSheet
+        isOpen={isModeSheetOpen}
+        onSelectMode={handleSelectTerminalMode}
+        onClose={() => {
+          // Can only close if an initial mode has already been picked in this session
+          if (sessionStorage.getItem('dredgeops_siteagent_mode_selected')) {
+            setIsModeSheetOpen(false);
+          }
+        }}
+        isMandatory={!sessionStorage.getItem('dredgeops_siteagent_mode_selected')}
+      />
     </div>
   );
 };
