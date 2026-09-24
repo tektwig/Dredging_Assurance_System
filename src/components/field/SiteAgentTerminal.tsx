@@ -284,12 +284,24 @@ export const SiteAgentTerminal: React.FC = () => {
       return;
     }
     const video = videoRef.current;
+    const vw = video.videoWidth || 640;
+    const vh = video.videoHeight || 480;
+
+    // Crop to the plate reticle region: center 82% width, center 33% height
+    // This matches the CSS reticle guide (aspect-ratio 3:1, 82% width)
+    const cropW = Math.round(vw * 0.82);
+    const cropH = Math.round(cropW / 3); // 3:1 aspect ratio like a license plate
+    const cropX = Math.round((vw - cropW) / 2);
+    const cropY = Math.round((vh - cropH) / 2);
+
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    canvas.width = cropW;
+    canvas.height = cropH;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // Draw only the cropped plate region from the video
+    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
     const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
     stopLiveCamera();
     runPlateOCR(dataUrl);
