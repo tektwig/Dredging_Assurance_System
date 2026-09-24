@@ -79,7 +79,6 @@ export const SiteAgentTerminal: React.FC = () => {
   const [hasScanned, setHasScanned] = useState(false);
 
   // 1. Camera & Scan State
-  const [candidatePlate, setCandidatePlate] = useState('KJA-482XY');
   const [confirmedPlate, setConfirmedPlate] = useState('KJA-482XY');
   const [confidenceScore, setConfidenceScore] = useState(97.6);
   const [selectedTruckId, setSelectedTruckId] = useState('trk-1');
@@ -219,7 +218,6 @@ export const SiteAgentTerminal: React.FC = () => {
         setOcrProgress(p.progress);
       });
 
-      setCandidatePlate(result.candidatePlate);
       setConfirmedPlate(result.candidatePlate);
       setConfidenceScore(result.confidence);
 
@@ -266,24 +264,6 @@ export const SiteAgentTerminal: React.FC = () => {
     if (!file) return;
     runPlateOCR(file);
     e.target.value = '';
-  };
-
-  const handleManualPlateEdit = (newPlate: string) => {
-    setConfirmedPlate(newPlate);
-    const normalized = newPlate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-    const matchedTruck = trucks.find((t) => t.normalized_registration === normalized);
-    if (matchedTruck) {
-      setSelectedTruckId(matchedTruck.id);
-      setEstimatedTonnes(matchedTruck.capacity_tonnes || matchedTruck.capacity || 30);
-      setDeliveredTonnes(matchedTruck.capacity_tonnes || matchedTruck.capacity || 30);
-      const matchedDriver = drivers.find((d) => d.assigned_truck_id === matchedTruck.id) || drivers[0];
-      if (matchedDriver) setSelectedDriverId(matchedDriver.id);
-      setIsUnregisteredModalOpen(false);
-    } else {
-      setSelectedTruckId('');
-      setSelectedDriverId('');
-      setNewTruckPlate(newPlate);
-    }
   };
 
   // Register Unregistered Truck and its Driver
@@ -342,7 +322,6 @@ export const SiteAgentTerminal: React.FC = () => {
     setSelectedTruckId(truckRes.truck.id);
     setSelectedDriverId(driverRes.driver.id);
     setConfirmedPlate(cleanPlate);
-    setCandidatePlate(cleanPlate);
     setEstimatedTonnes(Number(newTruckCapacity) || 30);
     setDeliveredTonnes(Number(newTruckCapacity) || 30);
     setIsUnregisteredModalOpen(false);
@@ -806,7 +785,7 @@ export const SiteAgentTerminal: React.FC = () => {
             </div>
           )}
 
-          {/* OCR Result & Confirmed Registration */}
+          {/* Read-Only Verified Plate Display (Anti-Fraud Lock) */}
           <div
             style={{
               padding: '0.85rem 1rem',
@@ -815,40 +794,21 @@ export const SiteAgentTerminal: React.FC = () => {
               border: '1px solid var(--border-subtle)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '0.5rem',
+              gap: '0.6rem',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)' }}>
                 IDENTIFIED PLATE:
               </span>
-              <PlateDisplay plate={confirmedPlate} size="md" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.7rem', color: '#047857', fontWeight: 700 }}>
+                <ShieldCheck size={13} color="#059669" />
+                <span>Locked to Camera Scan</span>
+              </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <input
-                type="text"
-                className="form-input"
-                style={{
-                  minHeight: '38px',
-                  fontSize: '0.875rem',
-                  fontFamily: 'var(--font-mono)',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                }}
-                value={confirmedPlate}
-                onChange={(e) => handleManualPlateEdit(e.target.value)}
-                placeholder="Edit plate if OCR differs..."
-              />
-              <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ minHeight: '38px', padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
-                onClick={() => handleManualPlateEdit(candidatePlate)}
-                title="Reset to OCR candidate"
-              >
-                <RotateCcw size={14} />
-              </button>
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '0.4rem 0' }}>
+              <PlateDisplay plate={confirmedPlate} size="lg" />
             </div>
           </div>
 
@@ -1957,15 +1917,20 @@ export const SiteAgentTerminal: React.FC = () => {
 
                 <div className="grid-2" style={{ gap: '0.75rem' }}>
                   <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label" style={{ fontSize: '0.75rem' }}>License Plate Number *</label>
+                    <label className="form-label" style={{ fontSize: '0.75rem' }}>License Plate Number (Scanned)</label>
                     <input
                       type="text"
                       className="form-input"
-                      required
+                      readOnly
                       value={newTruckPlate}
-                      onChange={(e) => setNewTruckPlate(e.target.value.toUpperCase())}
-                      placeholder="e.g. IKD-882ZX"
-                      style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}
+                      style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontWeight: 700,
+                        backgroundColor: '#F1F5F9',
+                        color: '#0F172A',
+                        cursor: 'not-allowed',
+                      }}
+                      title="Locked to scanned plate to prevent fraud"
                     />
                   </div>
 
