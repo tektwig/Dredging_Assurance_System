@@ -121,10 +121,11 @@ assert.deepEqual(calls.at(-1), { rpc: 'lookup_loading_truck', args: { p_plate: '
 rpcResponse = { ok: true, found: false, assignment };
 assert.equal((await data.lookupLoadingTruck({ plate: 'NEW-123' })).kind, 'unknown_truck');
 rpcResponse = { ok: true, found: true, assignment, truck: { ...truck, is_active: false }, default_driver: driver, block: null };
-assert.equal((await data.lookupLoadingTruck({ plate: 'ABC-123' })).kind, 'inactive_truck');
+assert.equal((await data.lookupLoadingTruck({ plate: 'ABC-123' })).driver.id, 'driver-1');
 rpcResponse = { ok: true, found: true, assignment, truck, default_driver: driver,
   block: { ok: false, code: 'OPEN_TRIP_EXISTS', details: { trip_id: 'trip-1', trip_number: 'TRP-001' } } };
 assert.equal((await data.lookupLoadingTruck({ plate: 'ABC-123' })).trip.tripNumber, 'TRP-001');
+assert.equal((await data.lookupLoadingTruck({ plate: 'ABC-123' })).driver.id, 'driver-1');
 rpcResponse.block = { ok: false, code: 'BLOCKING_EXCEPTION', details: { exception_id: 'private-issue' } };
 assert.equal((await data.lookupLoadingTruck({ plate: 'ABC-123' })).kind, 'blocking_exception');
 rpcResponse = { ok: false, code: 'SITE_ASSIGNMENT_REQUIRED', details: {} };
@@ -188,7 +189,16 @@ let html = render();
 assert(html.includes('Loading Portal') && html.includes('Test Officer') && html.includes('North Loading Yard'));
 assert(html.includes('24 September 2026') && html.includes('ABC123'));
 for (const label of ['Trips Opened', 'Open Trips', 'Trips Closed', 'Trucks Processed']) assert(html.includes(label));
+const assertWorkspaceBeforeActivity = markup => {
+  const header = markup.indexOf('class="loading-heading"');
+  const workspace = markup.indexOf('aria-label="Manual truck lookup"');
+  const activity = markup.indexOf('aria-label="Today’s Loading activity"');
+  assert(header >= 0 && workspace > header && activity > workspace);
+};
+assertWorkspaceBeforeActivity(html);
+assert(html.includes('Process Truck') && html.includes('Find Truck'));
 assert(html.includes('type="submit"') && html.includes('name="plate"'));
+assert(!html.includes('Scan Plate'));
 // Native form submit handles Enter and button activation through the same callback.
 function findElement(node, type) {
   if (!node || typeof node !== 'object') return null;
@@ -202,13 +212,24 @@ findElement(tree, 'input').props.onChange({ target: { value: 'XYZ-999' } });
 assert(prevented && submitted === 1 && edited === 'XYZ-999');
 for (const blockedSite of [{ status: 'blocked', reason: 'missing' }, { status: 'blocked', reason: 'wrong_type' }, { status: 'blocked', reason: 'inactive' }, { status: 'blocked', reason: 'unauthorized' }]) {
   html = render({ site: blockedSite });
-  assert(html.includes('Loading site unavailable') && html.includes('name="plate"') && html.includes('disabled=""'));
+  assertWorkspaceBeforeActivity(html);
+  assert(html.includes('Loading site unavailable') && !html.includes('name="plate"') && !html.includes('Find Truck'));
+  assert(html.indexOf('Loading site unavailable') < html.indexOf('aria-label="Today’s Loading activity"'));
 }
 const state = value => ({ state: value, pending: false });
 html = render({ lookup: state({ status: 'known_ready', plate: 'ABC-123', truck: { id: 'truck-1', registrationNumber: 'ABC-123', normalizedRegistration: 'ABC123', isActive: true },
   driver: { id: 'driver-1', fullName: 'John Doe', phoneNumber: '08012345678', email: null, isActive: true } }) });
 assert(html.includes('Truck found') && html.includes('John Doe') && html.includes('08012345678'));
+assertWorkspaceBeforeActivity(html);
 assert(!html.includes('NEVER_DISPLAY') && !html.includes('bank_name') && !html.includes('Open Trip</button>'));
+const driverMarkup = render({ lookup: state({ status: 'known_ready', plate: 'ABC-123', truck: {
+  id: 'truck-1', registrationNumber: 'ABC-123', normalizedRegistration: 'ABC123', isActive: true,
+}, driver: { id: 'driver-1', fullName: 'John Doe', phoneNumber: '08012345678', email: null, isActive: true } }),
+driverPanel: React.createElement('span', null, 'Driver selection controls') });
+assert(driverMarkup.indexOf('Driver selection controls') < driverMarkup.indexOf('aria-label="Today’s Loading activity"'));
+const reviewMarkup = render({ savedRegistration: { status: 'review_required', reason: 'identity_mismatch', receipt: { plate: 'ABC-123' } } });
+assert(reviewMarkup.includes('Registration saved') && reviewMarkup.includes('review required'));
+assert(reviewMarkup.indexOf('review required') < reviewMarkup.indexOf('aria-label="Today’s Loading activity"'));
 for (const [lookup, message] of [
   [{ status: 'unknown_truck', plate: 'NEW-123' }, 'Truck not registered'],
   [{ status: 'inactive_truck', plate: 'ABC-123', truck }, 'Truck inactive'],
@@ -216,7 +237,16 @@ for (const [lookup, message] of [
   [{ status: 'blocking_exception', plate: 'ABC-123', truck }, 'Truck needs review'],
   [{ status: 'lookup_error', plate: 'ABC-123' }, 'Retry lookup'],
   [{ status: 'access_unavailable' }, 'Loading access unavailable'],
-]) assert(render({ lookup: state(lookup) }).includes(message));
+]) {
+  const branchMarkup = render({ lookup: state(lookup) });
+  assert(branchMarkup.includes(message));
+  assertWorkspaceBeforeActivity(branchMarkup);
+  assert(branchMarkup.indexOf(message) < branchMarkup.indexOf('aria-label="Today’s Loading activity"'));
+}
+assert(render({ lookup: state({ status: 'inactive_driver', plate: 'ABC-123', truck: {
+  id: 'truck-1', registrationNumber: 'ABC-123', normalizedRegistration: 'ABC123', isActive: true,
+}, driver: { id: 'driver-1', fullName: 'John Doe', phoneNumber: '08012345678', email: null, isActive: false } }),
+driverPanel: React.createElement('span', null, 'Replacement driver controls') }).includes('Replacement driver controls'));
 assert(render({ statistics: { status: 'error' } }).includes('Retry figures'));
 assert(render({ site: { status: 'error' } }).includes('Recheck assignment'));
 console.log('PASS portal shell, form behavior, site gates, statistics, safe review and error states');

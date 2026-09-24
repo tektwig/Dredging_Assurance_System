@@ -702,6 +702,7 @@ end $$;
 -- audit lock for as little of the migration as practical. Maintenance window required.
 lock table public.audit_log in access exclusive mode;
 alter table public.audit_log disable trigger audit_immutable;
+alter table public.audit_log disable trigger trg_protect_audit_log;
 with history as materialized (
   -- Read historic bank values once, rather than rescanning audit_log for each row
   -- while ACCESS EXCLUSIVE is held. Old values may no longer be current master data.
@@ -727,5 +728,7 @@ update public.audit_log a set old_value=private.audit_projection(s.entity_name,s
   new_value=private.audit_projection(s.entity_name,s.new_value,s.tokens),
   reason=private.audit_redact_text(s.reason,s.tokens)
 from source s where a.id=s.id;
+-- Restore normal audit-log immutability.
+alter table public.audit_log enable trigger trg_protect_audit_log;
 alter table public.audit_log enable trigger audit_immutable;
 commit;

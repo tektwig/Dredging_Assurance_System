@@ -136,6 +136,11 @@ names remain separate IDs. Loading Officers cannot directly enumerate `drivers`;
 truck lookup explicitly returns safe regular-driver fields and assignment/block
 information. All prechecks remain advisory.
 
+Pre-deployment privacy hardening: define the permitted driver discovery scope
+and an abuse/rate-control strategy for repeated searches. The current bounded
+RPC can still be called repeatedly with short name fragments, and there is no
+established driver-to-site ownership model that would make site scoping safe.
+
 ## Errors and idempotency
 
 Business errors are `{ok:false,code,details:{...}}`; details contain only safe,

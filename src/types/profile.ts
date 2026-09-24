@@ -52,6 +52,14 @@ export interface Database {
     Functions: {
       lookup_loading_truck: { Args: { p_plate: string }; Returns: unknown };
       get_loading_statistics: { Args: Record<string, never>; Returns: unknown };
+      search_loading_drivers: { Args: { p_query: string; p_limit?: number }; Returns: unknown };
+      register_loading_participant: { Args: {
+        p_request_id: string; p_plate: string; p_expected_truck_id?: string | null;
+        p_existing_driver_id?: string | null; p_full_name?: string | null;
+        p_phone_number?: string | null; p_email?: string | null;
+        p_bank_name?: string | null; p_account_number?: string | null;
+        p_account_name?: string | null;
+      }; Returns: unknown };
     };
     Enums: { app_role: AppRole };
     CompositeTypes: { [_ in never]: never };

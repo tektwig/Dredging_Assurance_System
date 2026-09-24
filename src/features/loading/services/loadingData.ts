@@ -84,18 +84,6 @@ export async function lookupLoadingTruck(request: TruckLookupRequest): Promise<T
     id: truck.id, registrationNumber: truck.registration_number,
     normalizedRegistration: truck.normalized_registration, isActive: truck.is_active,
   };
-  if (!safeTruck.isActive) return { kind: 'inactive_truck', assignmentId, truck: safeTruck };
-  if (result.block !== null) {
-    const block = record(result.block);
-    const details = record(block?.details);
-    if (block?.ok !== false || !string(block.code)) throw new Error('Invalid truck block');
-    if (block.code === 'OPEN_TRIP_EXISTS' && string(details?.trip_id) && string(details.trip_number)) {
-      return { kind: 'open_trip_exists', assignmentId, truck: safeTruck,
-        trip: { tripId: details.trip_id, tripNumber: details.trip_number } };
-    }
-    if (block.code === 'BLOCKING_EXCEPTION') return { kind: 'blocking_exception', assignmentId, truck: safeTruck };
-    throw new Error('Unexpected truck block');
-  }
   const driver = record(result.default_driver);
   if (!driver || !string(driver.id) || !string(driver.full_name) || !string(driver.phone_number)
     || (driver.email !== null && !string(driver.email)) || typeof driver.is_active !== 'boolean') {
@@ -103,6 +91,18 @@ export async function lookupLoadingTruck(request: TruckLookupRequest): Promise<T
   }
   const safeDriver = { id: driver.id, fullName: driver.full_name, phoneNumber: driver.phone_number,
     email: driver.email, isActive: driver.is_active };
+  if (!safeTruck.isActive) return { kind: 'inactive_truck', assignmentId, truck: safeTruck, driver: safeDriver };
+  if (result.block !== null) {
+    const block = record(result.block);
+    const details = record(block?.details);
+    if (block?.ok !== false || !string(block.code)) throw new Error('Invalid truck block');
+    if (block.code === 'OPEN_TRIP_EXISTS' && string(details?.trip_id) && string(details.trip_number)) {
+      return { kind: 'open_trip_exists', assignmentId, truck: safeTruck, driver: safeDriver,
+        trip: { tripId: details.trip_id, tripNumber: details.trip_number } };
+    }
+    if (block.code === 'BLOCKING_EXCEPTION') return { kind: 'blocking_exception', assignmentId, truck: safeTruck, driver: safeDriver };
+    throw new Error('Unexpected truck block');
+  }
   if (!safeDriver.isActive) return { kind: 'inactive_driver', assignmentId, truck: safeTruck, driver: safeDriver };
   return { kind: 'known_ready', assignmentId, truck: safeTruck, driver: safeDriver };
 }

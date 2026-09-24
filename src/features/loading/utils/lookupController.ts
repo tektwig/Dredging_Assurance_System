@@ -31,6 +31,15 @@ export class LoadingLookupController {
   dispose() { this.disposed = true; this.revision += 1; }
   resume() { this.disposed = false; }
 
+  // Called only after the independent registration refresh has passed identity
+  // validation. An inactive regular driver stays unselectable in the driver flow.
+  acceptValidatedRegistration(plate: string, result: Extract<TruckLookupResult, { kind: 'known_ready' | 'inactive_driver' }>): boolean {
+    if (this.disposed || this.pending) return false;
+    this.revision += 1;
+    this.publish({ status: result.kind, plate, truck: result.truck, driver: result.driver });
+    return true;
+  }
+
   async submit(plateInput: string, expectedAssignmentId: string): Promise<boolean> {
     if (this.pending || this.disposed) return false;
     const plate = plateInput.trim();
