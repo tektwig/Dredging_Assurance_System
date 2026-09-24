@@ -14,10 +14,6 @@ import {
   FileText,
   AlertTriangle,
   Check,
-  Video,
-  VideoOff,
-  SwitchCamera,
-  Zap,
   User,
   Users,
   UserPlus,
@@ -78,9 +74,6 @@ export const SiteAgentTerminal: React.FC = () => {
 
   // Live hardware camera input ref
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const cameraRequestIdRef = useRef(0);
   const previewObjectUrlRef = useRef<string | null>(null);
 
   const [hasScanned, setHasScanned] = useState(false);
@@ -99,12 +92,7 @@ export const SiteAgentTerminal: React.FC = () => {
   const [ocrProgress, setOcrProgress] = useState(0);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'warning' } | null>(null);
 
-  // Live Camera State
-  const [isLiveCameraActive, setIsLiveCameraActive] = useState(false);
-  const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const [isCameraStarting, setIsCameraStarting] = useState(false);
-  const [isCameraReady, setIsCameraReady] = useState(false);
+
 
   // 2. Driver Selection & Onboarding State (Multidriver & Unregistered Truck Support)
   const [isUnregisteredModalOpen, setIsUnregisteredModalOpen] = useState(false);
@@ -131,32 +119,14 @@ export const SiteAgentTerminal: React.FC = () => {
   const [quickDriverAccountNumber, setQuickDriverAccountNumber] = useState('');
   const [quickDriverLicense, setQuickDriverLicense] = useState('');
 
-  // Cleanup camera stream on unmount
+  // Cleanup preview URL on unmount
   useEffect(() => {
     return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-      }
       if (previewObjectUrlRef.current) {
         URL.revokeObjectURL(previewObjectUrlRef.current);
       }
     };
   }, []);
-
-  // getUserMedia resolves before the conditional <video> is mounted. Attach the
-  // stream after React has rendered it; otherwise the first launch stays blank
-  // and only starts after a camera flip causes another request.
-  useEffect(() => {
-    const video = videoRef.current;
-    const stream = streamRef.current;
-    if (!isLiveCameraActive || !video || !stream) return;
-
-    video.srcObject = stream;
-    video.play().catch((err) => {
-      console.warn('Camera preview playback failed:', err);
-      setCameraError('The camera opened but the preview could not start. Tap Retake Camera to try again.');
-    });
-  }, [isLiveCameraActive]);
 
   // 3. Movement Type State: 'pickup' vs 'delivery'
   const [movementType, setMovementType] = useState<'pickup' | 'delivery'>(() => {
@@ -219,103 +189,13 @@ export const SiteAgentTerminal: React.FC = () => {
       t.truck?.registration_number.toLowerCase() === confirmedPlate.toLowerCase()
   ) || (openTrips.length > 0 ? openTrips[0] : null);
 
-  // Live Camera Controls
-  const startLiveCamera = async (mode: 'environment' | 'user' = cameraFacingMode) => {
-    const requestId = ++cameraRequestIdRef.current;
-    setIsCameraStarting(true);
-    setIsCameraReady(false);
-    setCameraError(null);
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error('Camera access requires a supported browser over HTTPS.');
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: mode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      });
-      if (requestId !== cameraRequestIdRef.current) {
-        stream.getTracks().forEach((track) => track.stop());
-        return;
-      }
-      streamRef.current = stream;
-      setCameraFacingMode(mode);
-      setIsLiveCameraActive(true);
-      // On camera flips the video is already mounted, so replace its stream now.
-      // First launch is handled by the effect after the conditional video mounts.
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        void videoRef.current.play().catch((playError) => {
-          console.warn('Camera preview playback failed after switching:', playError);
-        });
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      setCameraError(
-        /NotAllowed|Permission/i.test(message)
-          ? 'Camera permission is blocked. Allow camera access in the browser, then tap Retake Camera.'
-          : `Camera could not start: ${message}`
-      );
-      setIsLiveCameraActive(false);
-    } finally {
-      setIsCameraStarting(false);
-    }
-  };
-
-  const stopLiveCamera = () => {
-    cameraRequestIdRef.current += 1;
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setIsCameraReady(false);
-    setIsLiveCameraActive(false);
-  };
-
-  const toggleCameraFacingMode = () => {
-    const nextMode = cameraFacingMode === 'environment' ? 'user' : 'environment';
-    setCameraFacingMode(nextMode);
-    if (isLiveCameraActive) {
-      startLiveCamera(nextMode);
-    }
-  };
-
-  const snapPhotoFromLiveFeed = () => {
-    if (!videoRef.current || !isCameraReady) {
-      setCameraError('Camera is still starting. Wait for the live preview, then capture again.');
-      return;
-    }
-    const video = videoRef.current;
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-    stopLiveCamera();
-    runPlateOCR(dataUrl);
-  };
-
   const retakePlatePhoto = () => {
-    stopLiveCamera();
     setHasScanned(false);
     setIsScanning(false);
     setOcrProgress(0);
     setOcrStatus('Ready for capture');
-    setCameraError(null);
     setIsUnregisteredModalOpen(false);
-    void startLiveCamera(cameraFacingMode);
+    cameraInputRef.current?.click();
   };
 
   // Real Tesseract OCR recognition pipeline
@@ -758,207 +638,94 @@ export const SiteAgentTerminal: React.FC = () => {
             </h3>
 
             {/* Clean Single Camera Action Button */}
-            {!isLiveCameraActive ? (
-              <div style={{ display: 'flex', gap: '0.4rem' }}>
-                <button
-                  type="button"
-                  onClick={() => cameraInputRef.current?.click()}
-                  className="btn btn-primary"
-                  style={{
-                    backgroundColor: '#B45309',
-                    borderColor: '#92400E',
-                    minHeight: '38px',
-                    padding: '0.35rem 0.85rem',
-                    fontSize: '0.8125rem',
-                    fontWeight: 700,
-                    gap: '0.4rem',
-                  }}
-                  title="Snap truck plate with camera"
-                >
-                  <Camera size={15} />
-                  <span>Snap Plate Photo</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => startLiveCamera()}
-                  disabled={isCameraStarting}
-                  className="btn btn-secondary"
-                  style={{
-                    minHeight: '38px',
-                    padding: '0.35rem 0.75rem',
-                    fontSize: '0.8125rem',
-                    gap: '0.35rem',
-                  }}
-                  title="Live video scanner"
-                >
-                  <Video size={15} />
-                  <span>Live Stream</span>
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={stopLiveCamera}
-                className="btn btn-danger"
-                style={{
-                  minHeight: '38px',
-                  padding: '0.35rem 0.85rem',
-                  fontSize: '0.8125rem',
-                  fontWeight: 700,
-                  gap: '0.4rem',
-                }}
-              >
-                <VideoOff size={15} />
-                <span>Stop Stream</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              className="btn btn-primary"
+              style={{
+                backgroundColor: '#B45309',
+                borderColor: '#92400E',
+                minHeight: '38px',
+                padding: '0.4rem 0.95rem',
+                fontSize: '0.825rem',
+                fontWeight: 700,
+                gap: '0.45rem',
+                boxShadow: '0 2px 6px rgba(180, 83, 9, 0.25)',
+              }}
+              title="Snap truck plate with mobile camera"
+            >
+              <Camera size={16} />
+              <span>Snap Plate Photo</span>
+            </button>
           </div>
 
-          {cameraError && (
-            <p style={{ fontSize: '0.75rem', color: '#DC2626', margin: 0 }}>
-              {cameraError}
-            </p>
-          )}
-
-          {/* Live Camera Viewfinder or Static Snapshot Viewfinder */}
-          {isLiveCameraActive ? (
-            <div className="camera-viewfinder-box">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="camera-video-feed"
-                onLoadedMetadata={() => setIsCameraReady(true)}
-              />
-              <div className="camera-reticle-overlay">
-                <div className="camera-scanline-laser" />
-                <span className="camera-reticle-label">ALIGN NIGERIAN PLATE</span>
-              </div>
-              <div className="camera-live-pill">
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10B981', display: 'inline-block' }} />
-                LIVE STREAM
-              </div>
-
-              {/* Live Controls Overlay */}
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: '12px',
-                  left: '12px',
-                  right: '12px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  zIndex: 10,
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={toggleCameraFacingMode}
-                  className="btn btn-secondary"
-                  style={{
-                    backgroundColor: 'rgba(15, 23, 42, 0.85)',
-                    color: '#FFFFFF',
-                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                    fontSize: '0.75rem',
-                    padding: '0.35rem 0.65rem',
-                  }}
-                >
-                  <SwitchCamera size={14} /> Flip ({cameraFacingMode})
-                </button>
-
-                <button
-                  type="button"
-                  onClick={snapPhotoFromLiveFeed}
-                  disabled={!isCameraReady}
-                  style={{
-                    backgroundColor: isCameraReady ? '#F59E0B' : '#94A3B8',
-                    color: '#0F172A',
-                    border: 'none',
-                    borderRadius: 'var(--radius-full)',
-                    padding: '0.5rem 1.25rem',
-                    fontWeight: 800,
-                    fontSize: '0.85rem',
-                    cursor: isCameraReady ? 'pointer' : 'wait',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    boxShadow: '0 4px 12px rgba(245, 158, 11, 0.4)',
-                  }}
-                >
-                  <Zap size={16} /> {isCameraReady ? 'Snap & Analyze Plate' : 'Starting Preview...'}
-                </button>
-              </div>
+          {/* Clean Snapshot Viewfinder */}
+          <div className="viewfinder" style={{ position: 'relative', overflow: 'hidden' }}>
+            <img
+              src={photoUrl}
+              alt="Truck Plate Scan"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                filter: isScanning ? 'blur(3px)' : !hasScanned ? 'brightness(0.65)' : 'none',
+                transition: 'all 0.3s ease',
+              }}
+            />
+            <div className="viewfinder-target">
+              {isScanning && <div className="viewfinder-scanline" />}
             </div>
-          ) : (
-            <div className="viewfinder" style={{ position: 'relative', overflow: 'hidden' }}>
-              <img
-                src={photoUrl}
-                alt="Truck Plate Scan"
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                  filter: isScanning ? 'blur(3px)' : !hasScanned ? 'brightness(0.65)' : 'none',
-                  transition: 'all 0.3s ease',
-                }}
-              />
-              <div className="viewfinder-target">
-                {isScanning && <div className="viewfinder-scanline" />}
-              </div>
 
-              {!hasScanned && !isScanning && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '0.5rem',
-                    backgroundColor: 'rgba(15, 23, 42, 0.45)',
-                    color: '#FFFFFF',
-                    padding: '1rem',
-                    textAlign: 'center',
-                  }}
-                >
-                  <Camera size={32} color="#FCD34D" />
-                  <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
-                    Camera Standby
-                  </span>
-                  <span style={{ fontSize: '0.75rem', opacity: 0.85 }}>
-                    Launch live camera above or test plate below
-                  </span>
-                </div>
-              )}
-
+            {!hasScanned && !isScanning && (
               <div
+                onClick={() => cameraInputRef.current?.click()}
                 style={{
                   position: 'absolute',
-                  bottom: '10px',
-                  left: '10px',
-                  right: '10px',
-                  backgroundColor: 'rgba(15, 23, 42, 0.85)',
-                  padding: '0.4rem 0.75rem',
-                  borderRadius: 'var(--radius-sm)',
+                  inset: 0,
                   display: 'flex',
-                  justifyContent: 'space-between',
+                  flexDirection: 'column',
                   alignItems: 'center',
-                  fontSize: '0.75rem',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  backgroundColor: 'rgba(15, 23, 42, 0.45)',
                   color: '#FFFFFF',
+                  padding: '1rem',
+                  textAlign: 'center',
+                  cursor: 'pointer',
                 }}
               >
-                <span>{isScanning ? ocrStatus : hasScanned ? 'HD Snapshot Recorded' : 'Ready for plate analysis'}</span>
-                <span style={{ color: '#38BDF8', fontWeight: 700 }}>
-                  {hasScanned ? `${confidenceScore}% Confidence` : 'Standby'}
+                <Camera size={34} color="#FCD34D" />
+                <span style={{ fontSize: '0.875rem', fontWeight: 700 }}>
+                  Snap Plate Photo
+                </span>
+                <span style={{ fontSize: '0.75rem', opacity: 0.85 }}>
+                  Tap here to capture license plate with device camera
                 </span>
               </div>
+            )}
+
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '10px',
+                left: '10px',
+                right: '10px',
+                backgroundColor: 'rgba(15, 23, 42, 0.85)',
+                padding: '0.4rem 0.75rem',
+                borderRadius: 'var(--radius-sm)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                fontSize: '0.75rem',
+                color: '#FFFFFF',
+              }}
+            >
+              <span>{isScanning ? ocrStatus : hasScanned ? 'HD Snapshot Recorded' : 'Ready for plate analysis'}</span>
+              <span style={{ color: '#38BDF8', fontWeight: 700 }}>
+                {hasScanned ? `${confidenceScore}% Confidence` : 'Standby'}
+              </span>
             </div>
-          )}
+          </div>
 
           {/* OCR Progress Bar Indicator */}
           {isScanning && (
@@ -1020,7 +787,7 @@ export const SiteAgentTerminal: React.FC = () => {
               <button
                 type="button"
                 onClick={retakePlatePhoto}
-                disabled={isScanning || isCameraStarting}
+                disabled={isScanning}
                 style={{
                   background: 'none',
                   border: 'none',
