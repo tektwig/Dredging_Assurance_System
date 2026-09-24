@@ -1601,7 +1601,7 @@ export const SiteAgentTerminal: React.FC = () => {
                   type="button"
                   className={deliveryPlateMatchesTrip ? 'btn btn-secondary' : 'btn btn-primary'}
                   onClick={captureDeliveryPlate}
-                  disabled={isScanning || isCameraStarting}
+                  disabled={isScanning}
                   style={{ minHeight: '42px' }}
                 >
                   <Camera size={16} />
