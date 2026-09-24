@@ -25,7 +25,7 @@ export function isProfile(value: unknown): value is Profile {
     && (!row.is_active || row.role !== null);
 }
 
-// Intentionally limited to the table used by this phase.
+// Columns used by the browser; database policies and RPCs remain authoritative.
 export interface Database {
   public: {
     Tables: {
@@ -35,9 +35,24 @@ export interface Database {
         Update: Partial<Profile>;
         Relationships: [];
       };
+      user_site_assignments: {
+        Row: { id: string; profile_id: string; site_id: string; ended_at: string | null };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      sites: {
+        Row: { id: string; name: string; site_type: 'loading' | 'offloading'; is_active: boolean };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
-    Functions: { [_ in never]: never };
+    Functions: {
+      lookup_loading_truck: { Args: { p_plate: string }; Returns: unknown };
+      get_loading_statistics: { Args: Record<string, never>; Returns: unknown };
+    };
     Enums: { app_role: AppRole };
     CompositeTypes: { [_ in never]: never };
   };

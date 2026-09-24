@@ -3,7 +3,16 @@
 Implemented in `20260924000100_loading_alignment.sql`, after the original three
 migrations. This document supersedes the daily-driver, global loading-site,
 Loading registration, and audit-payload descriptions in `backend-foundation.md`.
-No hosted migration, data reset, upload, or frontend implementation is part of this change.
+No hosted migration, data reset, upload, or frontend implementation was part of
+the original 2B change.
+
+The forward follow-up `20260924000200_loading_read_scope_security.sql` narrows
+Loading Officer direct `trips` reads to `opened_by = auth.uid()` and direct `sites`
+reads to the active site in their current assignment. Other operational roles
+retain their existing broader reads. `get_loading_statistics()` derives the actor
+and Africa/Lagos day on the server, validates an active Loading assignment, and
+returns only four aggregate counts. The Loading Portal uses this RPC instead of
+reading trip rows for its dashboard.
 
 ## Operational model
 
