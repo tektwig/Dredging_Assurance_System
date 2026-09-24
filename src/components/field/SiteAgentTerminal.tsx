@@ -10,7 +10,6 @@ import {
   ArrowRight,
   ShieldCheck,
   RotateCcw,
-  Sparkles,
   Clock,
   FileText,
   AlertTriangle,
@@ -19,7 +18,6 @@ import {
   VideoOff,
   SwitchCamera,
   Zap,
-  Layers,
   User,
   Users,
   UserPlus,
@@ -99,8 +97,6 @@ export const SiteAgentTerminal: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [ocrStatus, setOcrStatus] = useState('Ready for capture');
   const [ocrProgress, setOcrProgress] = useState(0);
-  const [ocrMatchType, setOcrMatchType] = useState<'EXACT_FLEET' | 'FUZZY_FLEET' | 'SYNTACTIC_VALID' | 'FALLBACK' | null>('EXACT_FLEET');
-  const [preprocessedImageUrl, setPreprocessedImageUrl] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'warning' } | null>(null);
 
   // Live Camera State
@@ -317,42 +313,9 @@ export const SiteAgentTerminal: React.FC = () => {
     setIsScanning(false);
     setOcrProgress(0);
     setOcrStatus('Ready for capture');
-    setOcrMatchType(null);
-    setPreprocessedImageUrl(null);
     setCameraError(null);
     setIsUnregisteredModalOpen(false);
     void startLiveCamera(cameraFacingMode);
-  };
-
-  // Realistic Nigerian plate canvas generator for instant local testing
-  const createPlateCanvas = (plateNumber: string): string => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 440;
-    canvas.height = 150;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return '';
-    // Commercial yellow
-    ctx.fillStyle = '#FED766';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    // Dark border
-    ctx.strokeStyle = '#0F172A';
-    ctx.lineWidth = 8;
-    ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
-    // Top banner
-    ctx.fillStyle = '#065F46';
-    ctx.font = 'bold 16px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('FEDERAL REPUBLIC OF NIGERIA', canvas.width / 2, 28);
-    // Plate number
-    ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 44px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(plateNumber, canvas.width / 2, 90);
-    // Bottom LGA
-    ctx.fillStyle = '#B45309';
-    ctx.font = 'bold 13px sans-serif';
-    ctx.fillText('LAGOS STATE • COMMERCIAL HAULAGE', canvas.width / 2, 130);
-    return canvas.toDataURL('image/jpeg', 0.95);
   };
 
   // Real Tesseract OCR recognition pipeline
@@ -379,10 +342,6 @@ export const SiteAgentTerminal: React.FC = () => {
       setCandidatePlate(result.candidatePlate);
       setConfirmedPlate(result.candidatePlate);
       setConfidenceScore(result.confidence);
-      setOcrMatchType(result.matchType);
-      if (result.preprocessedImageUrl) {
-        setPreprocessedImageUrl(result.preprocessedImageUrl);
-      }
 
       const normalized = result.candidatePlate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
       const matched = result.matchedTruck || trucks.find((t) => t.normalized_registration === normalized);
@@ -404,7 +363,7 @@ export const SiteAgentTerminal: React.FC = () => {
       }
 
       setToastMessage({
-        text: `Plate [${result.candidatePlate}] recognized! Match type: ${result.matchType} (${result.confidence}% confidence).`,
+        text: `Plate [${result.candidatePlate}] recognized (${result.confidence}% confidence).`,
         type: 'success',
       });
       setTimeout(() => setToastMessage(null), 5000);
@@ -427,21 +386,6 @@ export const SiteAgentTerminal: React.FC = () => {
     if (!file) return;
     runPlateOCR(file);
     e.target.value = '';
-  };
-
-  // Simulation handler when scanning different trucks (for testing)
-  const handleScanPreset = (plate: string, truckId: string, driverId: string, isUnregistered = false) => {
-    const dataUrl = createPlateCanvas(plate);
-    if (!isUnregistered) {
-      setSelectedTruckId(truckId);
-      setSelectedDriverId(driverId);
-      setIsUnregisteredModalOpen(false);
-    } else {
-      setSelectedTruckId('');
-      setSelectedDriverId('');
-      setNewTruckPlate(plate);
-    }
-    runPlateOCR(dataUrl);
   };
 
   const handleManualPlateEdit = (newPlate: string) => {
@@ -803,156 +747,79 @@ export const SiteAgentTerminal: React.FC = () => {
         aria-label="Capture Truck Photo via Camera"
       />
 
-      {/* TOP SCAN LAUNCHER CARD */}
-      <div
-        className="card"
-        style={{
-          padding: '1.25rem 1rem',
-          backgroundColor: '#FFFFFF',
-          border: '2px solid #F59E0B',
-          borderRadius: 'var(--radius-xl)',
-          boxShadow: 'var(--shadow-md)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          textAlign: 'center',
-          gap: '0.75rem',
-          background: 'linear-gradient(180deg, #FFFDF5 0%, #FFFFFF 100%)',
-        }}
-      >
-        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center', width: '100%', maxWidth: '640px' }}>
-          {/* Live Video Camera Stream Launcher */}
-          {!isLiveCameraActive ? (
-            <button
-              type="button"
-              onClick={() => startLiveCamera()}
-              disabled={isCameraStarting}
-              style={{
-                flex: 1,
-                minWidth: '220px',
-                minHeight: '56px',
-                padding: '0.75rem 1.25rem',
-                backgroundColor: '#B45309',
-                color: '#FFFFFF',
-                borderRadius: 'var(--radius-lg)',
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.75rem',
-                cursor: 'pointer',
-                fontSize: '1rem',
-                fontWeight: 800,
-                boxShadow: '0 4px 14px rgba(180, 83, 9, 0.35)',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <Video size={20} />
-              <span>{isCameraStarting ? 'Starting Camera...' : 'Launch Live Camera Stream'}</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={stopLiveCamera}
-              style={{
-                flex: 1,
-                minWidth: '220px',
-                minHeight: '56px',
-                padding: '0.75rem 1.25rem',
-                backgroundColor: '#DC2626',
-                color: '#FFFFFF',
-                borderRadius: 'var(--radius-lg)',
-                border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.75rem',
-                cursor: 'pointer',
-                fontSize: '1rem',
-                fontWeight: 800,
-              }}
-            >
-              <VideoOff size={20} />
-              <span>Close Live Camera</span>
-            </button>
-          )}
-
-          {/* Native Live Camera Trigger (Direct Hardware Capture) */}
-          <button
-            type="button"
-            onClick={() => cameraInputRef.current?.click()}
-            style={{
-              flex: 1,
-              minWidth: '200px',
-              minHeight: '56px',
-              padding: '0.75rem 1.25rem',
-              backgroundColor: '#FFFFFF',
-              color: '#0F172A',
-              borderRadius: 'var(--radius-lg)',
-              border: '1.5px solid var(--border-medium)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.65rem',
-              cursor: 'pointer',
-              fontSize: '0.95rem',
-              fontWeight: 700,
-              boxShadow: 'var(--shadow-xs)',
-            }}
-            title="Open device camera to snap live plate photo"
-          >
-            <Camera size={19} color="#B45309" />
-            <span>Snap with Device Camera</span>
-          </button>
-
-          {hasScanned && (
-            <button
-              type="button"
-              onClick={retakePlatePhoto}
-              disabled={isScanning || isCameraStarting}
-              className="btn btn-secondary"
-              style={{ minHeight: '56px', padding: '0.75rem 1rem', fontWeight: 700 }}
-              title="Clear this scan and take another live plate photo"
-            >
-              <RotateCcw size={17} />
-              <span>{isCameraStarting ? 'Restarting Camera...' : 'Retake Live Photo'}</span>
-            </button>
-          )}
-        </div>
-
-        {cameraError && (
-          <p style={{ fontSize: '0.75rem', color: '#DC2626', margin: 0 }}>
-            {cameraError}
-          </p>
-        )}
-
-        <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0, maxWidth: '580px', lineHeight: 1.4 }}>
-          {hasScanned ? (
-            <>
-              Plate <strong style={{ color: '#0F172A' }}>{confirmedPlate}</strong> verified ({confidenceScore}% confidence). Select <strong>Pickup (Gate 1 Dispatch)</strong> or <strong>Delivery (Gate 2 Weighbridge)</strong> below.
-            </>
-          ) : (
-            <>
-              Stream live video feed or snap photo with device camera. Tesseract WebAssembly engine automatically extracts characters and cross-references master fleet records.
-            </>
-          )}
-        </p>
-      </div>
-
       {/* Main Two-Column Terminal Layout */}
       <div className="field-two-col">
         {/* Left Column: Camera Viewfinder & OCR Extraction */}
         <div className="card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
               <Camera size={18} color="#B45309" />
-              1. Real-Time ANPR Plate Recognition
+              <span>Plate Scanner</span>
             </h3>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--brand-primary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-              <Sparkles size={13} />
-              {isScanning ? 'OCR Processing...' : hasScanned ? 'ANPR Verified' : 'Engine Ready'}
-            </span>
+
+            {/* Clean Single Camera Action Button */}
+            {!isLiveCameraActive ? (
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <button
+                  type="button"
+                  onClick={() => cameraInputRef.current?.click()}
+                  className="btn btn-primary"
+                  style={{
+                    backgroundColor: '#B45309',
+                    borderColor: '#92400E',
+                    minHeight: '38px',
+                    padding: '0.35rem 0.85rem',
+                    fontSize: '0.8125rem',
+                    fontWeight: 700,
+                    gap: '0.4rem',
+                  }}
+                  title="Snap truck plate with camera"
+                >
+                  <Camera size={15} />
+                  <span>Snap Plate Photo</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => startLiveCamera()}
+                  disabled={isCameraStarting}
+                  className="btn btn-secondary"
+                  style={{
+                    minHeight: '38px',
+                    padding: '0.35rem 0.75rem',
+                    fontSize: '0.8125rem',
+                    gap: '0.35rem',
+                  }}
+                  title="Live video scanner"
+                >
+                  <Video size={15} />
+                  <span>Live Stream</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={stopLiveCamera}
+                className="btn btn-danger"
+                style={{
+                  minHeight: '38px',
+                  padding: '0.35rem 0.85rem',
+                  fontSize: '0.8125rem',
+                  fontWeight: 700,
+                  gap: '0.4rem',
+                }}
+              >
+                <VideoOff size={15} />
+                <span>Stop Stream</span>
+              </button>
+            )}
           </div>
+
+          {cameraError && (
+            <p style={{ fontSize: '0.75rem', color: '#DC2626', margin: 0 }}>
+              {cameraError}
+            </p>
+          )}
 
           {/* Live Camera Viewfinder or Static Snapshot Viewfinder */}
           {isLiveCameraActive ? (
@@ -1132,182 +999,45 @@ export const SiteAgentTerminal: React.FC = () => {
             </div>
           )}
 
-          {/* Match Verification & Recognition Pills */}
+          {/* Plate Capture Confirmation Banner */}
           {hasScanned && (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                {ocrMatchType === 'EXACT_FLEET' && (
-                  <span
-                    style={{
-                      fontSize: '0.7rem',
-                      fontWeight: 800,
-                      backgroundColor: '#D1FAE5',
-                      color: '#065F46',
-                      border: '1px solid #6EE7B7',
-                      padding: '0.2rem 0.5rem',
-                      borderRadius: 'var(--radius-sm)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.3rem',
-                    }}
-                  >
-                    <CheckCircle2 size={12} /> MASTER FLEET MATCH (BR-01)
-                  </span>
-                )}
-                {ocrMatchType === 'FUZZY_FLEET' && (
-                  <span
-                    style={{
-                      fontSize: '0.7rem',
-                      fontWeight: 800,
-                      backgroundColor: '#FEF3C7',
-                      color: '#B45309',
-                      border: '1px solid #FCD34D',
-                      padding: '0.2rem 0.5rem',
-                      borderRadius: 'var(--radius-sm)',
-                    }}
-                  >
-                    FUZZY FLEET MATCH (LEVENSHTEIN)
-                  </span>
-                )}
-                {ocrMatchType === 'SYNTACTIC_VALID' && (
-                  <span
-                    style={{
-                      fontSize: '0.7rem',
-                      fontWeight: 800,
-                      backgroundColor: '#FEE2E2',
-                      color: '#991B1B',
-                      border: '1px solid #FCA5A5',
-                      padding: '0.2rem 0.5rem',
-                      borderRadius: 'var(--radius-sm)',
-                    }}
-                  >
-                    UNREGISTERED NIGERIAN VEHICLE (EXCEPTION BR-01)
-                  </span>
-                )}
-              </div>
-
-              {preprocessedImageUrl && (
-                <span
-                  style={{
-                    fontSize: '0.7rem',
-                    color: 'var(--text-muted)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.3rem',
-                  }}
-                  title="Image preprocessed with pixel contrast curve boost"
-                >
-                  <Layers size={12} /> Contrast Preprocessed (75%)
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Nigerian Test Plates (Canvas Rendered Real Tesseract OCR Verification) */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-              <label
-                style={{
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  color: 'var(--text-muted)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em',
-                }}
-              >
-                Instant ANPR OCR Plate Verification:
-              </label>
-              <span style={{ fontSize: '0.68rem', color: '#0284C7', fontWeight: 600 }}>
-                Executes Real Tesseract
-              </span>
-            </div>
             <div
               style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-                gap: '0.45rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.5rem 0.75rem',
+                backgroundColor: '#F8FAFC',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                fontSize: '0.75rem',
               }}
             >
-              {[
-                {
-                  plate: 'KJA-482XY',
-                  truckId: 'trk-1',
-                  driverId: 'drv-1',
-                  label: 'Mack Granite (30T)',
-                  isUnregistered: false,
-                },
-                {
-                  plate: 'APP-914AA',
-                  truckId: 'trk-2',
-                  driverId: 'drv-2',
-                  label: 'Sino Dump (35T)',
-                  isUnregistered: false,
-                },
-                {
-                  plate: 'EPE-303ZZ',
-                  truckId: 'trk-3',
-                  driverId: 'drv-3',
-                  label: 'Actros (28T)',
-                  isUnregistered: false,
-                },
-                {
-                  plate: 'BDG-708BB',
-                  truckId: 'trk-4',
-                  driverId: 'drv-4',
-                  label: 'HOWO (32T)',
-                  isUnregistered: false,
-                },
-                {
-                  plate: 'IKD-882ZX',
-                  truckId: '',
-                  driverId: '',
-                  label: 'Unregistered Truck',
-                  isUnregistered: true,
-                },
-              ].map((p) => (
-                <button
-                  key={p.plate}
-                  type="button"
-                  onClick={() => handleScanPreset(p.plate, p.truckId, p.driverId, p.isUnregistered)}
-                  disabled={isScanning}
-                  style={{
-                    padding: '0.45rem 0.55rem',
-                    borderRadius: 'var(--radius-md)',
-                    border: confirmedPlate === p.plate
-                      ? '2px solid #B45309'
-                      : p.isUnregistered
-                      ? '1.5px dashed #EF4444'
-                      : '1px solid var(--border-subtle)',
-                    backgroundColor: confirmedPlate === p.plate
-                      ? '#FEF3C7'
-                      : p.isUnregistered
-                      ? '#FEF2F2'
-                      : '#FFFFFF',
-                    cursor: isScanning ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'flex-start',
-                    textAlign: 'left',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                    <strong style={{ fontSize: '0.78rem', color: confirmedPlate === p.plate ? '#B45309' : p.isUnregistered ? '#DC2626' : '#0F172A' }}>
-                      {p.plate}
-                    </strong>
-                    {p.isUnregistered && (
-                      <span style={{ fontSize: '0.55rem', fontWeight: 800, color: '#DC2626', backgroundColor: '#FEE2E2', padding: '0.05rem 0.25rem', borderRadius: '3px' }}>
-                        NEW
-                      </span>
-                    )}
-                  </div>
-                  <span style={{ fontSize: '0.65rem', color: p.isUnregistered ? '#B91C1C' : 'var(--text-muted)' }}>
-                    {p.label}
-                  </span>
-                </button>
-              ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#047857', fontWeight: 700 }}>
+                <CheckCircle2 size={14} />
+                <span>Plate Scanned ({confidenceScore}% Confidence)</span>
+              </div>
+              <button
+                type="button"
+                onClick={retakePlatePhoto}
+                disabled={isScanning || isCameraStarting}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.25rem',
+                }}
+              >
+                <RotateCcw size={12} />
+                <span>Retake</span>
+              </button>
             </div>
-          </div>
+          )}
 
           {/* OCR Result & Confirmed Registration */}
           <div
@@ -2323,68 +2053,45 @@ export const SiteAgentTerminal: React.FC = () => {
           </div>
         </div>
 
-        <div className="table-wrapper">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Waybill #</th>
-                <th>Truck Plate</th>
-                <th>Type</th>
-                <th>Tonnes</th>
-                <th>Route / Facility</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRecentTrips.length === 0 ? (
-                <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)' }}>
-                    No recent records matching filter.
-                  </td>
-                </tr>
-              ) : (
-                filteredRecentTrips.map((trip) => (
-                  <tr key={trip.id}>
-                    <td>
-                      <span className="mono" style={{ fontWeight: 700, color: 'var(--brand-primary)' }}>
-                        {trip.trip_number}
-                      </span>
-                    </td>
-                    <td>
-                      <PlateDisplay plate={trip.truck?.registration_number || 'UNKNOWN'} size="sm" />
-                    </td>
-                    <td>
-                      <span
-                        style={{
-                          fontSize: '0.7rem',
-                          fontWeight: 800,
-                          padding: '0.15rem 0.45rem',
-                          borderRadius: 'var(--radius-sm)',
-                          backgroundColor: trip.status === 'open' ? '#FEF3C7' : '#D1FAE5',
-                          color: trip.status === 'open' ? '#B45309' : '#047857',
-                        }}
-                      >
-                        {trip.status === 'open' ? 'PICKUP' : 'DELIVERY'}
-                      </span>
-                    </td>
-                    <td style={{ fontWeight: 700 }}>
-                      {trip.status === 'open'
-                        ? `${trip.loading_event?.estimated_tonnes || trip.truck?.capacity_tonnes || 30} T`
-                        : `${trip.offloading_event?.quantity || trip.loading_event?.estimated_tonnes || trip.truck?.capacity_tonnes || 30} T`}
-                    </td>
-                    <td style={{ fontSize: '0.8125rem' }}>
-                      {trip.status === 'open'
-                        ? `${trip.loading_site?.code} ➔ ${trip.offloading_site?.code}`
-                        : `Delivered at ${trip.offloading_site?.name}`}
-                    </td>
-                    <td>
-                      <StatusBadge status={trip.status} />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        {/* Mobile-Friendly Movement Cards */}
+        <div style={{ padding: '0.85rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+          {filteredRecentTrips.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--text-muted)', fontSize: '0.8125rem' }}>
+              No recent movement records.
+            </div>
+          ) : (
+            filteredRecentTrips.map((trip) => (
+              <div
+                key={trip.id}
+                style={{
+                  padding: '0.75rem 0.85rem',
+                  backgroundColor: '#F8FAFC',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.75rem',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0 }}>
+                  <PlateDisplay plate={trip.truck?.registration_number || 'UNKNOWN'} size="sm" />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--brand-primary)', fontFamily: 'var(--font-mono)' }}>
+                      #{trip.trip_number}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {trip.status === 'open' ? 'Dispatched' : 'Delivered'} • {trip.status === 'open' ? `${trip.loading_event?.estimated_tonnes || 30}T` : `${trip.offloading_event?.quantity || 30}T`}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ flexShrink: 0 }}>
+                  <StatusBadge status={trip.status} />
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
