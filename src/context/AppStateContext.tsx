@@ -318,7 +318,7 @@ const INITIAL_TRIPS: Trip[] = [
     trip_number: 'TRP-2026-08192',
     truck_id: 'trk-2',
     driver_id: 'drv-2',
-    loading_site_id: 'site-ikd-02',
+    loading_site_id: 'site-epe-01',
     offloading_site_id: 'site-lkk-01',
     status: 'open',
     loaded_at: new Date(Date.now() - 25 * 60 * 1000).toISOString(), // 25 mins ago
@@ -558,6 +558,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       sessionStorage.removeItem('dredgeops_auth_role');
       sessionStorage.removeItem('dredgeops_authenticated');
+      sessionStorage.removeItem('dredgeops_siteagent_mode');
+      sessionStorage.removeItem('dredgeops_siteagent_mode_selected');
     } catch {
       // ignore
     }
