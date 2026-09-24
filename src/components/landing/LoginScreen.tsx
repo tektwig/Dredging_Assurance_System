@@ -285,7 +285,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
                   autoCapitalize="none"
                   autoCorrect="off"
                   required
-                  placeholder="e.g. agent@tektwig.com"
                   value={identifier}
                   onChange={(e) => {
                     setIdentifier(e.target.value);
@@ -341,7 +340,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
                   type={showPassword ? 'text' : 'password'}
                   autoComplete="current-password"
                   required
-                  placeholder="••••••••••••"
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value);
