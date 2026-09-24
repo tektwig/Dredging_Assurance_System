@@ -6,13 +6,16 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit --incremental false && tsc -p tsconfig.node.json --noEmit --incremental false",
+    "test:frontend": "node scripts/test-frontend-foundation.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
     "lucide-react": "^0.477.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-router-dom": "6.30.4",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {

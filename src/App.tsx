@@ -1,10 +1,32 @@
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { AuthProvider } from './auth/AuthProvider';
+import { StatusPage } from './components/StatusPage';
+import { AuthenticatedLayout } from './layouts/AuthenticatedLayout';
+import { configurationError } from './lib/supabase';
+import { AccessDeniedPage } from './pages/AccessDeniedPage';
+import { LoginPage } from './pages/LoginPage';
+import { PortalPage } from './pages/PortalPage';
+import { AccountGate, HomeRedirect, LoginOnly, RequireRole, RequireSession } from './routing/RouteGuards';
+import { PORTALS, type PortalRole } from './routing/roleRoutes';
+
 export default function App() {
-  return (
-    <div style={{ padding: '3rem 1.5rem', textAlign: 'center', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-      <h1>Adams Dredging Assurance System</h1>
-      <p style={{ color: '#94A3B8', marginTop: '0.5rem' }}>
-        Sand Haulage Waybill & Revenue Assurance System — Base Project Scaffold
-      </p>
-    </div>
-  );
+  if (configurationError) return <StatusPage title="Application configuration required">
+    <p role="alert">{configurationError}</p>
+  </StatusPage>;
+  return <BrowserRouter><AuthProvider><Routes>
+    <Route element={<AccountGate />}>
+      <Route element={<LoginOnly />}><Route path="/login" element={<LoginPage />} /></Route>
+      <Route element={<RequireSession />}>
+        <Route path="/access-denied" element={<AccessDeniedPage />} />
+      </Route>
+      {(Object.keys(PORTALS) as PortalRole[]).map(role =>
+        <Route key={role} element={<RequireRole role={role} />}>
+          <Route element={<AuthenticatedLayout />}>
+            <Route path={PORTALS[role].path} element={<PortalPage role={role} />} />
+          </Route>
+        </Route>
+      )}
+      <Route path="*" element={<HomeRedirect />} />
+    </Route>
+  </Routes></AuthProvider></BrowserRouter>;
 }
