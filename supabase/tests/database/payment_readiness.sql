@@ -13,6 +13,18 @@ begin
   raise exception 'Expected SQLSTATE %, but command succeeded: %', expected_state, command;
 end;
 $$;
+-- Run this regression suite both before and after Loading Alignment.
+create function pg_temp.open_payment_trip(p_plate text) returns jsonb language plpgsql as $$
+declare t uuid; a uuid;
+begin
+  if to_regclass('public.user_site_assignments') is null then
+    return public.create_loading_trip(p_plate);
+  end if;
+  select (public.lookup_loading_truck(p_plate)#>>'{default_driver,id}')::uuid into t;
+  select id into a from public.user_site_assignments where profile_id=auth.uid() and ended_at is null;
+  return public.create_loading_trip_v2(gen_random_uuid(),p_plate,t,a,'MANUAL',clock_timestamp());
+end;
+$$;
 insert into auth.users(id,email,raw_user_meta_data)
 select ('00000000-0000-0000-0000-00000000000'||n)::uuid, 'role'||n||'@example.invalid','{}'::jsonb from generate_series(1,6) n;
 update public.profiles set is_active=true, role=case right(id::text,1)
@@ -24,19 +36,25 @@ select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000001'
 insert into public.sites(id,name,site_type) values
  ('10000000-0000-0000-0000-000000000001','Loading','loading'),
  ('10000000-0000-0000-0000-000000000002','Offloading','offloading');
+do $$ begin
+  if to_regclass('public.user_site_assignments') is not null then
+    perform public.assign_user_site('00000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000001');
+    perform public.assign_user_site('00000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001');
+  end if;
+end $$;
 insert into public.drivers(id,full_name,phone_number,email) values
  ('20000000-0000-0000-0000-000000000001','Driver without bank details','08000000001','driver@example.invalid');
 insert into public.trucks(id,registration_number,driver_id) values
  ('30000000-0000-0000-0000-000000000001','TEST-123','20000000-0000-0000-0000-000000000001');
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',true);
-select pg_temp.assert_true(public.create_loading_trip('test 123')->>'ok'='true','trip opens without banking prerequisites');
-select set_config('test.delivery',(select id::text from public.trips where status='open'),true);
+select pg_temp.assert_true(pg_temp.open_payment_trip('test 123')->>'ok'='true','trip opens without banking prerequisites');
+select set_config('test.delivery',(select id::text from public.trips where status='open' and truck_id='30000000-0000-0000-0000-000000000001'),true);
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000003',true);
 select pg_temp.assert_true(public.close_trip(current_setting('test.delivery')::uuid,'10000000-0000-0000-0000-000000000002',12.34)->>'ok'='true','trip closes without bank details');
 select pg_temp.assert_true((select status='closed' and quantity_tonnes=12.34 and closed_at is not null and closed_by=auth.uid() from public.trips where id=current_setting('test.delivery')::uuid),'physical delivery retained with quantity, actor and timestamp');
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',true);
-select pg_temp.assert_true(public.create_loading_trip('TEST123')->>'ok'='true','truck immediately free for next trip');
-select set_config('test.delivery_two',(select id::text from public.trips where status='open'),true);
+select pg_temp.assert_true(pg_temp.open_payment_trip('TEST123')->>'ok'='true','truck immediately free for next trip');
+select set_config('test.delivery_two',(select id::text from public.trips where status='open' and truck_id='30000000-0000-0000-0000-000000000001'),true);
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000003',true);
 select pg_temp.assert_true(public.close_trip(current_setting('test.delivery_two')::uuid,'10000000-0000-0000-0000-000000000002',20)->>'ok'='true','another physical delivery can complete before banking resolution');
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000004',true);
@@ -51,7 +69,7 @@ select pg_temp.assert_true((select count(*)=1 from public.notification_outbox wh
 select pg_temp.assert_true((select count(*)=1 from public.notification_outbox where trip_id=current_setting('test.delivery')::uuid and audience='driver'),'valid email gets appropriate driver notification');
 select pg_temp.expect_error($q$select public.mark_trip_payment_paid(current_setting('test.payment')::uuid,'CANNOT-PAY-YET')$q$,'22023');
 select pg_temp.expect_error($q$select public.complete_trip_payment_details(current_setting('test.payment')::uuid,'Driver','invalid','Bank','Invalid account')$q$,'23514');
-select pg_temp.assert_true((select count(*)=0 from public.driver_payment_details),'invalid completion leaves no bank row');
+select pg_temp.assert_true((select count(*)=0 from public.driver_payment_details where driver_id='20000000-0000-0000-0000-000000000001'),'invalid completion leaves no bank row');
 select pg_temp.assert_true((select status='payment_details_required' from public.trip_payments where id=current_setting('test.payment')::uuid),'invalid completion leaves readiness unchanged');
 reset role;
 select pg_temp.assert_true((select private.trip_email(payload,array['finance@example.invalid'],'sender@example.invalid')->>'text' like '%Trip physically completed.%payment could not be processed%'
@@ -76,7 +94,8 @@ select pg_temp.assert_true((select status='pending' and account_name is null and
  and supplied_account_name='Driver Account' and supplied_account_number='0123456789' and supplied_bank_name='Test Bank'
  and payment_ready_at is not null and payment_ready_by=auth.uid() from public.trip_payments where id=current_setting('test.payment')::uuid),'completion preserves original unknowns and records later information with actor/time');
 select pg_temp.assert_true((select count(*)=1 from public.audit_log where entity_name='trip_payments' and entity_id=current_setting('test.payment')::uuid
- and old_value->>'status'='payment_details_required' and new_value->>'status'='pending' and actor_id=auth.uid() and reason='Finance confirmed supplied details'),'readiness transition audited');
+ and old_value->>'status'='payment_details_required' and new_value->>'status'='pending' and actor_id=auth.uid()
+ and reason='Finance confirmed supplied details'),'readiness transition audited');
 select pg_temp.assert_true((select account_number='0123456789' from public.driver_payment_details where driver_id='20000000-0000-0000-0000-000000000001'),'driver bank details populated atomically');
 select pg_temp.assert_true((select status='payment_details_required' from public.trip_payments where id=current_setting('test.payment_two')::uuid),'other affected payments are not silently rewritten');
 select pg_temp.assert_true((select payload->>'payment_status'='payment_details_required' and payload->>'account_number' is null from public.notification_outbox
@@ -88,8 +107,8 @@ select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000001'
 select public.complete_trip_payment_details(current_setting('test.payment_two')::uuid,'Driver Updated Account','9999999999','Other Bank','Administrator confirmed details for second payment');
 select pg_temp.assert_true((select status='pending' and payment_ready_by=auth.uid() from public.trip_payments where id=current_setting('test.payment_two')::uuid),'administrator may also complete details');
 select pg_temp.assert_true((select supplied_account_number='0123456789' from public.trip_payments where id=current_setting('test.payment')::uuid),'later bank updates cannot change already supplied payment information');
-select public.create_loading_trip('TEST123');
-select set_config('test.complete_bank_trip',(select id::text from public.trips where status='open'),true);
+select pg_temp.open_payment_trip('TEST123');
+select set_config('test.complete_bank_trip',(select id::text from public.trips where status='open' and truck_id='30000000-0000-0000-0000-000000000001'),true);
 select public.close_trip(current_setting('test.complete_bank_trip')::uuid,'10000000-0000-0000-0000-000000000002',30);
 select pg_temp.assert_true((select status='pending' and account_number='9999999999' and supplied_account_number is null and payment_ready_at is not null
  from public.trip_payments where trip_id=current_setting('test.complete_bank_trip')::uuid),'subsequent complete-bank closure snapshots bank and starts pending');
@@ -130,4 +149,5 @@ select pg_temp.assert_visibility(false); -- audit reviewer
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000006',true);
 select pg_temp.assert_visibility(false); -- operations manager
 reset role;
+set constraints all immediate;
 rollback;

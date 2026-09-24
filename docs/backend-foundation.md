@@ -1,8 +1,10 @@
 # MVP backend foundation
 
-This document records the approved MVP implemented by the three migrations in
-`supabase/migrations`. It supersedes the original BRD/TRD for this milestone.
-The frontend is unchanged. No remote database was linked or modified.
+This document records the earlier MVP checkpoint implemented by the original
+three migrations. Its daily-driver, loading-site, Loading RPC and audit behavior
+has been superseded by [loading-backend-alignment.md](loading-backend-alignment.md)
+for the current Loading V2 contract. The historical behavior remains here for
+checkpoint review. No remote database was linked or modified.
 
 ## Model and invariants
 
@@ -270,9 +272,12 @@ node scripts/test-edge-handler.mjs
 git diff --check
 ```
 
-With Docker/Podman available, start a fresh local Supabase instance, apply local
-migrations, run `npx --no-install supabase db lint --local`, and execute
-both files in `supabase/tests/database/` using psql with `ON_ERROR_STOP=1`.
+With Docker/Podman available, start a fresh local Supabase instance and apply local
+migrations, then run `npx --no-install supabase db lint --local`. Execute
+`mvp_foundation.sql` and the legacy `payment_readiness.sql` only at the original
+three-migration checkpoint. After the Loading V2 migration, run
+`loading_alignment.sql` and `payment_readiness.sql`; use the embedded harness
+below for the full before/after upgrade sequence.
 The SQL fixtures are development-only and roll back. Do not run them against remote
 data. A reset destroys the selected local database; use a disposable instance.
 
