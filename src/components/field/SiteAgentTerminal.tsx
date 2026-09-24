@@ -75,6 +75,7 @@ export const SiteAgentTerminal: React.FC = () => {
   // Live hardware camera input ref
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const previewObjectUrlRef = useRef<string | null>(null);
+  const capturePurposeRef = useRef<'general' | 'delivery'>('general');
 
   const [hasScanned, setHasScanned] = useState(false);
 
@@ -169,6 +170,12 @@ export const SiteAgentTerminal: React.FC = () => {
     'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=80'
   );
   const [deliveryNotes, setDeliveryNotes] = useState('');
+  const [deliveryPlateEvidence, setDeliveryPlateEvidence] = useState<{
+    plate: string;
+    imageUrl: string;
+    confidence: number;
+    capturedAt: string;
+  } | null>(null);
   const [isFlaggingException, setIsFlaggingException] = useState(false);
   const [exceptionType, setExceptionType] = useState<ExceptionType>('quantity_mismatch');
   const [exceptionDesc, setExceptionDesc] = useState('');
@@ -186,14 +193,29 @@ export const SiteAgentTerminal: React.FC = () => {
     (t) =>
       t.truck_id === selectedTruckId ||
       t.truck?.registration_number.toLowerCase() === confirmedPlate.toLowerCase()
-  ) || (openTrips.length > 0 ? openTrips[0] : null);
+  ) || null;
+
+  const normalizePlate = (plate: string) => plate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  const expectedDeliveryPlate = matchingOpenTrip?.truck?.registration_number || '';
+  const deliveryPlateMatchesTrip = !!deliveryPlateEvidence && !!matchingOpenTrip &&
+    normalizePlate(deliveryPlateEvidence.plate) === normalizePlate(expectedDeliveryPlate);
 
   const retakePlatePhoto = () => {
+    capturePurposeRef.current = movementType === 'delivery' ? 'delivery' : 'general';
     setHasScanned(false);
     setIsScanning(false);
     setOcrProgress(0);
     setOcrStatus('Ready for capture');
     setIsUnregisteredModalOpen(false);
+    cameraInputRef.current?.click();
+  };
+
+  const captureDeliveryPlate = () => {
+    capturePurposeRef.current = 'delivery';
+    setDeliveryPlateEvidence(null);
+    setHasScanned(false);
+    setOcrProgress(0);
+    setOcrStatus('Ready for capture');
     cameraInputRef.current?.click();
   };
 
@@ -220,6 +242,16 @@ export const SiteAgentTerminal: React.FC = () => {
 
       setConfirmedPlate(result.candidatePlate);
       setConfidenceScore(result.confidence);
+
+      if (capturePurposeRef.current === 'delivery' || movementType === 'delivery') {
+        setDeliveryPlateEvidence({
+          plate: result.candidatePlate,
+          imageUrl: previewUrl,
+          confidence: result.confidence,
+          capturedAt: new Date().toISOString(),
+        });
+      }
+      capturePurposeRef.current = 'general';
 
       const normalized = result.candidatePlate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
       const matched = result.matchedTruck || trucks.find((t) => t.normalized_registration === normalized);
@@ -429,6 +461,14 @@ export const SiteAgentTerminal: React.FC = () => {
   // Submit Delivery (Offloading Gate / Weighbridge Close)
   const handleCompleteDelivery = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!deliveryPlateEvidence) {
+      setToastMessage({
+        text: 'Snap and verify the arriving truck plate before confirming delivery.',
+        type: 'warning',
+      });
+      setTimeout(() => setToastMessage(null), 4500);
+      return;
+    }
     if (!matchingOpenTrip) {
       setToastMessage({
         text: 'No active inbound trip found for this truck to close.',
@@ -437,12 +477,24 @@ export const SiteAgentTerminal: React.FC = () => {
       setTimeout(() => setToastMessage(null), 4500);
       return;
     }
+    if (!deliveryPlateMatchesTrip) {
+      setToastMessage({
+        text: `Delivery plate ${deliveryPlateEvidence.plate} does not match waybill truck ${expectedDeliveryPlate}. Flag the discrepancy instead of closing the trip.`,
+        type: 'warning',
+      });
+      setTimeout(() => setToastMessage(null), 5500);
+      return;
+    }
 
     const result = closeOffloadingTrip(matchingOpenTrip.id, {
       quantity: deliveredTonnes,
       unit: 'tonnes' as QuantityUnit,
       scaleTicketNumber,
       scaleTicketUrl: ticketPhotoUrl,
+      deliveryPlateImageUrl: deliveryPlateEvidence.imageUrl,
+      deliveryConfirmedPlate: deliveryPlateEvidence.plate,
+      deliveryPlateConfidence: deliveryPlateEvidence.confidence,
+      deliveryPlateCapturedAt: deliveryPlateEvidence.capturedAt,
       notes: deliveryNotes,
     });
 
@@ -452,6 +504,7 @@ export const SiteAgentTerminal: React.FC = () => {
         type: result.varianceAlert ? 'warning' : 'success',
       });
       setDeliveryNotes('');
+      setDeliveryPlateEvidence(null);
       setTimeout(() => setToastMessage(null), 4500);
     }
   };
@@ -1503,6 +1556,59 @@ export const SiteAgentTerminal: React.FC = () => {
                 </span>
               </div>
 
+              {/* Mandatory fresh delivery-gate plate evidence */}
+              <div
+                style={{
+                  padding: '0.9rem 1rem',
+                  backgroundColor: deliveryPlateMatchesTrip ? '#F0FDF4' : '#FFF7ED',
+                  border: `1.5px solid ${deliveryPlateMatchesTrip ? '#86EFAC' : '#FDBA74'}`,
+                  borderRadius: 'var(--radius-md)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.85rem',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                  {deliveryPlateEvidence?.imageUrl ? (
+                    <img
+                      src={deliveryPlateEvidence.imageUrl}
+                      alt="Delivery gate plate evidence"
+                      style={{ width: '72px', height: '52px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--border-default)' }}
+                    />
+                  ) : (
+                    <div style={{ width: '72px', height: '52px', borderRadius: '6px', backgroundColor: '#FFEDD5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Camera size={22} color="#C2410C" />
+                    </div>
+                  )}
+                  <div>
+                    <strong style={{ display: 'block', fontSize: '0.82rem', color: deliveryPlateMatchesTrip ? '#166534' : '#9A3412' }}>
+                      {deliveryPlateMatchesTrip
+                        ? `Delivery plate verified: ${deliveryPlateEvidence?.plate}`
+                        : deliveryPlateEvidence
+                        ? `Review plate: ${deliveryPlateEvidence.plate}`
+                        : 'Delivery plate photo required'}
+                    </strong>
+                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
+                      {deliveryPlateEvidence
+                        ? `${deliveryPlateEvidence.confidence}% confidence • Must match the active waybill truck`
+                        : 'Take a fresh photo of the arriving truck before completing the weighbridge fields.'}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className={deliveryPlateMatchesTrip ? 'btn btn-secondary' : 'btn btn-primary'}
+                  onClick={captureDeliveryPlate}
+                  disabled={isScanning || isCameraStarting}
+                  style={{ minHeight: '42px' }}
+                >
+                  <Camera size={16} />
+                  {deliveryPlateEvidence ? 'Retake Delivery Plate' : 'Snap Delivery Plate'}
+                </button>
+              </div>
+
               {/* Linked Inbound Waybill Card */}
               {matchingOpenTrip ? (
                 <div
@@ -1650,13 +1756,21 @@ export const SiteAgentTerminal: React.FC = () => {
                     />
                   </div>
 
+                  {!deliveryPlateMatchesTrip && (
+                    <div style={{ padding: '0.65rem 0.8rem', backgroundColor: '#FFF7ED', border: '1px solid #FDBA74', borderRadius: 'var(--radius-md)', color: '#9A3412', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+                      <span>A fresh delivery-gate plate photo must match the inbound waybill before this trip can be closed.</span>
+                    </div>
+                  )}
+
                   {/* Complete Delivery Action Button */}
                   <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
                     <button
                       type="submit"
                       className="btn btn-success btn-lg"
                       style={{ flex: 1 }}
-                      disabled={!matchingOpenTrip}
+                      disabled={!matchingOpenTrip || !deliveryPlateMatchesTrip}
+                      title={!deliveryPlateMatchesTrip ? 'Verify the arriving truck plate first' : 'Close this delivery trip'}
                     >
                       <CheckCircle2 size={18} />
                       <span>Save as Delivery & Close Trip</span>

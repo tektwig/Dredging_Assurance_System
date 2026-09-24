@@ -92,6 +92,11 @@ export interface TripOffloadingEvent {
   ticket_image_url?: string;
   scale_ticket_number?: string;
   scale_ticket_url?: string;
+  delivery_plate_image_url?: string;
+  delivery_extracted_plate?: string;
+  delivery_confirmed_plate?: string;
+  delivery_plate_confidence?: number;
+  delivery_plate_captured_at?: string;
   closed_by?: string;
   closed_by_name?: string;
   closed_by_id?: string;
