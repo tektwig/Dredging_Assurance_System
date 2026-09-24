@@ -13,9 +13,19 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     sites,
     signOut,
     isOnline,
+    isLiveMode,
+    liveSyncError,
     draftTrips,
     syncOfflineDrafts,
   } = useAppState();
+  const isLiveHealthy = isOnline && (!isLiveMode || !liveSyncError);
+  const connectionLabel = !isOnline
+    ? `Offline (${draftTrips.length})`
+    : liveSyncError
+      ? 'Live Sync Error'
+      : isLiveMode
+        ? 'Live Sync'
+        : 'Online';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: '#FFFFFF' }}>
@@ -55,18 +65,21 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
           {/* Right Header Controls */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
             {/* PWA / Network Status Pill */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600 }}>
+            <div
+              title={liveSyncError || (isLiveMode ? 'Trips update automatically across signed-in devices.' : 'Local mode')}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 600 }}
+            >
               <span
                 style={{
                   width: 8,
                   height: 8,
                   borderRadius: '50%',
-                  backgroundColor: isOnline ? '#10B981' : '#EF4444',
-                  boxShadow: isOnline ? '0 0 6px rgba(16, 185, 129, 0.6)' : '0 0 6px rgba(239, 68, 68, 0.6)',
+                  backgroundColor: isLiveHealthy ? '#10B981' : '#EF4444',
+                  boxShadow: isLiveHealthy ? '0 0 6px rgba(16, 185, 129, 0.6)' : '0 0 6px rgba(239, 68, 68, 0.6)',
                 }}
               />
-              <span style={{ color: isOnline ? '#059669' : '#DC2626' }}>
-                {isOnline ? 'Online' : `Offline (${draftTrips.length})`}
+              <span style={{ color: isLiveHealthy ? '#059669' : '#DC2626' }}>
+                {connectionLabel}
               </span>
 
               {draftTrips.length > 0 && isOnline && (

@@ -73,6 +73,7 @@ export const SiteAgentTerminal: React.FC = () => {
     raiseTripException,
     addTruck,
     addDriver,
+    lookupTruckByPlate,
   } = useAppState();
 
   // Live hardware camera input ref
@@ -210,6 +211,14 @@ export const SiteAgentTerminal: React.FC = () => {
   const currentTruck = trucks.find((t) => t.id === selectedTruckId);
   const currentDriver = drivers.find((d) => d.id === selectedDriverId);
   const offloadingSites = sites.filter((s) => s.site_type === 'offloading');
+
+  useEffect(() => {
+    if (offloadingSites.length === 0 && destinationSiteId) {
+      setDestinationSiteId('');
+    } else if (offloadingSites.length > 0 && !offloadingSites.some((site) => site.id === destinationSiteId)) {
+      setDestinationSiteId(offloadingSites[0].id);
+    }
+  }, [destinationSiteId, offloadingSites]);
 
   // Check if there is an existing in-transit trip matching this truck for Delivery
   const matchingOpenTrip = openTrips.find(
@@ -371,14 +380,19 @@ export const SiteAgentTerminal: React.FC = () => {
       capturePurposeRef.current = 'general';
 
       const normalized = result.candidatePlate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-      const matched = result.matchedTruck || trucks.find((t) => t.normalized_registration === normalized);
+      const liveLookup = await lookupTruckByPlate(result.candidatePlate);
+      const matched = liveLookup.truck || result.matchedTruck || trucks.find((t) => t.normalized_registration === normalized);
 
       if (matched) {
         setSelectedTruckId(matched.id);
         const tonnage = matched.capacity_tonnes || matched.capacity || 30;
         setEstimatedTonnes(tonnage);
         setDeliveredTonnes(tonnage);
-        const driver = drivers.find((d) => d.assigned_truck_id === matched.id) || drivers[0];
+        const openTripDriverId = openTrips.find((trip) => trip.truck_id === matched.id)?.driver_id;
+        const driver = liveLookup.driver
+          || drivers.find((item) => item.id === openTripDriverId)
+          || drivers.find((item) => item.assigned_truck_id === matched.id)
+          || drivers[0];
         if (driver) setSelectedDriverId(driver.id);
         setIsUnregisteredModalOpen(false);
       } else {
@@ -545,8 +559,12 @@ export const SiteAgentTerminal: React.FC = () => {
   };
 
   // Submit Pickup (Loading Gate Dispatch)
-  const handleDispatchPickup = (e: React.FormEvent) => {
+  const handleDispatchPickup = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!hasScanned) {
+      setToastMessage({ text: 'Scan the truck plate before issuing a live waybill.', type: 'warning' });
+      return;
+    }
     if (!selectedTruckId || !selectedDriverId) {
       setToastMessage({
         text: 'Vehicle and Driver must be registered before issuing a waybill. Please complete registration.',
@@ -556,27 +574,33 @@ export const SiteAgentTerminal: React.FC = () => {
       return;
     }
 
-    const newTrip = createLoadingTrip({
-      plate: confirmedPlate,
-      truckId: selectedTruckId,
-      driverId: selectedDriverId,
-      offloadingSiteId: destinationSiteId,
-      estimatedTonnes,
-      plateImageUrl: photoUrl,
-      confidenceScore,
-      notes: pickupNotes,
-    });
-
-    setToastMessage({
-      text: `Waybill Issued! Trip ${newTrip.trip_number} dispatched for Pickup.`,
-      type: 'success',
-    });
-    setPickupNotes('');
-    setTimeout(() => setToastMessage(null), 4500);
+    try {
+      const newTrip = await createLoadingTrip({
+        plate: confirmedPlate,
+        truckId: selectedTruckId,
+        driverId: selectedDriverId,
+        offloadingSiteId: destinationSiteId,
+        estimatedTonnes,
+        plateImageUrl: photoUrl,
+        confidenceScore,
+        notes: pickupNotes,
+      });
+      setToastMessage({
+        text: `Live waybill issued! Trip ${newTrip.trip_number} is now visible at the delivery gate.`,
+        type: 'success',
+      });
+      setPickupNotes('');
+    } catch (error: unknown) {
+      setToastMessage({
+        text: error instanceof Error ? error.message : 'The live waybill could not be issued.',
+        type: 'warning',
+      });
+    }
+    setTimeout(() => setToastMessage(null), 5500);
   };
 
   // Submit Delivery (Offloading Gate / Weighbridge Close)
-  const handleCompleteDelivery = (e: React.FormEvent) => {
+  const handleCompleteDelivery = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!deliveryPlateEvidence) {
       setToastMessage({
@@ -603,7 +627,7 @@ export const SiteAgentTerminal: React.FC = () => {
       return;
     }
 
-    const result = closeOffloadingTrip(matchingOpenTrip.id, {
+    const result = await closeOffloadingTrip(matchingOpenTrip.id, {
       quantity: deliveredTonnes,
       unit: 'tonnes' as QuantityUnit,
       scaleTicketNumber,
@@ -623,6 +647,9 @@ export const SiteAgentTerminal: React.FC = () => {
       setDeliveryNotes('');
       setDeliveryPlateEvidence(null);
       setTimeout(() => setToastMessage(null), 4500);
+    } else {
+      setToastMessage({ text: result.message || 'The live trip could not be closed.', type: 'warning' });
+      setTimeout(() => setToastMessage(null), 5000);
     }
   };
 
@@ -1597,6 +1624,9 @@ export const SiteAgentTerminal: React.FC = () => {
                     value={destinationSiteId}
                     onChange={(e) => setDestinationSiteId(e.target.value)}
                   >
+                    {offloadingSites.length === 0 && (
+                      <option value="">Assigned automatically at the delivery gate</option>
+                    )}
                     {offloadingSites.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.code} — {s.name}
@@ -1667,19 +1697,22 @@ export const SiteAgentTerminal: React.FC = () => {
               <button
                 type="submit"
                 className="btn btn-primary btn-lg"
-                disabled={!selectedTruckId || !selectedDriverId}
+                disabled={!hasScanned || !selectedTruckId || !selectedDriverId}
+                title={!hasScanned ? 'Scan the truck plate before issuing a live waybill' : 'Issue the live waybill'}
                 style={{
                   width: '100%',
                   marginTop: '0.25rem',
-                  backgroundColor: (!selectedTruckId || !selectedDriverId) ? '#94A3B8' : '#B45309',
-                  borderColor: (!selectedTruckId || !selectedDriverId) ? '#94A3B8' : '#92400E',
-                  cursor: (!selectedTruckId || !selectedDriverId) ? 'not-allowed' : 'pointer',
-                  boxShadow: (!selectedTruckId || !selectedDriverId) ? 'none' : '0 2px 4px 0 rgba(180, 83, 9, 0.25)',
+                  backgroundColor: (!hasScanned || !selectedTruckId || !selectedDriverId) ? '#94A3B8' : '#B45309',
+                  borderColor: (!hasScanned || !selectedTruckId || !selectedDriverId) ? '#94A3B8' : '#92400E',
+                  cursor: (!hasScanned || !selectedTruckId || !selectedDriverId) ? 'not-allowed' : 'pointer',
+                  boxShadow: (!hasScanned || !selectedTruckId || !selectedDriverId) ? 'none' : '0 2px 4px 0 rgba(180, 83, 9, 0.25)',
                 }}
               >
                 <TruckIcon size={18} />
                 <span>
-                  {(!selectedTruckId || !selectedDriverId)
+                  {!hasScanned
+                    ? 'Scan Plate to Issue Waybill'
+                    : (!selectedTruckId || !selectedDriverId)
                     ? 'Registration Required to Issue Waybill'
                     : 'Save as Pickup & Issue Digital Waybill'}
                 </span>
@@ -1798,6 +1831,10 @@ export const SiteAgentTerminal: React.FC = () => {
                   </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
                     Dispatched from: <strong>{matchingOpenTrip?.loading_site?.name}</strong> • Expected: <strong>{matchingOpenTrip?.loading_event?.estimated_tonnes || matchingOpenTrip?.truck?.capacity_tonnes || 30} Tonnes</strong>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                    Driver: <strong>{matchingOpenTrip.driver?.full_name || 'Driver details on file'}</strong>
+                    {matchingOpenTrip.driver?.phone ? ` • ${matchingOpenTrip.driver.phone}` : ''}
                   </div>
                 </div>
               ) : (

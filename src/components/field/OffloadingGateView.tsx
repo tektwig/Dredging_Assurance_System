@@ -57,11 +57,11 @@ export const OffloadingGateView: React.FC = () => {
   const variancePercent = Number(((variance / estimatedTonnes) * 100).toFixed(1));
   const isHighVariance = Math.abs(variancePercent) > 12;
 
-  const handleCloseTrip = (e: React.FormEvent) => {
+  const handleCloseTrip = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTripId) return;
 
-    const result = closeOffloadingTrip(selectedTripId, {
+    const result = await closeOffloadingTrip(selectedTripId, {
       quantity,
       unit,
       scaleTicketNumber,
@@ -79,6 +79,12 @@ export const OffloadingGateView: React.FC = () => {
       const remaining = openTrips.filter((t) => t.id !== selectedTripId);
       setSelectedTripId(remaining.length > 0 ? remaining[0].id : null);
 
+      setTimeout(() => setToastMessage(null), 4500);
+    } else {
+      setToastMessage({
+        text: result.message || 'The live trip could not be closed.',
+        type: 'warning',
+      });
       setTimeout(() => setToastMessage(null), 4500);
     }
   };

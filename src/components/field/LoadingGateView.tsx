@@ -75,19 +75,22 @@ export const LoadingGateView: React.FC = () => {
     }
   };
 
-  const handleDispatchTrip = (e: React.FormEvent) => {
+  const handleDispatchTrip = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newTrip = createLoadingTrip({
-      plate: confirmedPlate,
-      truckId: selectedTruckId,
-      driverId: selectedDriverId,
-      offloadingSiteId: destinationSiteId,
-      estimatedTonnes,
-      plateImageUrl: photoUrl,
-      confidenceScore,
-    });
-
-    setSuccessToast(`Waybill Issued! Trip ${newTrip.trip_number} dispatched.`);
+    try {
+      const newTrip = await createLoadingTrip({
+        plate: confirmedPlate,
+        truckId: selectedTruckId,
+        driverId: selectedDriverId,
+        offloadingSiteId: destinationSiteId,
+        estimatedTonnes,
+        plateImageUrl: photoUrl,
+        confidenceScore,
+      });
+      setSuccessToast(`Waybill Issued! Trip ${newTrip.trip_number} dispatched.`);
+    } catch (error: unknown) {
+      setSuccessToast(error instanceof Error ? error.message : 'The live waybill could not be issued.');
+    }
     setTimeout(() => setSuccessToast(null), 4500);
   };
 

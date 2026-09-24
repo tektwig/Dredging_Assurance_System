@@ -15,6 +15,15 @@ import {
   DraftTrip,
 } from '../types';
 import { INITIAL_INVOICES, INITIAL_PAYOUT_BATCHES } from '../services/mockData';
+import { isSupabaseLive, supabase } from '../services/supabase';
+import {
+  closeLiveTrip,
+  createLiveLoadingTrip,
+  fetchLiveSnapshot,
+  LiveTruckLookup,
+  lookupLiveTruck,
+  subscribeToLiveTrips,
+} from '../services/liveOperations';
 
 interface AppStateContextType {
   // Authentication & Role
@@ -46,6 +55,8 @@ interface AppStateContextType {
   setIsOnline: (online: boolean) => void;
   draftTrips: DraftTrip[];
   syncOfflineDrafts: () => void;
+  isLiveMode: boolean;
+  liveSyncError: string | null;
 
   // Helper Lookups
   activeSite?: Site;
@@ -63,7 +74,7 @@ interface AppStateContextType {
     plateImageUrl: string;
     confidenceScore: number;
     notes?: string;
-  }) => Trip;
+  }) => Promise<Trip>;
 
   closeOffloadingTrip: (
     tripId: string,
@@ -78,7 +89,8 @@ interface AppStateContextType {
       deliveryPlateCapturedAt?: string;
       notes?: string;
     }
-  ) => { success: boolean; varianceAlert?: boolean; message?: string };
+  ) => Promise<{ success: boolean; varianceAlert?: boolean; message?: string }>;
+  lookupTruckByPlate: (plate: string) => Promise<LiveTruckLookup>;
 
   raiseTripException: (
     tripId: string,
@@ -553,6 +565,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const signOut = () => {
+    if (isSupabaseLive && supabase) void supabase.auth.signOut();
     setAuthenticatedRole(null);
     setIsAuthenticated(false);
     try {
@@ -580,7 +593,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const [sites] = useState<Site[]>(INITIAL_SITES);
+  const [sites, setSites] = useState<Site[]>(INITIAL_SITES);
   const [trucks, setTrucks] = useState<Truck[]>(() => {
     const saved = localStorage.getItem('dredgeops_trucks');
     return saved ? JSON.parse(saved) : INITIAL_TRUCKS;
@@ -610,6 +623,41 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const saved = localStorage.getItem('dredgeops_draft_trips');
     return saved ? JSON.parse(saved) : [];
   });
+  const [liveSyncError, setLiveSyncError] = useState<string | null>(null);
+
+  const refreshLiveData = async () => {
+    if (!isSupabaseLive || !supabase || !isAuthenticated) return;
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session) {
+      setLiveSyncError('Live session expired. Sign out and sign in again.');
+      return;
+    }
+
+    try {
+      const snapshot = await fetchLiveSnapshot(authenticatedRole);
+      setLiveSyncError(null);
+      if (snapshot.sites.length) setSites(snapshot.sites);
+      if (snapshot.trucks.length) setTrucks(snapshot.trucks);
+      if (snapshot.drivers.length) setDrivers(snapshot.drivers);
+      setTrips(snapshot.trips);
+      setActiveSiteId((current) => {
+        if (snapshot.assignedSiteId) return snapshot.assignedSiteId;
+        if (snapshot.sites.some((site) => site.id === current)) return current;
+        const preferredType = authenticatedRole === 'offloading_officer' ? 'offloading' : 'loading';
+        return snapshot.sites.find((site) => site.site_type === preferredType)?.id || snapshot.sites[0]?.id || current;
+      });
+    } catch (error: unknown) {
+      setLiveSyncError(error instanceof Error ? error.message : 'Live trip synchronization failed.');
+    }
+  };
+
+  useEffect(() => {
+    if (!isAuthenticated || !isSupabaseLive || !supabase) return;
+    void refreshLiveData();
+    return subscribeToLiveTrips(() => void refreshLiveData());
+    // Authentication changes establish a new RLS scope and realtime channel.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, authenticatedRole]);
 
   // Listen to network status
   useEffect(() => {
@@ -671,21 +719,20 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Derived lookups
   const activeSite = sites.find((s) => s.id === activeSiteId) || sites[0];
-  const openTrips = trips.filter((t) => t.status === 'open');
-  const closedTrips = trips.filter((t) => t.status === 'closed');
-  const exceptionTrips = trips.filter((t) => t.status === 'exception');
-
   // Enrich trips with relations
   const enrichedTrips = trips.map((trip) => ({
     ...trip,
-    truck: trucks.find((tr) => tr.id === trip.truck_id),
-    driver: drivers.find((dr) => dr.id === trip.driver_id),
-    loading_site: sites.find((s) => s.id === trip.loading_site_id),
-    offloading_site: sites.find((s) => s.id === trip.offloading_site_id),
+    truck: trip.truck || trucks.find((tr) => tr.id === trip.truck_id),
+    driver: trip.driver || drivers.find((dr) => dr.id === trip.driver_id),
+    loading_site: trip.loading_site || sites.find((s) => s.id === trip.loading_site_id),
+    offloading_site: trip.offloading_site || sites.find((s) => s.id === trip.offloading_site_id),
   }));
+  const openTrips = enrichedTrips.filter((t) => t.status === 'open');
+  const closedTrips = enrichedTrips.filter((t) => t.status === 'closed');
+  const exceptionTrips = enrichedTrips.filter((t) => t.status === 'exception');
 
-  // Create loading trip
-  const createLoadingTrip: AppStateContextType['createLoadingTrip'] = ({
+  // Local fallback used only when the terminal is offline or Supabase is unavailable.
+  const createLocalLoadingTrip = ({
     plate,
     truckId,
     driverId,
@@ -694,7 +741,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     plateImageUrl,
     confidenceScore,
     notes,
-  }) => {
+  }: Parameters<AppStateContextType['createLoadingTrip']>[0]): Trip => {
     const tripSeq = Math.floor(10000 + Math.random() * 90000);
     const tripNumber = `TRP-2026-${tripSeq}`;
     const tripId = `trip-${Date.now()}`;
@@ -750,9 +797,43 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return newTrip;
   };
 
-  // Close offloading trip
-  const closeOffloadingTrip: AppStateContextType['closeOffloadingTrip'] = (
-    tripId,
+  const createLoadingTrip: AppStateContextType['createLoadingTrip'] = async (params) => {
+    if (!isSupabaseLive || !supabase) {
+      return createLocalLoadingTrip(params);
+    }
+    if (!navigator.onLine) {
+      throw new Error('This terminal is offline. Reconnect before issuing a live waybill.');
+    }
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session) throw new Error('Your live session has expired. Please sign in again.');
+    const row = await createLiveLoadingTrip({
+      plate: params.plate,
+      driverId: params.driverId,
+      plateImageUrl: params.plateImageUrl,
+      confidenceScore: params.confidenceScore,
+    });
+    await refreshLiveData();
+
+    const truck = trucks.find((item) => item.id === row.truck_id);
+    const driver = drivers.find((item) => item.id === row.driver_id);
+    return {
+      id: row.id,
+      trip_number: row.trip_number,
+      truck_id: row.truck_id,
+      driver_id: row.driver_id,
+      loading_site_id: row.loading_site_id,
+      status: 'open',
+      loaded_at: row.opened_at,
+      truck,
+      driver,
+      loading_site: sites.find((site) => site.id === row.loading_site_id),
+    };
+  };
+
+  // Local close fallback for offline demo data.
+  const closeLocalOffloadingTrip = (
+    tripId: string,
     {
       quantity,
       unit,
@@ -763,8 +844,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       deliveryPlateConfidence,
       deliveryPlateCapturedAt,
       notes,
-    }
-  ) => {
+    }: Parameters<AppStateContextType['closeOffloadingTrip']>[1]
+  ): { success: boolean; varianceAlert?: boolean; message?: string } => {
     const targetTrip = trips.find((t) => t.id === tripId);
     if (!targetTrip) return { success: false, message: 'Trip not found' };
 
@@ -838,6 +919,49 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ? `Delivered ${quantity} ${unit} differs from rated capacity (${capacity}T) by ${variancePercent.toFixed(1)}%.`
         : undefined,
     };
+  };
+
+  const closeOffloadingTrip: AppStateContextType['closeOffloadingTrip'] = async (tripId, params) => {
+    if (!isSupabaseLive || !supabase) {
+      return closeLocalOffloadingTrip(tripId, params);
+    }
+    if (!navigator.onLine) {
+      return { success: false, message: 'This terminal is offline. Reconnect before closing the live trip.' };
+    }
+
+    const offloadingSite = sites.find(
+      (site) => site.id === activeSiteId && site.site_type === 'offloading' && site.status === 'active'
+    );
+    if (!offloadingSite) return { success: false, message: 'Select your assigned offloading site before closing the trip.' };
+
+    try {
+      await closeLiveTrip({
+        tripId,
+        offloadingSiteId: offloadingSite.id,
+        quantityTonnes: params.quantity,
+      });
+      await refreshLiveData();
+      const targetTrip = trips.find((trip) => trip.id === tripId);
+      const capacity = targetTrip?.truck?.capacity_tonnes || 30;
+      const variancePercent = ((params.quantity - capacity) / capacity) * 100;
+      return { success: true, varianceAlert: Math.abs(variancePercent) > 15 };
+    } catch (error: unknown) {
+      return { success: false, message: error instanceof Error ? error.message : 'The live trip could not be closed.' };
+    }
+  };
+
+  const lookupTruckByPlate: AppStateContextType['lookupTruckByPlate'] = async (plate) => {
+    if (isSupabaseLive && supabase && navigator.onLine && authenticatedRole === 'loading_officer') {
+      const result = await lookupLiveTruck(plate);
+      if (result.truck) setTrucks((current) => [result.truck!, ...current.filter((item) => item.id !== result.truck!.id)]);
+      if (result.driver) setDrivers((current) => [result.driver!, ...current.filter((item) => item.id !== result.driver!.id)]);
+      return result;
+    }
+
+    const normalized = plate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const truck = trucks.find((item) => item.normalized_registration === normalized);
+    const driver = truck ? drivers.find((item) => item.assigned_truck_id === truck.id) : undefined;
+    return { found: !!truck, truck, driver };
   };
 
   // Raise Exception
@@ -1248,7 +1372,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const now = new Date().toISOString();
 
     draftTrips.forEach((draft) => {
-      createLoadingTrip({
+      void createLoadingTrip({
         plate: draft.truck_plate,
         truckId: trucks.find((t) => t.registration_number === draft.truck_plate)?.id || trucks[0]?.id || 'trk-1',
         driverId: draft.driver_id || drivers[0]?.id || 'drv-1',
@@ -1257,6 +1381,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         plateImageUrl: 'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=600&auto=format&fit=crop&q=80',
         confidenceScore: 95.0,
         notes: `[OFFLINE SYNCED] ${draft.notes || ''}`,
+      }).catch((error) => {
+        console.warn('Offline draft sync failed:', error);
       });
     });
 
@@ -1303,12 +1429,15 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setIsOnline,
         draftTrips,
         syncOfflineDrafts,
+        isLiveMode: isSupabaseLive,
+        liveSyncError,
         activeSite,
         openTrips,
         closedTrips,
         exceptionTrips,
         createLoadingTrip,
         closeOffloadingTrip,
+        lookupTruckByPlate,
         raiseTripException,
         resolveTripException,
         createPayoutBatch,

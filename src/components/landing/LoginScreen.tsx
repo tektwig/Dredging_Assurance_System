@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { UserRole } from '../../types';
+import { isSupabaseLive, supabase } from '../../services/supabase';
 import { TektwigLogo } from '../common/TektwigLogo';
 import {
   ArrowLeft,
@@ -24,7 +25,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -51,6 +52,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
             email: (import.meta.env.VITE_AUTH_LOADING_EMAIL || 'loading@tektwig.com').trim().toLowerCase(),
             password: (import.meta.env.VITE_AUTH_LOADING_PASSWORD || 'dredge2026').trim(),
           },
+        ],
+      },
+      {
+        role: 'offloading_officer',
+        allowed: [
           {
             email: (import.meta.env.VITE_AUTH_OFFLOAD_EMAIL || 'offload@tektwig.com').trim().toLowerCase(),
             password: (import.meta.env.VITE_AUTH_OFFLOAD_PASSWORD || 'weighbridge2026').trim(),
@@ -86,32 +92,82 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
       },
     ];
 
-    setTimeout(() => {
-      // Find matching authorized account
-      let matchedRole: UserRole | null = null;
-
-      for (const group of credentialsMap) {
-        const found = group.allowed.find((acc) => {
-          // Check exact email or prefix username (e.g., 'ops' matching 'ops@tektwig.com')
-          const matchesEmail = acc.email === cleanId;
-          const matchesUsername = acc.email.split('@')[0] === cleanId;
-          return (matchesEmail || matchesUsername) && acc.password === cleanPassword;
-        });
-
-        if (found) {
-          matchedRole = group.role;
-          break;
-        }
+    let matchedRole: UserRole | null = null;
+    let matchedEmail = cleanId.includes('@') ? cleanId : '';
+    let locallyAuthorized = false;
+    for (const group of credentialsMap) {
+      const found = group.allowed.find((account) => {
+        const matchesEmail = account.email === cleanId;
+        const matchesUsername = account.email.split('@')[0] === cleanId;
+        return matchesEmail || matchesUsername;
+      });
+      if (found) {
+        matchedRole = group.role;
+        matchedEmail = found.email;
+        locallyAuthorized = found.password === cleanPassword;
+        break;
       }
+    }
 
-      if (matchedRole) {
-        setIsLoading(false);
-        onSignIn(matchedRole);
-      } else {
+    if (!isSupabaseLive || !supabase) {
+      if (!matchedRole || !locallyAuthorized) {
         setIsLoading(false);
         setErrorMessage('Invalid credentials. Please verify your corporate ID and password.');
+        return;
       }
-    }, 400);
+      setIsLoading(false);
+      onSignIn(matchedRole);
+      return;
+    }
+
+    if (!matchedEmail) {
+      setIsLoading(false);
+      setErrorMessage('Enter your full corporate email address.');
+      return;
+    }
+
+    try {
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: matchedEmail,
+        password: cleanPassword,
+      });
+      if (authError || !authData.user) {
+        setErrorMessage(authError?.message || 'The live account could not be authenticated.');
+        return;
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('role,is_active')
+        .eq('id', authData.user.id)
+        .single();
+      if (profileError || !profile?.is_active || !profile.role) {
+        await supabase.auth.signOut();
+        setErrorMessage('This live account is not active or has no operational role assigned.');
+        return;
+      }
+
+      const roleMap: Record<string, UserRole> = {
+        system_administrator: 'admin',
+        loading_officer: 'loading_officer',
+        offloading_officer: 'offloading_officer',
+        operations_manager: 'operations_manager',
+        finance_officer: 'finance_officer',
+        audit_reviewer: 'audit_reviewer',
+      };
+      const liveRole = roleMap[profile.role];
+      if (!liveRole) {
+        await supabase.auth.signOut();
+        setErrorMessage('This account role is not supported by the application.');
+        return;
+      }
+
+      onSignIn(liveRole);
+    } catch (error: unknown) {
+      setErrorMessage(error instanceof Error ? error.message : 'The live service could not be reached.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
