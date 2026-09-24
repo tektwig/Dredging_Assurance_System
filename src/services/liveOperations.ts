@@ -19,6 +19,11 @@ export interface LiveTruckLookup {
   error?: string;
 }
 
+export interface LiveParticipantRegistration {
+  truck: Truck;
+  driver: Driver;
+}
+
 const ensureClient = () => {
   if (!isSupabaseLive || !supabase) throw new Error('Live Supabase service is not configured.');
   return supabase;
@@ -160,6 +165,55 @@ export async function lookupLiveTruck(plate: string): Promise<LiveTruckLookup> {
     assignmentId: result.assignment?.assignment_id,
     error: result.block?.code,
   };
+}
+
+export async function registerLiveParticipant(params: {
+  plate: string;
+  expectedTruckId?: string;
+  fullName: string;
+  phoneNumber: string;
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  capacityTonnes?: number;
+  truckType?: string;
+  ownerName?: string;
+  ownerPhone?: string;
+}): Promise<LiveParticipantRegistration> {
+  const client = ensureClient();
+  const { data, error } = await client.rpc('register_loading_participant', {
+    p_request_id: crypto.randomUUID(),
+    p_plate: params.plate,
+    p_expected_truck_id: params.expectedTruckId || null,
+    p_existing_driver_id: null,
+    p_full_name: params.fullName,
+    p_phone_number: params.phoneNumber,
+    p_email: null,
+    p_bank_name: params.bankName,
+    p_account_number: params.accountNumber,
+    p_account_name: params.accountName,
+  });
+  if (error) throw error;
+
+  const result = data as JsonObject;
+  if (!result?.ok) throw new Error(result?.code || 'The truck and driver could not be registered.');
+
+  const truck: Truck = {
+    ...mapTruck(result.truck),
+    capacity: params.capacityTonnes || 30,
+    capacity_tonnes: params.capacityTonnes || 30,
+    truck_type: params.truckType || 'Registered tipper truck',
+    owner_name: params.ownerName || 'Registered haulage operator',
+    owner_phone: params.ownerPhone,
+  };
+  const driver: Driver = {
+    ...mapDriver(result.driver),
+    assigned_truck_id: truck.id,
+    bank_name: params.bankName,
+    account_number_last4: params.accountNumber.slice(-4),
+  };
+
+  return { truck, driver };
 }
 
 async function imageUrlToBlob(imageUrl: string): Promise<Blob> {

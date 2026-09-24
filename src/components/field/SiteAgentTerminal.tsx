@@ -62,6 +62,7 @@ const TRUCK_TYPES = [
 
 export const SiteAgentTerminal: React.FC = () => {
   const {
+    authenticatedRole,
     activeSite,
     sites,
     trucks,
@@ -71,9 +72,8 @@ export const SiteAgentTerminal: React.FC = () => {
     createLoadingTrip,
     closeOffloadingTrip,
     raiseTripException,
-    addTruck,
-    addDriver,
     lookupTruckByPlate,
+    registerLoadingParticipant,
   } = useAppState();
 
   // Live hardware camera input ref
@@ -83,6 +83,9 @@ export const SiteAgentTerminal: React.FC = () => {
   const cameraRequestIdRef = useRef(0);
   const previewObjectUrlRef = useRef<string | null>(null);
   const capturePurposeRef = useRef<'general' | 'delivery'>('general');
+  const pickupSaveLockRef = useRef(false);
+  const deliverySaveLockRef = useRef(false);
+  const registrationLockRef = useRef(false);
 
   const [hasScanned, setHasScanned] = useState(false);
 
@@ -98,6 +101,11 @@ export const SiteAgentTerminal: React.FC = () => {
   const [ocrStatus, setOcrStatus] = useState('Ready for capture');
   const [ocrProgress, setOcrProgress] = useState(0);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'warning' } | null>(null);
+  const [isPickupSaving, setIsPickupSaving] = useState(false);
+  const [pickupSaved, setPickupSaved] = useState(false);
+  const [isDeliverySaving, setIsDeliverySaving] = useState(false);
+  const [deliverySaved, setDeliverySaved] = useState(false);
+  const [isRegisteringParticipant, setIsRegisteringParticipant] = useState(false);
   const [isLiveCameraActive, setIsLiveCameraActive] = useState(false);
   const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -153,26 +161,18 @@ export const SiteAgentTerminal: React.FC = () => {
   }, [isLiveCameraActive]);
 
   // 3. Movement Type State: 'pickup' vs 'delivery'
-  const [movementType, setMovementType] = useState<'pickup' | 'delivery'>(() => {
-    try {
-      const saved = sessionStorage.getItem('dredgeops_siteagent_mode');
-      return saved === 'delivery' ? 'delivery' : 'pickup';
-    } catch {
-      return 'pickup';
-    }
-  });
+  const assignedMovementType: 'pickup' | 'delivery' = authenticatedRole === 'offloading_officer' ? 'delivery' : 'pickup';
+  const [movementType, setMovementType] = useState<'pickup' | 'delivery'>(assignedMovementType);
 
-  const [isModeSheetOpen, setIsModeSheetOpen] = useState<boolean>(() => {
-    try {
-      // Check if user has explicitly picked their initial shift mode in this session
-      return !sessionStorage.getItem('dredgeops_siteagent_mode_selected');
-    } catch {
-      return true;
-    }
-  });
+  const [isModeSheetOpen, setIsModeSheetOpen] = useState(false);
+
+  useEffect(() => {
+    setMovementType(assignedMovementType);
+    setIsModeSheetOpen(false);
+  }, [assignedMovementType]);
 
   const handleSelectTerminalMode = (mode: 'pickup' | 'delivery') => {
-    setMovementType(mode);
+    setMovementType(mode === assignedMovementType ? mode : assignedMovementType);
     setIsModeSheetOpen(false);
     try {
       sessionStorage.setItem('dredgeops_siteagent_mode', mode);
@@ -347,6 +347,9 @@ export const SiteAgentTerminal: React.FC = () => {
 
   // Real Tesseract OCR recognition pipeline
   const runPlateOCR = async (imageSource: File | Blob | string) => {
+    const isDeliveryScan = capturePurposeRef.current === 'delivery' || movementType === 'delivery';
+    if (isDeliveryScan) setDeliverySaved(false);
+    else setPickupSaved(false);
     setHasScanned(true);
     setIsScanning(true);
     setOcrProgress(0.05);
@@ -369,7 +372,7 @@ export const SiteAgentTerminal: React.FC = () => {
       setConfirmedPlate(result.candidatePlate);
       setConfidenceScore(result.confidence);
 
-      if (capturePurposeRef.current === 'delivery' || movementType === 'delivery') {
+      if (isDeliveryScan) {
         setDeliveryPlateEvidence({
           plate: result.candidatePlate,
           imageUrl: previewUrl,
@@ -382,31 +385,56 @@ export const SiteAgentTerminal: React.FC = () => {
       const normalized = result.candidatePlate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
       const liveLookup = await lookupTruckByPlate(result.candidatePlate);
       const matched = liveLookup.truck || result.matchedTruck || trucks.find((t) => t.normalized_registration === normalized);
+      const matchedOpenTrip = matched
+        ? openTrips.find((trip) => trip.truck_id === matched.id || normalizePlate(trip.truck?.registration_number || '') === normalized)
+        : undefined;
 
       if (matched) {
         setSelectedTruckId(matched.id);
         const tonnage = matched.capacity_tonnes || matched.capacity || 30;
         setEstimatedTonnes(tonnage);
         setDeliveredTonnes(tonnage);
-        const openTripDriverId = openTrips.find((trip) => trip.truck_id === matched.id)?.driver_id;
+        const openTripDriverId = matchedOpenTrip?.driver_id;
         const driver = liveLookup.driver
+          || matchedOpenTrip?.driver
           || drivers.find((item) => item.id === openTripDriverId)
           || drivers.find((item) => item.assigned_truck_id === matched.id)
           || drivers[0];
         if (driver) setSelectedDriverId(driver.id);
         setIsUnregisteredModalOpen(false);
       } else {
-        // UNREGISTERED PLATE DETECTED: prompt to register truck & driver
         setSelectedTruckId('');
         setSelectedDriverId('');
-        setNewTruckPlate(result.candidatePlate);
-        setIsUnregisteredModalOpen(true);
+        if (isDeliveryScan) {
+          setIsUnregisteredModalOpen(false);
+        } else {
+          // Enrollment is a loading-gate action only.
+          setNewTruckPlate(result.candidatePlate);
+          setIsUnregisteredModalOpen(true);
+        }
       }
 
-      setToastMessage({
-        text: `Plate [${result.candidatePlate}] recognized (${result.confidence}% confidence).`,
-        type: 'success',
-      });
+      if (isDeliveryScan && !matched) {
+        setToastMessage({
+          text: `Plate [${result.candidatePlate}] is not registered. Confirm the plate or contact the loading gate; enrollment cannot be done at delivery.`,
+          type: 'warning',
+        });
+      } else if (isDeliveryScan && !matchedOpenTrip) {
+        setToastMessage({
+          text: `Truck [${result.candidatePlate}] is registered, but it has no open pickup trip to deliver.`,
+          type: 'warning',
+        });
+      } else if (isDeliveryScan && matchedOpenTrip) {
+        setToastMessage({
+          text: `Open trip ${matchedOpenTrip.trip_number} found for [${result.candidatePlate}]. Verify the weight and close the delivery.`,
+          type: 'success',
+        });
+      } else {
+        setToastMessage({
+          text: `Plate [${result.candidatePlate}] recognized (${result.confidence}% confidence).`,
+          type: 'success',
+        });
+      }
       setTimeout(() => setToastMessage(null), 5000);
     } catch (err: any) {
       console.warn('OCR error:', err);
@@ -430,8 +458,9 @@ export const SiteAgentTerminal: React.FC = () => {
   };
 
   // Register Unregistered Truck and its Driver
-  const handleOnboardNewTruckAndDriver = (e: React.FormEvent) => {
+  const handleOnboardNewTruckAndDriver = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (registrationLockRef.current || isRegisteringParticipant) return;
     const cleanPlate = (newTruckPlate || confirmedPlate).trim().toUpperCase();
     if (!cleanPlate) {
       setToastMessage({ text: 'Please enter a valid truck plate number.', type: 'warning' });
@@ -450,40 +479,30 @@ export const SiteAgentTerminal: React.FC = () => {
       return;
     }
 
-    // 1. Add Truck
-    const truckRes = addTruck({
-      registration_number: cleanPlate,
+    registrationLockRef.current = true;
+    setIsRegisteringParticipant(true);
+    const registration = await registerLoadingParticipant({
+      plate: cleanPlate,
       capacity: Number(newTruckCapacity) || 30,
-      capacity_unit: 'tonnes',
-      truck_type: newTruckType || 'Mack 10-Wheeler Tipper',
-      owner_name: newTruckOwner.trim() || 'Independent Haulier Fleet',
-      owner_phone: newTruckOwnerPhone.trim() || '+234 800 000 0000',
+      truckType: newTruckType || 'Mack 10-Wheeler Tipper',
+      ownerName: newTruckOwner.trim() || 'Independent Haulier Fleet',
+      ownerPhone: newTruckOwnerPhone.trim() || '+234 800 000 0000',
+      driverName: newDriverName.trim(),
+      driverPhone: newDriverPhone.trim(),
+      driverLicense: newDriverLicense.trim() || `FRSC-LAG-${Math.floor(10000 + Math.random() * 90000)}`,
+      bankName: newDriverBankName,
+      accountNumber: newDriverAccountNumber.trim(),
     });
+    registrationLockRef.current = false;
+    setIsRegisteringParticipant(false);
 
-    if (!truckRes.success || !truckRes.truck) {
-      setToastMessage({ text: truckRes.error || 'Failed to register truck.', type: 'warning' });
+    if (!registration.success || !registration.truck || !registration.driver) {
+      setToastMessage({ text: registration.error || 'Failed to register truck and driver.', type: 'warning' });
       return;
     }
 
-    // 2. Add Driver
-    const driverRes = addDriver({
-      full_name: newDriverName.trim(),
-      phone: newDriverPhone.trim(),
-      license_number: newDriverLicense.trim() || `FRSC-LAG-${Math.floor(10000 + Math.random() * 90000)}`,
-      bank_name: newDriverBankName,
-      account_number: newDriverAccountNumber.trim(),
-      account_number_last4: newDriverAccountNumber.trim().slice(-4),
-      assigned_truck_id: truckRes.truck.id,
-    });
-
-    if (!driverRes.success || !driverRes.driver) {
-      setToastMessage({ text: driverRes.error || 'Failed to register driver.', type: 'warning' });
-      return;
-    }
-
-    // 3. Set Active Selected
-    setSelectedTruckId(truckRes.truck.id);
-    setSelectedDriverId(driverRes.driver.id);
+    setSelectedTruckId(registration.truck.id);
+    setSelectedDriverId(registration.driver.id);
     setConfirmedPlate(cleanPlate);
     setEstimatedTonnes(Number(newTruckCapacity) || 30);
     setDeliveredTonnes(Number(newTruckCapacity) || 30);
@@ -495,15 +514,16 @@ export const SiteAgentTerminal: React.FC = () => {
     setNewDriverAccountNumber('');
 
     setToastMessage({
-      text: `Vehicle [${cleanPlate}] and Driver [${driverRes.driver.full_name}] registered & ready for dispatch!`,
+      text: `Vehicle [${cleanPlate}] and Driver [${registration.driver.full_name}] saved live and ready for dispatch!`,
       type: 'success',
     });
     setTimeout(() => setToastMessage(null), 5000);
   };
 
   // Register New Driver for Existing Registered Truck
-  const handleRegisterDriverForExistingTruck = (e: React.FormEvent) => {
+  const handleRegisterDriverForExistingTruck = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (registrationLockRef.current || isRegisteringParticipant) return;
     if (!quickDriverName.trim()) {
       setToastMessage({ text: 'Please enter driver full name.', type: 'warning' });
       return;
@@ -517,30 +537,38 @@ export const SiteAgentTerminal: React.FC = () => {
       return;
     }
 
-    const driverRes = addDriver({
-      full_name: quickDriverName.trim(),
-      phone: quickDriverPhone.trim(),
-      license_number: quickDriverLicense.trim() || `FRSC-LAG-${Math.floor(10000 + Math.random() * 90000)}`,
-      bank_name: quickDriverBankName,
-      account_number: quickDriverAccountNumber.trim(),
-      account_number_last4: quickDriverAccountNumber.trim().slice(-4),
-      assigned_truck_id: selectedTruckId,
+    registrationLockRef.current = true;
+    setIsRegisteringParticipant(true);
+    const registration = await registerLoadingParticipant({
+      plate: confirmedPlate,
+      expectedTruckId: selectedTruckId,
+      capacity: currentTruck?.capacity_tonnes || currentTruck?.capacity || 30,
+      truckType: currentTruck?.truck_type || 'Registered tipper truck',
+      ownerName: currentTruck?.owner_name || 'Registered haulage operator',
+      ownerPhone: currentTruck?.owner_phone,
+      driverName: quickDriverName.trim(),
+      driverPhone: quickDriverPhone.trim(),
+      driverLicense: quickDriverLicense.trim() || `FRSC-LAG-${Math.floor(10000 + Math.random() * 90000)}`,
+      bankName: quickDriverBankName,
+      accountNumber: quickDriverAccountNumber.trim(),
     });
+    registrationLockRef.current = false;
+    setIsRegisteringParticipant(false);
 
-    if (driverRes.success && driverRes.driver) {
-      setSelectedDriverId(driverRes.driver.id);
+    if (registration.success && registration.driver) {
+      setSelectedDriverId(registration.driver.id);
       setIsNewDriverFormOpen(false);
       setQuickDriverName('');
       setQuickDriverPhone('');
       setQuickDriverAccountNumber('');
       setToastMessage({
-        text: `New driver [${driverRes.driver.full_name}] registered & assigned to truck [${confirmedPlate}]!`,
+        text: `New driver [${registration.driver.full_name}] saved live for truck [${confirmedPlate}]!`,
         type: 'success',
       });
       setTimeout(() => setToastMessage(null), 5000);
     } else {
       setToastMessage({
-        text: driverRes.error || 'Failed to register driver.',
+        text: registration.error || 'Failed to register driver.',
         type: 'warning',
       });
     }
@@ -561,6 +589,7 @@ export const SiteAgentTerminal: React.FC = () => {
   // Submit Pickup (Loading Gate Dispatch)
   const handleDispatchPickup = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (pickupSaveLockRef.current || isPickupSaving || pickupSaved) return;
     if (!hasScanned) {
       setToastMessage({ text: 'Scan the truck plate before issuing a live waybill.', type: 'warning' });
       return;
@@ -574,6 +603,8 @@ export const SiteAgentTerminal: React.FC = () => {
       return;
     }
 
+    pickupSaveLockRef.current = true;
+    setIsPickupSaving(true);
     try {
       const newTrip = await createLoadingTrip({
         plate: confirmedPlate,
@@ -589,12 +620,16 @@ export const SiteAgentTerminal: React.FC = () => {
         text: `Live waybill issued! Trip ${newTrip.trip_number} is now visible at the delivery gate.`,
         type: 'success',
       });
+      setPickupSaved(true);
       setPickupNotes('');
     } catch (error: unknown) {
       setToastMessage({
         text: error instanceof Error ? error.message : 'The live waybill could not be issued.',
         type: 'warning',
       });
+    } finally {
+      pickupSaveLockRef.current = false;
+      setIsPickupSaving(false);
     }
     setTimeout(() => setToastMessage(null), 5500);
   };
@@ -602,6 +637,7 @@ export const SiteAgentTerminal: React.FC = () => {
   // Submit Delivery (Offloading Gate / Weighbridge Close)
   const handleCompleteDelivery = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (deliverySaveLockRef.current || isDeliverySaving || deliverySaved) return;
     if (!deliveryPlateEvidence) {
       setToastMessage({
         text: 'Snap and verify the arriving truck plate before confirming delivery.',
@@ -627,6 +663,8 @@ export const SiteAgentTerminal: React.FC = () => {
       return;
     }
 
+    deliverySaveLockRef.current = true;
+    setIsDeliverySaving(true);
     const result = await closeOffloadingTrip(matchingOpenTrip.id, {
       quantity: deliveredTonnes,
       unit: 'tonnes' as QuantityUnit,
@@ -638,12 +676,15 @@ export const SiteAgentTerminal: React.FC = () => {
       deliveryPlateCapturedAt: deliveryPlateEvidence.capturedAt,
       notes: deliveryNotes,
     });
+    deliverySaveLockRef.current = false;
+    setIsDeliverySaving(false);
 
     if (result.success) {
       setToastMessage({
         text: `Trip ${matchingOpenTrip.trip_number} successfully verified and closed!`,
         type: result.varianceAlert ? 'warning' : 'success',
       });
+      setDeliverySaved(true);
       setDeliveryNotes('');
       setDeliveryPlateEvidence(null);
       setTimeout(() => setToastMessage(null), 4500);
@@ -684,6 +725,8 @@ export const SiteAgentTerminal: React.FC = () => {
   const varianceDiff = deliveredTonnes - expectedTonnage;
   const variancePct = ((varianceDiff / expectedTonnage) * 100).toFixed(1);
   const isToleranceOk = Math.abs(varianceDiff) <= 1.5;
+  const pickupActionDisabled = !hasScanned || !selectedTruckId || !selectedDriverId || isPickupSaving || pickupSaved;
+  const deliveryActionDisabled = !matchingOpenTrip || !deliveryPlateMatchesTrip || isDeliverySaving || deliverySaved;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -770,6 +813,11 @@ export const SiteAgentTerminal: React.FC = () => {
       {toastMessage && (
         <div
           style={{
+            position: 'fixed',
+            top: '76px',
+            right: 'clamp(0.75rem, 3vw, 2rem)',
+            width: 'min(420px, calc(100vw - 1.5rem))',
+            zIndex: 1400,
             padding: '0.875rem 1.25rem',
             backgroundColor: toastMessage.type === 'success' ? '#D1FAE5' : '#FEF3C7',
             border: `1px solid ${toastMessage.type === 'success' ? '#6EE7B7' : '#FCD34D'}`,
@@ -781,7 +829,10 @@ export const SiteAgentTerminal: React.FC = () => {
             alignItems: 'center',
             gap: '0.75rem',
             animation: 'fadeIn 0.2s ease-in-out',
+            boxShadow: '0 12px 30px rgba(15, 23, 42, 0.18)',
           }}
+          role="status"
+          aria-live="polite"
         >
           {toastMessage.type === 'success' ? (
             <CheckCircle2 size={18} color="#059669" />
@@ -1511,10 +1562,11 @@ export const SiteAgentTerminal: React.FC = () => {
                       <button
                         type="submit"
                         className="btn btn-primary"
+                        disabled={isRegisteringParticipant}
                         style={{ padding: '0.3rem 0.75rem', fontSize: '0.75rem', backgroundColor: '#047857', borderColor: '#065F46' }}
                       >
                         <Check size={13} />
-                        <span>Save & Assign</span>
+                        <span>{isRegisteringParticipant ? 'Saving Live...' : 'Save & Assign'}</span>
                       </button>
                     </div>
                   </form>
@@ -1697,20 +1749,24 @@ export const SiteAgentTerminal: React.FC = () => {
               <button
                 type="submit"
                 className="btn btn-primary btn-lg"
-                disabled={!hasScanned || !selectedTruckId || !selectedDriverId}
-                title={!hasScanned ? 'Scan the truck plate before issuing a live waybill' : 'Issue the live waybill'}
+                disabled={pickupActionDisabled}
+                title={pickupSaved ? 'This pickup has already been saved. Scan the next truck.' : !hasScanned ? 'Scan the truck plate before issuing a live waybill' : 'Issue the live waybill'}
                 style={{
                   width: '100%',
                   marginTop: '0.25rem',
-                  backgroundColor: (!hasScanned || !selectedTruckId || !selectedDriverId) ? '#94A3B8' : '#B45309',
-                  borderColor: (!hasScanned || !selectedTruckId || !selectedDriverId) ? '#94A3B8' : '#92400E',
-                  cursor: (!hasScanned || !selectedTruckId || !selectedDriverId) ? 'not-allowed' : 'pointer',
-                  boxShadow: (!hasScanned || !selectedTruckId || !selectedDriverId) ? 'none' : '0 2px 4px 0 rgba(180, 83, 9, 0.25)',
+                  backgroundColor: pickupActionDisabled ? '#94A3B8' : '#B45309',
+                  borderColor: pickupActionDisabled ? '#94A3B8' : '#92400E',
+                  cursor: pickupActionDisabled ? 'not-allowed' : 'pointer',
+                  boxShadow: pickupActionDisabled ? 'none' : '0 2px 4px 0 rgba(180, 83, 9, 0.25)',
                 }}
               >
                 <TruckIcon size={18} />
                 <span>
-                  {!hasScanned
+                  {isPickupSaving
+                    ? 'Saving Live Pickup...'
+                    : pickupSaved
+                    ? 'Pickup Saved — Scan Next Truck'
+                    : !hasScanned
                     ? 'Scan Plate to Issue Waybill'
                     : (!selectedTruckId || !selectedDriverId)
                     ? 'Registration Required to Issue Waybill'
@@ -1974,11 +2030,11 @@ export const SiteAgentTerminal: React.FC = () => {
                       type="submit"
                       className="btn btn-success btn-lg"
                       style={{ flex: 1 }}
-                      disabled={!matchingOpenTrip || !deliveryPlateMatchesTrip}
-                      title={!deliveryPlateMatchesTrip ? 'Verify the arriving truck plate first' : 'Close this delivery trip'}
+                      disabled={deliveryActionDisabled}
+                      title={deliverySaved ? 'This delivery has already been closed.' : !deliveryPlateMatchesTrip ? 'Verify the arriving truck plate first' : 'Close this delivery trip'}
                     >
                       <CheckCircle2 size={18} />
-                      <span>Save as Delivery & Close Trip</span>
+                      <span>{isDeliverySaving ? 'Closing Live Trip...' : deliverySaved ? 'Delivery Closed' : 'Save as Delivery & Close Trip'}</span>
                     </button>
 
                     <button
@@ -2411,10 +2467,11 @@ export const SiteAgentTerminal: React.FC = () => {
                 <button
                   type="submit"
                   className="btn btn-primary"
+                  disabled={isRegisteringParticipant}
                   style={{ backgroundColor: '#B45309', borderColor: '#92400E', gap: '0.4rem' }}
                 >
                   <CheckCircle2 size={16} />
-                  <span>Register & Assign for Dispatch</span>
+                  <span>{isRegisteringParticipant ? 'Saving Live Registration...' : 'Register & Assign for Dispatch'}</span>
                 </button>
               </div>
             </form>

@@ -22,6 +22,7 @@ import {
   fetchLiveSnapshot,
   LiveTruckLookup,
   lookupLiveTruck,
+  registerLiveParticipant,
   subscribeToLiveTrips,
 } from '../services/liveOperations';
 
@@ -149,6 +150,19 @@ interface AppStateContextType {
     account_number_last4?: string;
     assigned_truck_id?: string;
   }) => { success: boolean; error?: string; driver?: Driver };
+  registerLoadingParticipant: (participant: {
+    plate: string;
+    expectedTruckId?: string;
+    capacity: number;
+    truckType: string;
+    ownerName: string;
+    ownerPhone?: string;
+    driverName: string;
+    driverPhone: string;
+    driverLicense: string;
+    bankName: string;
+    accountNumber: string;
+  }) => Promise<{ success: boolean; error?: string; truck?: Truck; driver?: Driver }>;
 }
 
 const AppStateContext = createContext<AppStateContextType | undefined>(undefined);
@@ -1366,6 +1380,65 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return { success: true, driver: newDriver };
   };
 
+  const registerLoadingParticipant: AppStateContextType['registerLoadingParticipant'] = async (participant) => {
+    if (!isSupabaseLive || !supabase) {
+      let truck = participant.expectedTruckId
+        ? trucks.find((item) => item.id === participant.expectedTruckId)
+        : undefined;
+      if (!truck) {
+        const truckResult = addTruck({
+          registration_number: participant.plate,
+          capacity: participant.capacity,
+          capacity_unit: 'tonnes',
+          truck_type: participant.truckType,
+          owner_name: participant.ownerName,
+          owner_phone: participant.ownerPhone,
+        });
+        if (!truckResult.success || !truckResult.truck) return truckResult;
+        truck = truckResult.truck;
+      }
+
+      const driverResult = addDriver({
+        full_name: participant.driverName,
+        phone: participant.driverPhone,
+        license_number: participant.driverLicense,
+        bank_name: participant.bankName,
+        account_number: participant.accountNumber,
+        account_number_last4: participant.accountNumber.slice(-4),
+        assigned_truck_id: truck.id,
+      });
+      return { ...driverResult, truck };
+    }
+
+    if (!navigator.onLine) {
+      return { success: false, error: 'This terminal is offline. Reconnect before registering a truck or driver.' };
+    }
+
+    try {
+      const result = await registerLiveParticipant({
+        plate: participant.plate,
+        expectedTruckId: participant.expectedTruckId,
+        fullName: participant.driverName,
+        phoneNumber: participant.driverPhone,
+        bankName: participant.bankName,
+        accountNumber: participant.accountNumber,
+        accountName: participant.driverName,
+        capacityTonnes: participant.capacity,
+        truckType: participant.truckType,
+        ownerName: participant.ownerName,
+        ownerPhone: participant.ownerPhone,
+      });
+      setTrucks((current) => [result.truck, ...current.filter((item) => item.id !== result.truck.id)]);
+      setDrivers((current) => [result.driver, ...current.filter((item) => item.id !== result.driver.id)]);
+      return { success: true, truck: result.truck, driver: result.driver };
+    } catch (error: unknown) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'The live truck and driver registration failed.',
+      };
+    }
+  };
+
   // Offline Sync Actions
   const syncOfflineDrafts = () => {
     if (draftTrips.length === 0) return;
@@ -1447,6 +1520,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         cancelInvoice,
         addTruck,
         addDriver,
+        registerLoadingParticipant,
       }}
     >
       {children}
