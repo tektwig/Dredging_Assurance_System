@@ -287,38 +287,35 @@ export const SiteAgentTerminal: React.FC = () => {
     const vw = video.videoWidth || 640;
     const vh = video.videoHeight || 480;
 
-    // Crop to the plate reticle region: center 82% width, center 33% height
-    // This matches the CSS reticle guide (aspect-ratio 3:1, 82% width)
-    const cropW = Math.round(vw * 0.82);
-    const cropH = Math.round(cropW / 3); // 3:1 aspect ratio like a license plate
-    const cropX = Math.round((vw - cropW) / 2);
-    const cropY = Math.round((vh - cropH) / 2);
-
     const canvas = document.createElement('canvas');
-    canvas.width = cropW;
-    canvas.height = cropH;
+    canvas.width = vw;
+    canvas.height = vh;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Draw only the cropped plate region from the video
-    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+    // Preserve the complete camera frame as evidence. The OCR service performs
+    // its own plate-region preprocessing without discarding the original photo.
+    ctx.drawImage(video, 0, 0, vw, vh);
     const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
     stopLiveCamera();
     runPlateOCR(dataUrl);
   };
 
-  const retakePlatePhoto = () => {
-    capturePurposeRef.current = movementType === 'delivery' ? 'delivery' : 'general';
-    stopLiveCamera();
-    setHasScanned(false);
-    setIsScanning(false);
-    setOcrProgress(0);
-    setOcrStatus('Ready for capture');
-    setOcrMatchType(null);
-    setPreprocessedImageUrl(null);
+  const openWebsiteCamera = (purpose: 'general' | 'delivery' = movementType === 'delivery' ? 'delivery' : 'general') => {
+    capturePurposeRef.current = purpose;
     setCameraError(null);
-    setIsUnregisteredModalOpen(false);
-    void startLiveCamera(cameraFacingMode);
+    void startLiveCamera('environment');
+  };
+
+  const openDeviceCamera = (purpose: 'general' | 'delivery' = movementType === 'delivery' ? 'delivery' : 'general') => {
+    capturePurposeRef.current = purpose;
+    stopLiveCamera();
+    setCameraError(null);
+    if (cameraInputRef.current) {
+      // Clearing the value lets the same newly-captured filename be selected again.
+      cameraInputRef.current.value = '';
+      cameraInputRef.current.click();
+    }
   };
 
   const captureDeliveryPlate = () => {
@@ -327,7 +324,7 @@ export const SiteAgentTerminal: React.FC = () => {
     stopLiveCamera();
     setHasScanned(false);
     setCameraError(null);
-    void startLiveCamera('environment');
+    openWebsiteCamera('delivery');
   };
 
   // Realistic Nigerian plate canvas generator for instant local testing
@@ -809,7 +806,7 @@ export const SiteAgentTerminal: React.FC = () => {
         </div>
       )}
 
-      {/* Hidden Hardware Camera Input (forces live environment camera on mobile) */}
+      {/* Native device-camera input. Mobile browsers open the operating system camera. */}
       <input
         ref={cameraInputRef}
         type="file"
@@ -817,7 +814,7 @@ export const SiteAgentTerminal: React.FC = () => {
         capture="environment"
         style={{ display: 'none' }}
         onChange={handleCameraCapture}
-        aria-label="Capture Truck Photo via Camera"
+        aria-label="Take a full truck photo with the device camera"
       />
 
       {/* TOP SCAN LAUNCHER CARD */}
@@ -838,12 +835,12 @@ export const SiteAgentTerminal: React.FC = () => {
         }}
       >
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center', width: '100%', maxWidth: '640px' }}>
-          {/* Live Video Camera Stream Launcher */}
+          {/* Action 1: camera embedded inside the website */}
           {!isLiveCameraActive ? (
             <button
               type="button"
-              onClick={() => startLiveCamera()}
-              disabled={isCameraStarting}
+              onClick={() => openWebsiteCamera()}
+              disabled={isCameraStarting || isScanning}
               style={{
                 flex: 1,
                 minWidth: '220px',
@@ -863,9 +860,10 @@ export const SiteAgentTerminal: React.FC = () => {
                 boxShadow: '0 4px 14px rgba(180, 83, 9, 0.35)',
                 transition: 'all 0.15s ease',
               }}
+              title="Open the camera inside this website"
             >
               <Video size={20} />
-              <span>{isCameraStarting ? 'Starting Camera...' : 'Launch Live Camera Stream'}</span>
+              <span>{isCameraStarting ? 'Opening Website Camera...' : 'Open Camera on Website'}</span>
             </button>
           ) : (
             <button
@@ -894,10 +892,11 @@ export const SiteAgentTerminal: React.FC = () => {
             </button>
           )}
 
-          {/* Native Live Camera Trigger (Direct Hardware Capture) */}
+          {/* Action 2: operating-system camera app, returning the full photo */}
           <button
             type="button"
-            onClick={() => cameraInputRef.current?.click()}
+            onClick={() => openDeviceCamera()}
+            disabled={isScanning || isCameraStarting}
             style={{
               flex: 1,
               minWidth: '200px',
@@ -911,30 +910,17 @@ export const SiteAgentTerminal: React.FC = () => {
               alignItems: 'center',
               justifyContent: 'center',
               gap: '0.65rem',
-              cursor: 'pointer',
+              cursor: isScanning || isCameraStarting ? 'not-allowed' : 'pointer',
+              opacity: isScanning || isCameraStarting ? 0.65 : 1,
               fontSize: '0.95rem',
               fontWeight: 700,
               boxShadow: 'var(--shadow-xs)',
             }}
-            title="Open device camera to snap live plate photo"
+            title="Open the device camera app and use the complete photo"
           >
             <Camera size={19} color="#B45309" />
-            <span>Snap with Device Camera</span>
+            <span>Take Photo with Device Camera</span>
           </button>
-
-          {hasScanned && (
-            <button
-              type="button"
-              onClick={retakePlatePhoto}
-              disabled={isScanning || isCameraStarting}
-              className="btn btn-secondary"
-              style={{ minHeight: '56px', padding: '0.75rem 1rem', fontWeight: 700 }}
-              title="Clear this scan and take another live plate photo"
-            >
-              <RotateCcw size={17} />
-              <span>{isCameraStarting ? 'Restarting Camera...' : 'Retake Live Photo'}</span>
-            </button>
-          )}
         </div>
 
         {/* Anti-Fraud Security Guarantee Banner */}
@@ -953,7 +939,7 @@ export const SiteAgentTerminal: React.FC = () => {
           }}
         >
           <ShieldCheck size={14} color="#B45309" />
-          <span>Anti-Fraud Lock: Live Camera Capture Only • Pre-existing File Uploads Disabled</span>
+          <span>Two secure options: website camera or device camera • Complete photo retained</span>
         </div>
 
         {cameraError && (
@@ -969,7 +955,7 @@ export const SiteAgentTerminal: React.FC = () => {
             </>
           ) : (
             <>
-              Live video or direct hardware camera snapshot is required at the gate. Pre-saved photo uploads are prohibited to prevent fraud and ensure audit integrity.
+              Choose <strong>Open Camera on Website</strong> for an in-page preview, or <strong>Take Photo with Device Camera</strong> to use the phone's camera app. Both options retain the complete image.
             </>
           )}
         </p>
@@ -1070,7 +1056,7 @@ export const SiteAgentTerminal: React.FC = () => {
                 style={{
                   width: '100%',
                   height: '100%',
-                  objectFit: 'cover',
+                  objectFit: hasScanned ? 'contain' : 'cover',
                   filter: isScanning ? 'blur(3px)' : !hasScanned ? 'brightness(0.65)' : 'none',
                   transition: 'all 0.3s ease',
                 }}
@@ -1100,7 +1086,7 @@ export const SiteAgentTerminal: React.FC = () => {
                     Camera Standby
                   </span>
                   <span style={{ fontSize: '0.75rem', opacity: 0.85 }}>
-                    Launch live camera above or test plate below
+                    Choose either camera option above
                   </span>
                 </div>
               )}
@@ -2150,7 +2136,7 @@ export const SiteAgentTerminal: React.FC = () => {
                     <img
                       src={deliveryPlateEvidence.imageUrl}
                       alt="Delivery gate plate evidence"
-                      style={{ width: '72px', height: '52px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--border-default)' }}
+                      style={{ width: '72px', height: '52px', objectFit: 'contain', backgroundColor: '#0F172A', borderRadius: '6px', border: '1px solid var(--border-default)' }}
                     />
                   ) : (
                     <div style={{ width: '72px', height: '52px', borderRadius: '6px', backgroundColor: '#FFEDD5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -2172,16 +2158,34 @@ export const SiteAgentTerminal: React.FC = () => {
                     </span>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className={deliveryPlateMatchesTrip ? 'btn btn-secondary' : 'btn btn-primary'}
-                  onClick={captureDeliveryPlate}
-                  disabled={isScanning || isCameraStarting}
-                  style={{ minHeight: '42px' }}
-                >
-                  <Camera size={16} />
-                  {deliveryPlateEvidence ? 'Retake Delivery Plate' : 'Snap Delivery Plate'}
-                </button>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className={deliveryPlateMatchesTrip ? 'btn btn-secondary' : 'btn btn-primary'}
+                    onClick={captureDeliveryPlate}
+                    disabled={isScanning || isCameraStarting}
+                    style={{ minHeight: '42px' }}
+                    title="Open the camera inside this website"
+                  >
+                    <Video size={16} />
+                    Website Camera
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      setDeliveryPlateEvidence(null);
+                      setHasScanned(false);
+                      openDeviceCamera('delivery');
+                    }}
+                    disabled={isScanning || isCameraStarting}
+                    style={{ minHeight: '42px' }}
+                    title="Use the device camera app and retain the complete photo"
+                  >
+                    <Camera size={16} />
+                    Device Camera
+                  </button>
+                </div>
               </div>
 
               {/* Linked Inbound Waybill Card */}
