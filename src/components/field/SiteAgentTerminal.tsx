@@ -27,7 +27,7 @@ import {
   Building,
 } from 'lucide-react';
 import { SiteAgentModeSheet } from './SiteAgentModeSheet';
-import { QuantityUnit, ExceptionType } from '../../types';
+import { QuantityUnit, ExceptionType, Trip } from '../../types';
 import { recognizeLicensePlate, OCRProgress } from '../../services/ocrService';
 
 const NIGERIAN_BANKS = [
@@ -192,6 +192,7 @@ export const SiteAgentTerminal: React.FC = () => {
     'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=80'
   );
   const [deliveryNotes, setDeliveryNotes] = useState('');
+  const [selectedDeliveryTripId, setSelectedDeliveryTripId] = useState<string | null>(null);
   const [deliveryPlateEvidence, setDeliveryPlateEvidence] = useState<{
     plate: string;
     imageUrl: string;
@@ -209,6 +210,9 @@ export const SiteAgentTerminal: React.FC = () => {
   const currentTruck = trucks.find((t) => t.id === selectedTruckId);
   const currentDriver = drivers.find((d) => d.id === selectedDriverId);
   const offloadingSites = sites.filter((s) => s.site_type === 'offloading');
+  const deliveryOpenTrips = activeSite
+    ? openTrips.filter((trip) => !trip.offloading_site_id || trip.offloading_site_id === activeSite.id)
+    : openTrips;
 
   useEffect(() => {
     if (offloadingSites.length === 0 && destinationSiteId) {
@@ -218,17 +222,22 @@ export const SiteAgentTerminal: React.FC = () => {
     }
   }, [destinationSiteId, offloadingSites]);
 
-  // Check if there is an existing in-transit trip matching this truck for Delivery
-  const matchingOpenTrip = openTrips.find(
-    (t) =>
-      t.truck_id === selectedTruckId ||
-      t.truck?.registration_number.toLowerCase() === confirmedPlate.toLowerCase()
-  ) || null;
+  // Delivery is trip-first: the officer selects the inbound waybill, then OCR
+  // verifies that the arriving plate belongs to that exact open trip.
+  const matchingOpenTrip = openTrips.find((trip) => trip.id === selectedDeliveryTripId) || null;
 
   const normalizePlate = (plate: string) => plate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
   const expectedDeliveryPlate = matchingOpenTrip?.truck?.registration_number || '';
   const deliveryPlateMatchesTrip = !!deliveryPlateEvidence && !!matchingOpenTrip &&
     normalizePlate(deliveryPlateEvidence.plate) === normalizePlate(expectedDeliveryPlate);
+
+  useEffect(() => {
+    if (selectedDeliveryTripId && !openTrips.some((trip) => trip.id === selectedDeliveryTripId)) {
+      setSelectedDeliveryTripId(null);
+      setDeliveryPlateEvidence(null);
+      setIsFlaggingException(false);
+    }
+  }, [openTrips, selectedDeliveryTripId]);
 
   const stopLiveCamera = () => {
     cameraRequestIdRef.current += 1;
@@ -343,6 +352,25 @@ export const SiteAgentTerminal: React.FC = () => {
     void startLiveCamera('delivery', 'environment');
   };
 
+  const confirmDeliveryTripWithOCR = (trip: Trip) => {
+    const expectedTonnes = trip.loading_event?.estimated_tonnes || trip.truck?.capacity_tonnes || 30;
+    setSelectedDeliveryTripId(trip.id);
+    setSelectedTruckId(trip.truck_id);
+    setSelectedDriverId(trip.driver_id);
+    setDeliveredTonnes(expectedTonnes);
+    setScaleTicketNumber('');
+    setDeliveryNotes('');
+    setDeliveryPlateEvidence(null);
+    setConfirmedPlate('');
+    setHasScanned(false);
+    setDeliverySaved(false);
+    setIsFlaggingException(false);
+    setOcrProgress(0);
+    setOcrStatus('Ready for capture');
+    capturePurposeRef.current = 'delivery';
+    void startLiveCamera('delivery', 'environment');
+  };
+
   // Real Tesseract OCR recognition pipeline
   const runPlateOCR = async (imageSource: File | Blob | string) => {
     const isDeliveryScan = capturePurposeRef.current === 'delivery' || movementType === 'delivery';
@@ -387,7 +415,7 @@ export const SiteAgentTerminal: React.FC = () => {
         ? openTrips.find((trip) => trip.truck_id === matched.id || normalizePlate(trip.truck?.registration_number || '') === normalized)
         : undefined;
 
-      if (matched) {
+      if (matched && !isDeliveryScan) {
         setSelectedTruckId(matched.id);
         const tonnage = matched.capacity_tonnes || matched.capacity || 30;
         setEstimatedTonnes(tonnage);
@@ -400,32 +428,39 @@ export const SiteAgentTerminal: React.FC = () => {
           || drivers[0];
         if (driver) setSelectedDriverId(driver.id);
         setIsUnregisteredModalOpen(false);
-      } else {
+      } else if (!matched && !isDeliveryScan) {
         setSelectedTruckId('');
         setSelectedDriverId('');
-        if (isDeliveryScan) {
-          setIsUnregisteredModalOpen(false);
-        } else {
-          // Enrollment is a loading-gate action only.
-          setNewTruckPlate(result.candidatePlate);
-          setIsUnregisteredModalOpen(true);
-        }
+        // Enrollment is a loading-gate action only.
+        setNewTruckPlate(result.candidatePlate);
+        setIsUnregisteredModalOpen(true);
+      } else if (isDeliveryScan) {
+        setIsUnregisteredModalOpen(false);
       }
 
-      if (isDeliveryScan && !matched) {
+      const selectedTrip = openTrips.find((trip) => trip.id === selectedDeliveryTripId);
+      const selectedTripPlate = selectedTrip?.truck?.registration_number || '';
+      const selectedTripPlateMatches = !!selectedTrip && normalizePlate(selectedTripPlate) === normalized;
+
+      if (isDeliveryScan && !selectedTrip) {
         setToastMessage({
-          text: `Plate [${result.candidatePlate}] is not registered. Confirm the plate or contact the loading gate; enrollment cannot be done at delivery.`,
+          text: 'Select an open trip before scanning the arriving truck.',
           type: 'warning',
         });
-      } else if (isDeliveryScan && !matchedOpenTrip) {
+      } else if (isDeliveryScan && selectedTripPlateMatches) {
         setToastMessage({
-          text: `Truck [${result.candidatePlate}] is registered, but it has no open pickup trip to deliver.`,
-          type: 'warning',
-        });
-      } else if (isDeliveryScan && matchedOpenTrip) {
-        setToastMessage({
-          text: `Open trip ${matchedOpenTrip.trip_number} found for [${result.candidatePlate}]. Verify the weight and close the delivery.`,
+          text: `Trip ${selectedTrip?.trip_number} confirmed by OCR for [${result.candidatePlate}]. Complete the delivery details to close it.`,
           type: 'success',
+        });
+      } else if (isDeliveryScan && !matched) {
+        setToastMessage({
+          text: `Plate [${result.candidatePlate}] is not registered and does not confirm waybill ${selectedTrip?.trip_number}.`,
+          type: 'warning',
+        });
+      } else if (isDeliveryScan && !selectedTripPlateMatches) {
+        setToastMessage({
+          text: `Plate [${result.candidatePlate}] does not match ${selectedTripPlate} on waybill ${selectedTrip?.trip_number}. Do not close this trip.`,
+          type: 'warning',
         });
       } else {
         setToastMessage({
@@ -685,6 +720,7 @@ export const SiteAgentTerminal: React.FC = () => {
       setDeliverySaved(true);
       setDeliveryNotes('');
       setDeliveryPlateEvidence(null);
+      setSelectedDeliveryTripId(null);
       setTimeout(() => setToastMessage(null), 4500);
     } else {
       setToastMessage({ text: result.message || 'The live trip could not be closed.', type: 'warning' });
@@ -1811,6 +1847,77 @@ export const SiteAgentTerminal: React.FC = () => {
                 </span>
               </div>
 
+              <div
+                style={{
+                  padding: '1rem',
+                  backgroundColor: '#F8FAFC',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginBottom: deliveryOpenTrips.length ? '0.75rem' : 0 }}>
+                  <div>
+                    <strong style={{ display: 'block', fontSize: '0.85rem', color: '#0F172A' }}>Open Trips Awaiting Delivery</strong>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                      Select the arriving waybill, then confirm its truck plate with OCR.
+                    </span>
+                  </div>
+                  <span className="badge badge-open">{deliveryOpenTrips.length} OPEN</span>
+                </div>
+
+                {deliveryOpenTrips.length === 0 ? (
+                  <div style={{ padding: '0.8rem', borderRadius: 'var(--radius-md)', backgroundColor: '#FFFFFF', border: '1px dashed var(--border-default)', color: 'var(--text-secondary)', fontSize: '0.78rem', textAlign: 'center' }}>
+                    No open trips are currently waiting for delivery.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                    {deliveryOpenTrips.map((trip) => {
+                      const isSelected = trip.id === selectedDeliveryTripId;
+                      return (
+                        <div
+                          key={trip.id}
+                          style={{
+                            padding: '0.8rem',
+                            backgroundColor: isSelected ? '#EFF6FF' : '#FFFFFF',
+                            border: `1.5px solid ${isSelected ? '#38BDF8' : 'var(--border-subtle)'}`,
+                            borderRadius: 'var(--radius-md)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: '0.75rem',
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                            <PlateDisplay plate={trip.truck?.registration_number || 'NO PLATE'} size="sm" />
+                            <div style={{ minWidth: 0 }}>
+                              <strong style={{ display: 'block', fontSize: '0.82rem', color: '#0F172A' }}>
+                                Waybill #{trip.trip_number}
+                              </strong>
+                              <span style={{ display: 'block', fontSize: '0.71rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
+                                {trip.driver?.full_name || 'Driver on file'} • {trip.loading_site?.name || 'Loading site'} • {trip.loading_event?.estimated_tonnes || trip.truck?.capacity_tonnes || 30}T
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className={isSelected ? 'btn btn-secondary' : 'btn btn-primary'}
+                            onClick={() => confirmDeliveryTripWithOCR(trip)}
+                            disabled={isScanning || isCameraStarting}
+                            style={{ minHeight: '40px' }}
+                          >
+                            <Camera size={15} /> {isSelected ? 'Scan Again with OCR' : 'Confirm Trip with OCR'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {matchingOpenTrip ? (
+                <>
+
               {/* Mandatory fresh delivery-gate plate evidence */}
               <div
                 style={{
@@ -2161,6 +2268,13 @@ export const SiteAgentTerminal: React.FC = () => {
                     Submit Exception to Operations Manager
                   </button>
                 </form>
+              )}
+                </>
+              ) : (
+                <div style={{ padding: '1rem', backgroundColor: '#EFF6FF', border: '1px dashed #7DD3FC', borderRadius: 'var(--radius-md)', color: '#075985', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <Camera size={17} style={{ flexShrink: 0 }} />
+                  <span>Choose an open trip above and click <strong>Confirm Trip with OCR</strong> to scan the arriving truck and unlock the trip-closing fields.</span>
+                </div>
               )}
             </div>
           )}
