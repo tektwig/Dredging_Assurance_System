@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Printer, Truck, User, MapPin, Scale } from 'lucide-react';
+import { X, Printer, Download, Truck, User, MapPin, Scale } from 'lucide-react';
 import { TripClosureInvoice } from '../../types';
 import { PlateDisplay } from '../common/PlateDisplay';
 
@@ -7,6 +7,36 @@ interface TripClosureInvoiceModalProps {
   invoice: TripClosureInvoice | null;
   onClose: () => void;
 }
+
+const escapeHtml = (value: string) => value
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#039;');
+
+/** Download a self-contained HTML receipt that can be reopened or printed to PDF. */
+export const downloadTripClosureInvoice = (invoice: TripClosureInvoice) => {
+  const openedAt = new Date(invoice.opened_at).toLocaleString();
+  const closedAt = new Date(invoice.closed_at).toLocaleString();
+  const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(invoice.invoice_number)}</title>
+<style>body{font-family:Arial,sans-serif;color:#0f172a;max-width:760px;margin:40px auto;padding:0 24px}header{display:flex;justify-content:space-between;border-bottom:2px solid #0f766e;padding-bottom:16px;margin-bottom:24px}h1{font-size:22px;margin:0 0 6px}.muted{color:#64748b;font-size:13px}.badge{color:#047857;font-weight:700;border:1px solid #86efac;background:#ecfdf5;padding:6px 10px;border-radius:999px;height:max-content}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:18px 0}.card{border:1px solid #cbd5e1;border-radius:8px;padding:14px}.label{display:block;color:#64748b;font-size:11px;font-weight:700;text-transform:uppercase;margin-bottom:6px}.value{font-size:15px;font-weight:700}.total{background:#ecfdf5;border:1px solid #86efac;border-radius:8px;padding:16px;margin-top:18px;font-size:18px;font-weight:700}@media print{body{margin:0}}</style></head>
+<body><header><div><h1>Trip Closure Invoice</h1><div class="muted">${escapeHtml(invoice.invoice_number)} · Waybill ${escapeHtml(invoice.trip_number)}</div></div><div class="badge">VERIFIED &amp; CLOSED</div></header>
+<div class="grid"><div class="card"><span class="label">Truck</span><div class="value">${escapeHtml(invoice.truck_registration)}</div><div class="muted">${escapeHtml(invoice.truck_type || 'Registered truck')} · ${invoice.truck_capacity_tonnes || 0}T capacity</div><div class="muted">Owner: ${escapeHtml(invoice.truck_owner_name || 'Owner on file')}</div></div>
+<div class="card"><span class="label">Driver</span><div class="value">${escapeHtml(invoice.driver_name)}</div><div class="muted">${escapeHtml(invoice.driver_phone || 'Phone on file')}</div><div class="muted">License: ${escapeHtml(invoice.driver_license || 'On file')}</div></div></div>
+<div class="card"><span class="label">Route</span><div class="value">${escapeHtml(invoice.loading_site_name)} → ${escapeHtml(invoice.offloading_site_name)}</div><div class="muted">Opened: ${escapeHtml(openedAt)}</div><div class="muted">Closed: ${escapeHtml(closedAt)}</div></div>
+<div class="total">Verified delivery: ${invoice.quantity_tonnes.toFixed(2)} tonnes</div></body></html>`;
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `${invoice.invoice_number}.html`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+};
 
 export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = ({ invoice, onClose }) => {
   if (!invoice) return null;
@@ -58,6 +88,7 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+            <button type="button" className="btn btn-secondary" onClick={() => downloadTripClosureInvoice(invoice)}><Download size={15} /> Download Invoice</button>
             <button type="button" className="btn btn-primary" onClick={() => window.print()}><Printer size={15} /> Print Invoice</button>
           </div>
         </div>

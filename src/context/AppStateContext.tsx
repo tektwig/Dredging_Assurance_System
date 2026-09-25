@@ -249,7 +249,14 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>(INITIAL_INVOICES);
-  const [tripInvoices, setTripInvoices] = useState<TripClosureInvoice[]>([]);
+  const [tripInvoices, setTripInvoices] = useState<TripClosureInvoice[]>(() => {
+    try {
+      const saved = localStorage.getItem('dredgeops_trip_closure_invoices');
+      return saved ? JSON.parse(saved) as TripClosureInvoice[] : [];
+    } catch {
+      return [];
+    }
+  });
   const [payoutBatches, setPayoutBatches] = useState<PayoutBatch[]>(INITIAL_PAYOUT_BATCHES);
   const [complianceDocs] = useState<ComplianceDocument[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
@@ -329,6 +336,10 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     localStorage.setItem('dredgeops_invoices', JSON.stringify(invoices));
   }, [invoices]);
+
+  useEffect(() => {
+    localStorage.setItem('dredgeops_trip_closure_invoices', JSON.stringify(tripInvoices));
+  }, [tripInvoices]);
 
   useEffect(() => {
     localStorage.setItem('dredgeops_payout_batches', JSON.stringify(payoutBatches));

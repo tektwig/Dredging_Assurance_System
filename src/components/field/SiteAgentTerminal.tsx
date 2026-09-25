@@ -21,12 +21,14 @@ import {
   Users,
   UserPlus,
   CreditCard,
+  Download,
   Search,
   X,
   Phone,
   Building,
 } from 'lucide-react';
 import { SiteAgentModeSheet } from './SiteAgentModeSheet';
+import { TripClosureInvoiceModal, downloadTripClosureInvoice } from '../operations/TripClosureInvoiceModal';
 import { QuantityUnit, ExceptionType, Trip } from '../../types';
 import { recognizeLicensePlate, OCRProgress } from '../../services/ocrService';
 
@@ -68,6 +70,7 @@ export const SiteAgentTerminal: React.FC = () => {
     trucks,
     drivers,
     trips,
+    tripInvoices,
     openTrips,
     createLoadingTrip,
     closeOffloadingTrip,
@@ -103,6 +106,7 @@ export const SiteAgentTerminal: React.FC = () => {
   const [pickupSaved, setPickupSaved] = useState(false);
   const [isDeliverySaving, setIsDeliverySaving] = useState(false);
   const [deliverySaved, setDeliverySaved] = useState(false);
+  const [selectedClosureInvoiceId, setSelectedClosureInvoiceId] = useState<string | null>(null);
   const [isRegisteringParticipant, setIsRegisteringParticipant] = useState(false);
   const [isLiveCameraActive, setIsLiveCameraActive] = useState(false);
   const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
@@ -2378,9 +2382,12 @@ export const SiteAgentTerminal: React.FC = () => {
               No recent movement records.
             </div>
           ) : (
-            filteredRecentTrips.map((trip) => (
+            filteredRecentTrips.map((trip) => {
+              const closureInvoice = tripInvoices.find((invoice) => invoice.trip_id === trip.id);
+              return (
               <div
                 key={trip.id}
+                onClick={() => closureInvoice && setSelectedClosureInvoiceId(trip.id)}
                 style={{
                   padding: '0.75rem 0.85rem',
                   backgroundColor: '#F8FAFC',
@@ -2390,7 +2397,9 @@ export const SiteAgentTerminal: React.FC = () => {
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   gap: '0.75rem',
+                  cursor: closureInvoice ? 'pointer' : undefined,
                 }}
+                title={closureInvoice ? 'Click to review the closure invoice' : undefined}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0 }}>
                   <PlateDisplay plate={trip.truck?.registration_number || 'UNKNOWN'} size="sm" />
@@ -2404,14 +2413,35 @@ export const SiteAgentTerminal: React.FC = () => {
                   </div>
                 </div>
 
-                <div style={{ flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.45rem', flexShrink: 0 }}>
                   <StatusBadge status={trip.status} />
+                  {trip.status === 'closed' && closureInvoice && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ minHeight: '30px', padding: '0.25rem 0.55rem', fontSize: '0.7rem' }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        downloadTripClosureInvoice(closureInvoice);
+                        setSelectedClosureInvoiceId(trip.id);
+                      }}
+                      title="Download and review this closure invoice"
+                    >
+                      <Download size={12} /> Download Invoice
+                    </button>
+                  )}
                 </div>
               </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
+
+      <TripClosureInvoiceModal
+        invoice={tripInvoices.find((invoice) => invoice.trip_id === selectedClosureInvoiceId) || null}
+        onClose={() => setSelectedClosureInvoiceId(null)}
+      />
 
       {/* ONBOARDING MODAL: UNREGISTERED TRUCK & DRIVER ENROLLMENT */}
       {isUnregisteredModalOpen && (
