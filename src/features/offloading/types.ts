@@ -30,6 +30,29 @@ export type OffloadingLookupState =
   | { status: 'lookup_error'; plate: string }
   | { status: 'found'; assignment: OffloadingAssignment; trip: OpenTripSummary; capture: PreparedOffloadingCapture };
 
+export type ClosureReview = {
+  assignment: OffloadingAssignment; trip: OpenTripSummary;
+  capture: PreparedOffloadingCapture; quantityTonnes: number;
+};
+export type ClosureRequest = { requestId: string; review: ClosureReview };
+export type ClosureFailureCode =
+  | 'INVALID_REQUEST_ID' | 'TRIP_REQUIRED' | 'INVALID_PLATE' | 'INVALID_QUANTITY'
+  | 'INVALID_CAPTURE_METHOD' | 'INVALID_CAPTURE_TIMESTAMP' | 'INVALID_OCR_DATA'
+  | 'SITE_REVIEW_REQUIRED' | 'SITE_ASSIGNMENT_REQUIRED' | 'INVALID_SITE_ASSIGNMENT'
+  | 'INACTIVE_SITE' | 'SITE_ASSIGNMENT_CHANGED' | 'TRIP_NOT_FOUND'
+  | 'TRIP_NOT_OPEN' | 'PLATE_MISMATCH' | 'INVALID_IMAGE_REFERENCE'
+  | 'IMAGE_NOT_FOUND' | 'IMAGE_ALREADY_USED';
+export type ClosureSuccess = {
+  kind: 'success'; requestId: string;
+  trip: { id: string; tripNumber: string; status: 'closed'; truckId: string;
+    driverId: string; offloadingSiteId: string; quantityTonnes: number;
+    closedAt: string; closedBy: string };
+  capture: { confirmedPlate: string; normalizedConfirmedPlate: string;
+    method: 'MANUAL' | 'OCR' | 'OCR_CORRECTED'; imageRecorded: boolean };
+  notificationQueued: boolean;
+};
+export type ClosureResult = ClosureSuccess | { kind: 'business_failure'; code: ClosureFailureCode; tripNumber?: string };
+
 export function preparedCapture(plate: string, evidence: PlateCaptureEvidence | null,
   capturedAt: string): PreparedOffloadingCapture {
   const normalize = (value: string) => value.replace(/[\t\n\v\f\r -]+/g, '').toUpperCase();

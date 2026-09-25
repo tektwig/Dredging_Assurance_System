@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.app.json --noEmit --incremental false && tsc -p tsconfig.node.json --noEmit --incremental false",
-    "test:frontend": "node scripts/test-frontend-foundation.mjs && node scripts/test-loading-portal.mjs && node scripts/test-loading-driver-workflow.mjs && node scripts/test-loading-trip-opening.mjs && node scripts/test-loading-ocr.mjs && node scripts/test-offloading-lookup.mjs"
+    "test:frontend": "node scripts/test-frontend-foundation.mjs && node scripts/test-loading-portal.mjs && node scripts/test-loading-driver-workflow.mjs && node scripts/test-loading-trip-opening.mjs && node scripts/test-loading-ocr.mjs && node scripts/test-offloading-lookup.mjs && node scripts/test-offloading-closure.mjs"
   },
   "dependencies": {
     "@paddleocr/paddleocr-js": "^0.4.2",

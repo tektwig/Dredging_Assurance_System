@@ -67,6 +67,12 @@ export interface Database {
         p_make_default_driver?: boolean;
       }; Returns: unknown };
       lookup_offloading_open_trip: { Args: { p_plate: string }; Returns: unknown };
+      close_trip_v2: { Args: {
+        p_request_id: string; p_trip_id: string; p_plate: string; p_expected_assignment_id: string;
+        p_quantity_tonnes: number; p_capture_method: 'MANUAL' | 'OCR' | 'OCR_CORRECTED';
+        p_captured_at: string; p_ocr_detected_plate: string | null;
+        p_ocr_confidence: number | null; p_image_path: string | null;
+      }; Returns: unknown };
     };
     Enums: { app_role: AppRole };
     CompositeTypes: { [_ in never]: never };

@@ -1,13 +1,18 @@
 import type { ReactNode } from 'react';
 import { operationalDateLabel, platePreview } from '../../loading/utils/operationalDate';
 import type { OffloadingLookupSnapshot } from '../utils/offloadingLookupController';
+import type { ClosureState } from '../utils/closureController';
 
 type Props = { officerName: string; plate: string; lookup: OffloadingLookupSnapshot;
-  capturePanel: ReactNode; onPlateChange: (plate: string) => void; onLookup: () => void; onReset: () => void };
+  closure: ClosureState; closurePanel: ReactNode; capturePanel: ReactNode;
+  onPlateChange: (plate: string) => void; onLookup: () => void; onReset: () => void };
 
 export function OffloadingPortalView({ officerName, plate, lookup, capturePanel,
-  onPlateChange, onLookup, onReset }: Props) {
+  closure, closurePanel, onPlateChange, onLookup, onReset }: Props) {
   const state = lookup.state;
+  const locked = closure.status !== 'idle';
+  const showCapture = closure.status === 'idle';
+  const showLookup = closure.status === 'idle';
   return <div className="loading-portal offloading-portal">
     <header className="loading-heading">
       <div><p className="eyebrow">Truck Revenue Tracking System</p><h1>Offloading Portal</h1>
@@ -21,7 +26,8 @@ export function OffloadingPortalView({ officerName, plate, lookup, capturePanel,
     <section className="loading-work-card" aria-label="Find open trip">
       <div className="loading-section-heading"><h2>Find Open Trip</h2>
         <p>Scan or enter the vehicle plate. Confirm it before finding the trip.</p></div>
-      {capturePanel}
+      {showCapture && capturePanel}
+      {showLookup && <>
       <form className="loading-plate-form" onSubmit={event => { event.preventDefault(); onLookup(); }}
         aria-busy={lookup.pending}>
         <label htmlFor="offloading-plate">Vehicle Plate Number</label>
@@ -37,6 +43,7 @@ export function OffloadingPortalView({ officerName, plate, lookup, capturePanel,
         {plate.trim() && <p className="loading-plate-preview">Confirmed plate: <strong>{plate.trim()}</strong>
           <span>Normalized preview: <strong>{platePreview(plate)}</strong></span></p>}
       </form>
+      </>}
       {state.status === 'looking_up' && <div className="loading-result" role="status">
         <h3>Finding open trip…</h3><p>Checking the confirmed plate.</p></div>}
       {state.status === 'invalid_plate' && <div className="loading-result loading-result-warning" role="alert">
@@ -54,7 +61,7 @@ export function OffloadingPortalView({ officerName, plate, lookup, capturePanel,
         <h3>Trip lookup unavailable</h3><p>Check your connection and retry. No trip has been changed.</p>
         <button className="button secondary" type="button" onClick={onLookup}>Retry lookup</button>
       </div>}
-      {state.status === 'found' && <div className="loading-result loading-result-ready" role="status">
+      {state.status === 'found' && !locked && <div className="loading-result loading-result-ready" role="status">
         <p className="eyebrow">Open trip found</p><h3>{state.trip.tripNumber}</h3>
         <dl className="loading-details">
           <div><dt>Confirmed plate</dt><dd>{state.capture.confirmedPlate}</dd></div>
@@ -64,9 +71,11 @@ export function OffloadingPortalView({ officerName, plate, lookup, capturePanel,
           <div><dt>Opened</dt><dd>{new Date(state.trip.openedAt).toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}</dd></div>
           <div><dt>Offloading site</dt><dd>{state.assignment.siteName}</dd></div>
         </dl>
-        <p className="loading-next-note">Trip identified. Tonnage entry and closure will be available in the next phase. No trip has been closed.</p>
       </div>}
-      {state.status !== 'idle' && <button className="button secondary offloading-next" type="button"
+      {closurePanel}
+      {(state.status !== 'idle' || closure.status !== 'idle')
+        && closure.status !== 'submitting' && closure.status !== 'ambiguous'
+        && <button className="button secondary offloading-next" type="button"
         onClick={onReset}>Scan Next Truck</button>}
     </section>
   </div>;

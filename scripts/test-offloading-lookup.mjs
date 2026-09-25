@@ -121,6 +121,7 @@ assert(scanMarkup.includes('Find Open Trip'));
 assert(scanMarkup.includes('No lookup has started'));
 const view = (state, plate = 'ABC-123') => renderToStaticMarkup(React.createElement(OffloadingPortalView, {
   officerName: 'Officer A', plate, lookup: { state, pending: false },
+  closure: { status: 'idle' }, closurePanel: null,
   capturePanel: React.createElement('span', null, 'shared scanner'),
   onPlateChange() {}, onLookup() {}, onReset() {},
 }));
