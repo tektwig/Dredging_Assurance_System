@@ -21,14 +21,13 @@ import {
   Users,
   UserPlus,
   CreditCard,
-  Download,
   Search,
   X,
   Phone,
   Building,
 } from 'lucide-react';
 import { SiteAgentModeSheet } from './SiteAgentModeSheet';
-import { TripClosureInvoiceModal, downloadTripClosureInvoice, viewTripClosureInvoice } from '../operations/TripClosureInvoiceModal';
+import { TripClosureInvoiceModal } from '../operations/TripClosureInvoiceModal';
 import { QuantityUnit, ExceptionType, Trip } from '../../types';
 import { recognizeLicensePlate, OCRProgress } from '../../services/ocrService';
 
