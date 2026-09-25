@@ -6,3 +6,8 @@ export class LoadingAuthorizationError extends Error {
 export class RegistrationOutcomeUnknownError extends Error {
   constructor() { super('Registration outcome unknown'); }
 }
+
+// The opening RPC may have committed before a transport or response failure.
+export class TripOutcomeUnknownError extends Error {
+  constructor() { super('Trip opening outcome unknown'); }
+}

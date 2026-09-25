@@ -122,3 +122,55 @@ export type LookupState =
   | { status: 'site_unavailable' }
   | { status: 'access_unavailable' }
   | { status: 'lookup_error'; plate: string };
+
+export type OpenTripReview = {
+  plate: string;
+  truck: TruckSummary;
+  actualDriver: SafeDriverSummary;
+  regularDriverId: string;
+  site: AssignedLoadingSite;
+  makeRegular: boolean;
+};
+
+export type OpenTripRequest = {
+  requestId: string;
+  capturedAt: string;
+  review: OpenTripReview;
+};
+
+export type OpenTripFailureCode =
+  | 'INVALID_REQUEST_ID' | 'INVALID_PLATE' | 'DRIVER_REQUIRED' | 'INVALID_DEFAULT_OPTION'
+  | 'INVALID_CAPTURE_METHOD' | 'INVALID_CAPTURE_TIMESTAMP' | 'INVALID_OCR_DATA'
+  | 'SITE_REVIEW_REQUIRED' | 'SITE_ASSIGNMENT_REQUIRED' | 'INVALID_SITE_ASSIGNMENT'
+  | 'INACTIVE_SITE' | 'SITE_ASSIGNMENT_CHANGED' | 'UNKNOWN_TRUCK' | 'INACTIVE_TRUCK'
+  | 'OPEN_TRIP_EXISTS' | 'BLOCKING_EXCEPTION' | 'DRIVER_NOT_FOUND' | 'INACTIVE_DRIVER'
+  | 'INVALID_IMAGE_REFERENCE' | 'IMAGE_NOT_FOUND' | 'IMAGE_ALREADY_USED';
+
+export type OpenedTrip = {
+  id: string;
+  tripNumber: string;
+  status: 'open';
+  truckId: string;
+  driverId: string;
+  driverNameAtLoading: string;
+  dailyRegistrationId: string;
+  loadingSiteId: string;
+  loadingAssignmentId: string;
+  openedAt: string;
+  openedBy: string;
+  quantityTonnes: null;
+};
+
+export type OpenTripSuccess = {
+  kind: 'success';
+  requestId: string;
+  trip: OpenedTrip;
+  capture: { confirmedPlate: string; normalizedConfirmedPlate: string; captureMethod: 'MANUAL'; imageRecorded: false };
+  defaultDriverChanged: boolean;
+};
+
+export type OpenTripResult = OpenTripSuccess | {
+  kind: 'business_failure';
+  code: OpenTripFailureCode;
+  tripNumber?: string;
+};

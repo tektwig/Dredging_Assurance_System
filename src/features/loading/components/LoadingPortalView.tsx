@@ -15,6 +15,10 @@ type Props = {
   onRetrySite: () => void;
   onRetryStatistics: () => void;
   driverPanel?: ReactNode;
+  tripPanel?: ReactNode;
+  tripStage?: string;
+  lateOpenedTrip?: string | null;
+  onDismissLateOpenedTrip?: () => void;
   plateLocked?: boolean;
   savedRegistration?: SavedRegistrationOutcome | null;
   lateRegistration?: SavedRegistrationReceipt | null;
@@ -144,6 +148,11 @@ export function LoadingPortalView(props: Props) {
     </header>
 
     <section className="loading-work-card" aria-label="Manual truck lookup">
+      {props.lateOpenedTrip && <div className="loading-result loading-result-warning" role="alert">
+        <strong>Trip {props.lateOpenedTrip} opened for a previous truck.</strong>
+        <p>The response arrived after the workspace changed. Do not open that truck again. Check with Operations if needed.</p>
+        <button className="button secondary" type="button" onClick={props.onDismissLateOpenedTrip}>Dismiss notice</button>
+      </div>}
       {props.lateRegistration && <div className="loading-result loading-result-warning" role="status">
         <strong>Registration saved for {props.lateRegistration.plate}.</strong>
         <p>It completed after the page context changed. Look up that plate before continuing; do not register it again.</p>
@@ -165,8 +174,10 @@ export function LoadingPortalView(props: Props) {
           {props.plate.trim() && <p className="loading-plate-preview">Entered: <strong>{props.plate.trim()}</strong>
             <span>Normalized preview: <strong>{preview || '—'}</strong></span></p>}
         </form>
-        <LookupResult lookup={props.lookup} onRetry={props.onLookup} driverPanel={props.driverPanel}
-          saved={props.savedRegistration} onRetryRegistrationCheck={props.onRetryRegistrationCheck} />
+        {(!props.tripStage || props.tripStage === 'idle' || props.tripStage === 'site_changed' || props.tripStage === 'authorization')
+          && <LookupResult lookup={props.lookup} onRetry={props.onLookup} driverPanel={props.driverPanel}
+            saved={props.savedRegistration} onRetryRegistrationCheck={props.onRetryRegistrationCheck} />}
+        {props.tripPanel}
       </> : <div className="loading-site-block" role={props.site.status === 'loading' ? 'status' : 'alert'}>
         <h2>{props.site.status === 'loading' ? 'Checking loading site' : 'Loading site unavailable'}</h2>
         <p>{siteUnavailableMessage(props.site)}</p>

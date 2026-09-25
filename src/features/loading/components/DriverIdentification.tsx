@@ -162,7 +162,7 @@ export function DriverIdentification(props: Props) {
       {context.kind === 'known' && selected.driver.id !== context.regular.id && <label className="loading-choice">
         <input type="checkbox" checked={selected.makeRegular} onChange={event => props.onMakeRegular(event.target.checked)} />
         Set {selected.driver.fullName} as this truck’s regular driver</label>}
-      <p className="loading-next-note">Driver identified. Trip review and opening will be available in the next phase. No trip has been opened.</p>
+      <p className="loading-next-note">Driver identified. Review the trip details before opening.</p>
     </div>}
   </section>;
 }

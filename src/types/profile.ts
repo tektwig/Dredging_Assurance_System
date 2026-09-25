@@ -60,6 +60,12 @@ export interface Database {
         p_bank_name?: string | null; p_account_number?: string | null;
         p_account_name?: string | null;
       }; Returns: unknown };
+      create_loading_trip_v2: { Args: {
+        p_request_id: string; p_plate: string; p_driver_id: string; p_expected_assignment_id: string;
+        p_capture_method: string; p_captured_at: string; p_ocr_detected_plate?: string | null;
+        p_ocr_confidence?: number | null; p_image_path?: string | null;
+        p_make_default_driver?: boolean;
+      }; Returns: unknown };
     };
     Enums: { app_role: AppRole };
     CompositeTypes: { [_ in never]: never };

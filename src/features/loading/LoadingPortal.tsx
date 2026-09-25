@@ -2,13 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../auth/AuthProvider';
 import { DriverIdentification } from './components/DriverIdentification';
 import { LoadingPortalView } from './components/LoadingPortalView';
+import { TripReview } from './components/TripReview';
 import { loadAssignedSite, loadLoadingStatistics, lookupLoadingTruck } from './services/loadingData';
 import { registerLoadingParticipant, searchLoadingDrivers } from './services/driverData';
 import { LoadingAuthorizationError } from './services/errors';
+import { openLoadingTrip } from './services/tripData';
 import type { SavedRegistrationReceipt, SiteContextState, StatisticsState } from './types';
 import { LoadingLookupController, type LookupSnapshot } from './utils/lookupController';
 import { DriverWorkflowController, type DriverWorkflowSnapshot } from './utils/driverWorkflowController';
-import { operationalDateKey } from './utils/operationalDate';
+import { operationalDateKey, operationalDateLabel } from './utils/operationalDate';
+import { OpenTripController, type OpenTripState } from './utils/openTripController';
+import { reviewForSelection } from './utils/reviewSelection';
 import './loading.css';
 
 export function LoadingPortal() {
@@ -28,6 +32,8 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
   const [lookupSnapshot, setLookupSnapshot] = useState<LookupSnapshot>({ state: { status: 'idle' }, pending: false });
   const [driverSnapshot, setDriverSnapshot] = useState<DriverWorkflowSnapshot | null>(null);
   const [lateRegistration, setLateRegistration] = useState<SavedRegistrationReceipt | null>(null);
+  const [openState, setOpenState] = useState<OpenTripState>({ status: 'idle' });
+  const [lateOpenedTrip, setLateOpenedTrip] = useState<string | null>(null);
   const siteRef = useRef(site);
   const lookupAssignmentRef = useRef<string | null>(null);
   siteRef.current = site;
@@ -48,13 +54,20 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     () => { setSite({ status: 'loading' }); setSiteRevision(value => value + 1); },
     receipt => setLateRegistration(receipt),
   ), [controller]);
+  const openController = useMemo(() => new OpenTripController(
+    openLoadingTrip, setOpenState, () => setStatisticsRevision(value => value + 1),
+    () => { setSite({ status: 'loading' }); setSiteRevision(value => value + 1); },
+    () => { setSite({ status: 'blocked', reason: 'unauthorized' }); setSiteRevision(value => value + 1); },
+    undefined, undefined, result => { setLateOpenedTrip(result.trip.tripNumber); setStatisticsRevision(value => value + 1); },
+  ), []);
   const dateKey = operationalDateKey(now);
 
   useEffect(() => {
     controller.resume();
     driverController.resume();
-    return () => { controller.dispose(); driverController.dispose(); };
-  }, [controller, driverController]);
+    openController.resume();
+    return () => { controller.dispose(); driverController.dispose(); openController.dispose(); };
+  }, [controller, driverController, openController]);
 
   useEffect(() => {
     if (site.status !== 'ready' || lookupAssignmentRef.current !== site.site.assignmentId) return;
@@ -73,6 +86,10 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
   }, [driverController, site, lookupSnapshot.state]);
 
   const assignmentId = site.status === 'ready' ? site.site.assignmentId : null;
+  const openInput = reviewForSelection(site, lookupSnapshot, driverSnapshot);
+  const inputKey = openInput ? JSON.stringify([openInput.plate, openInput.truck.id, openInput.actualDriver.id,
+    openInput.site.assignmentId, openInput.makeRegular]) : null;
+  useEffect(() => { openController.setInput(openInput); }, [openController, inputKey]);
   useEffect(() => {
     const saved = driverController.current.saved;
     if (saved) setLateRegistration(saved.receipt);
@@ -109,6 +126,7 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
   }, [actorId, dateKey, statisticsRevision]);
 
   function onPlateChange(value: string) {
+    openController.setInput(null);
     const saved = driverController.current.saved;
     if (saved && saved.status !== 'ready') setLateRegistration(saved.receipt);
     setPlate(value);
@@ -119,6 +137,7 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
 
   function onLookup() {
     if (site.status !== 'ready') return;
+    openController.setInput(null);
     const saved = driverController.current.saved;
     if (saved && saved.status !== 'ready') setLateRegistration(saved.receipt);
     lookupAssignmentRef.current = site.site.assignmentId;
@@ -142,13 +161,32 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
       onBackFromDuplicate={() => driverController.backFromDuplicate()}
       onMakeRegular={value => driverController.setMakeRegular(value)} /> : undefined;
 
+  function nextTruck() {
+    openController.nextTruck();
+    setPlate('');
+    lookupAssignmentRef.current = null;
+    controller.editPlate();
+    driverController.reset();
+    setLateRegistration(null);
+    setLateOpenedTrip(null);
+  }
+  const tripPanel = <TripReview state={openState} canReview={!!openInput} operationalDate={operationalDateLabel(now)}
+    onReview={() => { openController.setInput(openInput); openController.beginReview(); }}
+    onBack={() => openController.backToDriver()}
+    onOpen={() => { void openController.submit(); }} onNext={nextTruck} />;
+  const showDriverPanel = openState.status === 'idle' || openState.status === 'site_changed'
+    || openState.status === 'authorization';
+
   return <LoadingPortalView officerName={officerName} now={now} site={site} statistics={statistics}
-    plate={plate} lookup={lookupSnapshot} driverPanel={driverPanel}
+    plate={plate} lookup={lookupSnapshot} driverPanel={showDriverPanel ? driverPanel : undefined}
+    tripPanel={tripPanel} tripStage={openState.status}
+    lateOpenedTrip={lateOpenedTrip} onDismissLateOpenedTrip={() => setLateOpenedTrip(null)}
     savedRegistration={driverSnapshot?.saved ?? null} lateRegistration={lateRegistration}
     onDismissLateRegistration={() => setLateRegistration(null)}
     onRetryRegistrationCheck={() => { void driverController.retrySavedValidation(); }}
-    plateLocked={driverSnapshot?.registration.status === 'submitting' || driverSnapshot?.registration.status === 'refreshing'}
+    plateLocked={driverSnapshot?.registration.status === 'submitting' || driverSnapshot?.registration.status === 'refreshing'
+      || openState.status === 'submitting' || openState.status === 'ambiguous' || openState.status === 'success'}
     onPlateChange={onPlateChange} onLookup={onLookup}
-    onRetrySite={() => { lookupAssignmentRef.current = null; controller.editPlate(); driverController.reset(); setSiteRevision(value => value + 1); }}
+    onRetrySite={() => { openController.setInput(null); lookupAssignmentRef.current = null; controller.editPlate(); driverController.reset(); setSiteRevision(value => value + 1); }}
     onRetryStatistics={() => setStatisticsRevision(value => value + 1)} />;
 }

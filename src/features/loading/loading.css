@@ -75,7 +75,17 @@
 .loading-actual-driver { margin-top: 1.2rem; padding: 1rem; border-radius: .6rem; background: #e6f1eb; }
 .loading-actual-driver .loading-next-note { margin: .7rem 0 0; }
 .loading-saved-note { padding: .7rem .9rem; border-radius: .45rem; background: #d8ecdc; color: #163e2e; font-weight: 700; }
+.loading-trip-action { margin-top: 1rem; }
+.loading-trip-action p { margin: .5rem 0 0; color: #315b5d; }
+.loading-trip-review, .loading-trip-success { margin-top: 1.5rem; padding: 1.3rem; border: 1px solid #a9c9c3; border-radius: .8rem; background: #f1f8f7; }
+.loading-trip-review h3, .loading-trip-success h3 { margin: 0 0 .5rem; }
+.loading-trip-review p, .loading-trip-success p { margin: .5rem 0; }
+.loading-trip-success { border-color: #83b79b; background: #eaf5ee; }
+.loading-trip-buttons { display: flex; gap: .7rem; flex-wrap: wrap; margin-top: 1.2rem; }
+.loading-trip-message { margin-top: 1rem; padding: .8rem; border-radius: .5rem; background: #fff6e9; }
+.loading-trip-success > .button { margin-top: 1.2rem; }
 @media (max-width: 540px) {
   .loading-driver-results li { align-items: stretch; flex-direction: column; }
   .loading-registration-actions .button { width: 100%; }
+  .loading-trip-buttons .button, .loading-trip-success > .button { width: 100%; }
 }
