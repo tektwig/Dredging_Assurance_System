@@ -205,7 +205,7 @@ const mapTripClosureInvoice = (row: JsonObject): TripClosureInvoice => ({
   issued_at: row.issued_at,
 });
 
-export async function fetchLiveSnapshot(role: UserRole | null): Promise<LiveSnapshot> {
+export async function fetchLiveSnapshot(_role: UserRole | null): Promise<LiveSnapshot> {
   const client = ensureClient();
   const [sitesResult, trucksResult, tripsResult, assignmentsResult, exceptionsResult, invoicesResult] = await Promise.all([
     client.from('sites').select('*').eq('is_active', true),
@@ -222,12 +222,12 @@ export async function fetchLiveSnapshot(role: UserRole | null): Promise<LiveSnap
   const firstError = sitesResult.error || trucksResult.error || tripsResult.error || exceptionsResult.error;
   if (firstError) throw firstError;
 
-  let driverRows: JsonObject[] = [];
-  if (role !== 'loading_officer') {
-    const driversResult = await client.from('drivers').select('*').eq('is_active', true);
-    if (driversResult.error) throw driversResult.error;
-    driverRows = driversResult.data || [];
-  }
+  // Loading officers need the registered driver pool as well as managers:
+  // assigning a driver to one truck must make that driver selectable on the
+  // next trip and after the terminal is reopened.
+  const driversResult = await client.from('drivers').select('*').eq('is_active', true).order('full_name');
+  if (driversResult.error) throw driversResult.error;
+  const driverRows: JsonObject[] = driversResult.data || [];
 
   const sites = (sitesResult.data || []).map(mapSite);
   const trucks = (trucksResult.data || []).map(mapTruck);
