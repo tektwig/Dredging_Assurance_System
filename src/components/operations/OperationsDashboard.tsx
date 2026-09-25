@@ -4,7 +4,6 @@ import { StatCard } from '../common/StatCard';
 import { StatusBadge } from '../common/StatusBadge';
 import { PlateDisplay } from '../common/PlateDisplay';
 import { ExceptionTriageModal } from './ExceptionTriageModal';
-import { TripDetailModal } from '../TripDetailModal';
 import { TripClosureInvoiceModal } from './TripClosureInvoiceModal';
 import { Trip } from '../../types';
 import {
@@ -16,16 +15,14 @@ import {
   Filter,
   FileSpreadsheet,
   Layers,
-  Eye,
 } from 'lucide-react';
 
 export const OperationsDashboard: React.FC = () => {
-  const { trips, tripInvoices, auditLogs, resolveTripException } = useAppState();
+  const { trips, tripInvoices, resolveTripException } = useAppState();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [triagingTrip, setTriagingTrip] = useState<Trip | null>(null);
-  const [inspectedTrip, setInspectedTrip] = useState<Trip | null>(null);
   const [selectedClosureInvoiceId, setSelectedClosureInvoiceId] = useState<string | null>(null);
 
   // Derived Metrics
@@ -51,7 +48,7 @@ export const OperationsDashboard: React.FC = () => {
 
   const handleExportCSV = () => {
     const headers = [
-      'Waybill Number',
+      'Trip Number',
       'Truck Plate',
       'Driver Name',
       'Loading Site',
@@ -158,7 +155,7 @@ export const OperationsDashboard: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <Layers size={18} color="var(--brand-primary)" />
             <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>
-              Live Trip Movement & Waybill Ledger
+              Live Trip Movement Ledger
             </h3>
             <span className="badge badge-blue">{filteredTrips.length} records</span>
           </div>
@@ -170,7 +167,7 @@ export const OperationsDashboard: React.FC = () => {
                 type="text"
                 className="form-input"
                 style={{ paddingLeft: '2.25rem', minHeight: '38px', fontSize: '0.8125rem' }}
-                placeholder="Filter by plate, waybill, driver..."
+                placeholder="Filter by plate, trip, driver..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -207,7 +204,7 @@ export const OperationsDashboard: React.FC = () => {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Waybill #</th>
+                <th>Trip #</th>
                 <th>Truck Registration</th>
                 <th>Haulage Driver</th>
                 <th>Movement Route</th>
@@ -237,32 +234,35 @@ export const OperationsDashboard: React.FC = () => {
                   return (
                     <tr
                       key={trip.id}
-                      onClick={() => (opensInvoice ? setSelectedClosureInvoiceId(trip.id) : setInspectedTrip(trip))}
+                      onClick={() => opensInvoice && setSelectedClosureInvoiceId(trip.id)}
                       style={{ cursor: opensInvoice ? 'pointer' : undefined }}
                       title={opensInvoice ? 'Click to view the closure invoice' : undefined}
                     >
                       <td className="mono" style={{ fontWeight: 700, color: 'var(--brand-primary)' }}>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (opensInvoice) setSelectedClosureInvoiceId(trip.id);
-                            else setInspectedTrip(trip);
-                          }}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            padding: 0,
-                            cursor: 'pointer',
-                            color: 'var(--brand-primary)',
-                            fontWeight: 800,
-                            fontFamily: 'var(--font-mono)',
-                            textDecoration: 'underline',
-                          }}
-                          title={opensInvoice ? 'Click to view closure invoice' : 'Click to view full digital waybill'}
-                        >
-                          {trip.trip_number}
-                        </button>
+                        {opensInvoice ? (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelectedClosureInvoiceId(trip.id);
+                            }}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              cursor: 'pointer',
+                              color: 'var(--brand-primary)',
+                              fontWeight: 800,
+                              fontFamily: 'var(--font-mono)',
+                              textDecoration: 'underline',
+                            }}
+                            title="Click to view closure invoice"
+                          >
+                            {trip.trip_number}
+                          </button>
+                        ) : (
+                          trip.trip_number
+                        )}
                       </td>
                       <td>
                         <PlateDisplay plate={trip.truck?.registration_number || 'N/A'} size="sm" />
@@ -310,15 +310,6 @@ export const OperationsDashboard: React.FC = () => {
                           style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
                           onClick={(event) => event.stopPropagation()}
                         >
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            style={{ minHeight: '30px', padding: '0.2rem 0.55rem', fontSize: '0.72rem' }}
-                            onClick={() => setInspectedTrip(trip)}
-                            title="Inspect Digital Waybill & Audit Logs"
-                          >
-                            <Eye size={12} /> Waybill
-                          </button>
                           {hasException && (
                             <button
                               type="button"
@@ -359,15 +350,6 @@ export const OperationsDashboard: React.FC = () => {
           exception={triagingTrip.exceptions[0]}
           onClose={() => setTriagingTrip(null)}
           onResolve={resolveTripException}
-        />
-      )}
-
-      {/* Waybill Inspection & Audit Modal */}
-      {inspectedTrip && (
-        <TripDetailModal
-          trip={inspectedTrip}
-          onClose={() => setInspectedTrip(null)}
-          auditLogs={auditLogs}
         />
       )}
 
