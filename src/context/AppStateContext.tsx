@@ -13,6 +13,7 @@ import {
   Invoice,
   InvoiceItem,
   DraftTrip,
+  TripClosureInvoice,
 } from '../types';
 import { INITIAL_INVOICES, INITIAL_PAYOUT_BATCHES } from '../services/mockData';
 import { isSupabaseLive, supabase } from '../services/supabase';
@@ -52,6 +53,7 @@ interface AppStateContextType {
   complianceDocs: ComplianceDocument[];
   auditLogs: AuditLogEntry[];
   invoices: Invoice[];
+  tripInvoices: TripClosureInvoice[];
 
   // Offline / PWA
   isOnline: boolean;
@@ -247,6 +249,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>(INITIAL_INVOICES);
+  const [tripInvoices, setTripInvoices] = useState<TripClosureInvoice[]>([]);
   const [payoutBatches, setPayoutBatches] = useState<PayoutBatch[]>(INITIAL_PAYOUT_BATCHES);
   const [complianceDocs] = useState<ComplianceDocument[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
@@ -272,6 +275,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setTrucks(snapshot.trucks);
       setDrivers(snapshot.drivers);
       setTrips(snapshot.trips);
+      setTripInvoices(snapshot.tripInvoices);
       setActiveSiteId((current) => {
         if (snapshot.assignedSiteId) return snapshot.assignedSiteId;
         if (snapshot.sites.some((site) => site.id === current)) return current;
@@ -527,6 +531,37 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       )
     );
 
+    const tripTruck = targetTrip.truck || trucks.find((item) => item.id === targetTrip.truck_id);
+    const tripDriver = targetTrip.driver || drivers.find((item) => item.id === targetTrip.driver_id);
+    const loadingSite = targetTrip.loading_site || sites.find((item) => item.id === targetTrip.loading_site_id);
+    const deliverySite = targetTrip.offloading_site || sites.find((item) => item.id === activeSiteId);
+    setTripInvoices((current) => [
+      {
+        id: `closure-invoice-${tripId}`,
+        invoice_number: `INV-${new Date(now).getFullYear()}-${String(current.length + 1).padStart(6, '0')}`,
+        trip_id: tripId,
+        trip_number: targetTrip.trip_number,
+        truck_id: targetTrip.truck_id,
+        truck_registration: targetTrip.truck_registration_at_loading || tripTruck?.registration_number || '',
+        truck_type: targetTrip.truck_type_at_loading || tripTruck?.truck_type,
+        truck_capacity_tonnes: targetTrip.truck_capacity_at_loading || tripTruck?.capacity_tonnes,
+        truck_owner_name: targetTrip.truck_owner_at_loading || tripTruck?.owner_name,
+        driver_id: targetTrip.driver_id,
+        driver_name: targetTrip.driver_name_at_loading || tripDriver?.full_name || 'Driver on file',
+        driver_phone: targetTrip.driver_phone_at_loading || tripDriver?.phone,
+        driver_license: targetTrip.driver_license_at_loading || tripDriver?.license_number,
+        loading_site_id: targetTrip.loading_site_id,
+        loading_site_name: loadingSite?.name || 'Loading site',
+        offloading_site_id: activeSiteId,
+        offloading_site_name: deliverySite?.name || 'Offloading site',
+        quantity_tonnes: quantity,
+        opened_at: targetTrip.loaded_at,
+        closed_at: now,
+        issued_at: now,
+      },
+      ...current.filter((invoice) => invoice.trip_id !== tripId),
+    ]);
+
     // Audit log
     const auditEntry: AuditLogEntry = {
       id: `aud-${Date.now()}`,
@@ -570,6 +605,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const offloadingSite = sites.find(
       (site) => site.id === activeSiteId && site.site_type === 'offloading' && site.status === 'active'
     );
+
     if (!offloadingSite) return { success: false, message: 'Select your assigned offloading site before closing the trip.' };
 
     try {
@@ -1083,6 +1119,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         truckType: participant.truckType,
         ownerName: participant.ownerName,
         ownerPhone: participant.ownerPhone,
+        driverLicense: participant.driverLicense,
       });
       setTrucks((current) => [result.truck, ...current.filter((item) => item.id !== result.truck.id)]);
       setDrivers((current) => [result.driver, ...current.filter((item) => item.id !== result.driver.id)]);
@@ -1154,6 +1191,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         complianceDocs,
         auditLogs,
         invoices,
+        tripInvoices,
         isOnline,
         setIsOnline,
         draftTrips,

@@ -5,6 +5,7 @@ import { StatusBadge } from '../common/StatusBadge';
 import { PlateDisplay } from '../common/PlateDisplay';
 import { ExceptionTriageModal } from './ExceptionTriageModal';
 import { TripDetailModal } from '../TripDetailModal';
+import { TripClosureInvoiceModal } from './TripClosureInvoiceModal';
 import { Trip } from '../../types';
 import {
   Truck,
@@ -19,12 +20,13 @@ import {
 } from 'lucide-react';
 
 export const OperationsDashboard: React.FC = () => {
-  const { trips, auditLogs, resolveTripException } = useAppState();
+  const { trips, tripInvoices, auditLogs, resolveTripException } = useAppState();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [triagingTrip, setTriagingTrip] = useState<Trip | null>(null);
   const [inspectedTrip, setInspectedTrip] = useState<Trip | null>(null);
+  const [selectedClosureInvoiceId, setSelectedClosureInvoiceId] = useState<string | null>(null);
 
   // Derived Metrics
   const openCount = trips.filter((t) => t.status === 'open').length;
@@ -314,6 +316,17 @@ export const OperationsDashboard: React.FC = () => {
                               Dispute
                             </button>
                           )}
+                          {trip.status === 'closed' && tripInvoices.some((invoice) => invoice.trip_id === trip.id) && (
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              style={{ minHeight: '30px', padding: '0.2rem 0.55rem', fontSize: '0.72rem' }}
+                              onClick={() => setSelectedClosureInvoiceId(trip.id)}
+                              title="View the immutable closure invoice with dispatch snapshots"
+                            >
+                              Invoice
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -343,6 +356,11 @@ export const OperationsDashboard: React.FC = () => {
           auditLogs={auditLogs}
         />
       )}
+
+      <TripClosureInvoiceModal
+        invoice={tripInvoices.find((invoice) => invoice.trip_id === selectedClosureInvoiceId) || null}
+        onClose={() => setSelectedClosureInvoiceId(null)}
+      />
     </div>
   );
 };

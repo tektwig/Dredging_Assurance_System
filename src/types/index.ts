@@ -150,6 +150,13 @@ export interface Trip {
   idempotency_key?: string;
   created_at?: string;
   updated_at?: string;
+  truck_registration_at_loading?: string;
+  truck_type_at_loading?: string;
+  truck_capacity_at_loading?: number;
+  truck_owner_at_loading?: string;
+  driver_name_at_loading?: string;
+  driver_phone_at_loading?: string;
+  driver_license_at_loading?: string;
 
   // Joined relations for UI convenience
   truck?: Truck;
@@ -159,6 +166,30 @@ export interface Trip {
   loading_event?: TripLoadingEvent;
   offloading_event?: TripOffloadingEvent;
   exceptions?: TripException[];
+}
+
+export interface TripClosureInvoice {
+  id: string;
+  invoice_number: string;
+  trip_id: string;
+  trip_number: string;
+  truck_id: string;
+  truck_registration: string;
+  truck_type?: string;
+  truck_capacity_tonnes?: number;
+  truck_owner_name?: string;
+  driver_id: string;
+  driver_name: string;
+  driver_phone?: string;
+  driver_license?: string;
+  loading_site_id: string;
+  loading_site_name: string;
+  offloading_site_id: string;
+  offloading_site_name: string;
+  quantity_tonnes: number;
+  opened_at: string;
+  closed_at: string;
+  issued_at: string;
 }
 
 export interface ExceptionItem {

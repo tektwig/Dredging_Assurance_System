@@ -1,4 +1,4 @@
-import { Driver, ExceptionType, Site, Trip, TripException, Truck, UserRole } from '../types';
+import { Driver, ExceptionType, Site, Trip, TripClosureInvoice, TripException, Truck, UserRole } from '../types';
 import { isSupabaseLive, supabase } from './supabase';
 
 type JsonObject = Record<string, any>;
@@ -8,6 +8,7 @@ export interface LiveSnapshot {
   trucks: Truck[];
   drivers: Driver[];
   trips: Trip[];
+  tripInvoices: TripClosureInvoice[];
   assignedSiteId?: string;
 }
 
@@ -90,16 +91,32 @@ const mapDriver = (row: JsonObject): Driver => ({
 });
 
 function mapTrip(row: JsonObject, sites: Site[], trucks: Truck[], drivers: Driver[], exceptionRows: JsonObject[]): Trip {
-  const truck = trucks.find((item) => item.id === row.truck_id);
-  const driver = drivers.find((item) => item.id === row.driver_id) || (row.driver_name_at_loading
+  const masterTruck = trucks.find((item) => item.id === row.truck_id);
+  const truck = masterTruck || row.truck_registration_at_loading
     ? {
+        ...(masterTruck || {}),
+        id: row.truck_id,
+        registration_number: row.truck_registration_at_loading || masterTruck?.registration_number || '',
+        normalized_registration: (row.truck_registration_at_loading || masterTruck?.registration_number || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(),
+        capacity: Number(row.truck_capacity_at_loading || masterTruck?.capacity || 30),
+        capacity_tonnes: Number(row.truck_capacity_at_loading || masterTruck?.capacity_tonnes || 30),
+        capacity_unit: masterTruck?.capacity_unit || 'tonnes',
+        truck_type: row.truck_type_at_loading || masterTruck?.truck_type || 'Registered tipper truck',
+        owner_name: row.truck_owner_at_loading || masterTruck?.owner_name || 'Registered haulage operator',
+        status: masterTruck?.status || 'active',
+      } as Truck
+    : undefined;
+  const masterDriver = drivers.find((item) => item.id === row.driver_id);
+  const driver = masterDriver || row.driver_name_at_loading
+    ? {
+        ...(masterDriver || {}),
         id: row.driver_id,
-        full_name: row.driver_name_at_loading,
-        phone: '',
-        license_number: 'ON FILE',
-        status: 'active' as const,
-      }
-    : undefined);
+        full_name: row.driver_name_at_loading || masterDriver?.full_name || 'Driver on file',
+        phone: row.driver_phone_at_loading || masterDriver?.phone || '',
+        license_number: row.driver_license_at_loading || masterDriver?.license_number || 'ON FILE',
+        status: masterDriver?.status || 'active',
+      } as Driver
+    : undefined;
   const openedAt = row.opened_at || row.loaded_at || row.created_at;
 
   const exceptions: TripException[] = exceptionRows
@@ -130,6 +147,13 @@ function mapTrip(row: JsonObject, sites: Site[], trucks: Truck[], drivers: Drive
     closed_at: row.closed_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    truck_registration_at_loading: row.truck_registration_at_loading,
+    truck_type_at_loading: row.truck_type_at_loading,
+    truck_capacity_at_loading: row.truck_capacity_at_loading == null ? undefined : Number(row.truck_capacity_at_loading),
+    truck_owner_at_loading: row.truck_owner_at_loading,
+    driver_name_at_loading: row.driver_name_at_loading,
+    driver_phone_at_loading: row.driver_phone_at_loading,
+    driver_license_at_loading: row.driver_license_at_loading,
     truck,
     driver,
     loading_site: sites.find((item) => item.id === row.loading_site_id),
@@ -157,16 +181,44 @@ function mapTrip(row: JsonObject, sites: Site[], trucks: Truck[], drivers: Drive
   };
 }
 
+const mapTripClosureInvoice = (row: JsonObject): TripClosureInvoice => ({
+  id: row.id,
+  invoice_number: row.invoice_number,
+  trip_id: row.trip_id,
+  trip_number: row.trip_number,
+  truck_id: row.truck_id,
+  truck_registration: row.truck_registration,
+  truck_type: row.truck_type,
+  truck_capacity_tonnes: row.truck_capacity_tonnes == null ? undefined : Number(row.truck_capacity_tonnes),
+  truck_owner_name: row.truck_owner_name,
+  driver_id: row.driver_id,
+  driver_name: row.driver_name,
+  driver_phone: row.driver_phone,
+  driver_license: row.driver_license,
+  loading_site_id: row.loading_site_id,
+  loading_site_name: row.loading_site_name,
+  offloading_site_id: row.offloading_site_id,
+  offloading_site_name: row.offloading_site_name,
+  quantity_tonnes: Number(row.quantity_tonnes),
+  opened_at: row.opened_at,
+  closed_at: row.closed_at,
+  issued_at: row.issued_at,
+});
+
 export async function fetchLiveSnapshot(role: UserRole | null): Promise<LiveSnapshot> {
   const client = ensureClient();
-  const [sitesResult, trucksResult, tripsResult, assignmentsResult, exceptionsResult] = await Promise.all([
+  const [sitesResult, trucksResult, tripsResult, assignmentsResult, exceptionsResult, invoicesResult] = await Promise.all([
     client.from('sites').select('*').eq('is_active', true),
     client.from('trucks').select('*').eq('is_active', true),
     client.from('trips').select('*').order('opened_at', { ascending: false }).limit(500),
     client.from('user_site_assignments').select('site_id').is('ended_at', null).limit(1),
     client.from('exceptions').select('*').order('created_at', { ascending: false }).limit(500),
+    client.from('trip_closure_invoices').select('*').order('issued_at', { ascending: false }).limit(500),
   ]);
 
+  // The invoice table is introduced by the closure-invoice migration. Keep
+  // the rest of the live terminal readable during a rolling deployment if the
+  // frontend reaches the API before that migration has been applied.
   const firstError = sitesResult.error || trucksResult.error || tripsResult.error || exceptionsResult.error;
   if (firstError) throw firstError;
 
@@ -187,6 +239,7 @@ export async function fetchLiveSnapshot(role: UserRole | null): Promise<LiveSnap
     trucks,
     drivers,
     trips,
+    tripInvoices: (invoicesResult.data || []).map(mapTripClosureInvoice),
     assignedSiteId: assignmentsResult.data?.[0]?.site_id,
   };
 }
@@ -220,9 +273,10 @@ export async function registerLiveParticipant(params: {
   truckType?: string;
   ownerName?: string;
   ownerPhone?: string;
+  driverLicense?: string;
 }): Promise<LiveParticipantRegistration> {
   const client = await ensureAuthenticatedClient();
-  const { data, error } = await client.rpc('register_loading_participant', {
+  let { data, error } = await client.rpc('register_loading_participant_v2', {
     p_request_id: crypto.randomUUID(),
     p_plate: params.plate,
     p_expected_truck_id: params.expectedTruckId || null,
@@ -233,7 +287,28 @@ export async function registerLiveParticipant(params: {
     p_bank_name: params.bankName,
     p_account_number: params.accountNumber,
     p_account_name: params.accountName,
+    p_capacity_tonnes: params.capacityTonnes || 30,
+    p_truck_type: params.truckType || 'Registered tipper truck',
+    p_owner_name: params.ownerName || null,
+    p_owner_contact: params.ownerPhone || null,
+    p_driver_license: params.driverLicense || null,
   });
+  // Keep registration usable during a rolling deployment before the new
+  // persistence migration reaches the linked project.
+  if (error && /does not exist|42883|register_loading_participant_v2/i.test(error.message || '')) {
+    ({ data, error } = await client.rpc('register_loading_participant', {
+      p_request_id: crypto.randomUUID(),
+      p_plate: params.plate,
+      p_expected_truck_id: params.expectedTruckId || null,
+      p_existing_driver_id: null,
+      p_full_name: params.fullName,
+      p_phone_number: params.phoneNumber,
+      p_email: null,
+      p_bank_name: params.bankName,
+      p_account_number: params.accountNumber,
+      p_account_name: params.accountName,
+    }));
+  }
   if (error) throw error;
 
   const result = data as JsonObject;

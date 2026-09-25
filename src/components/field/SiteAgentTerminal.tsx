@@ -563,11 +563,11 @@ export const SiteAgentTerminal: React.FC = () => {
       plate: cleanPlate,
       capacity: Number(newTruckCapacity) || 30,
       truckType: newTruckType || 'Mack 10-Wheeler Tipper',
-      ownerName: newTruckOwner.trim() || 'Independent Haulier Fleet',
-      ownerPhone: newTruckOwnerPhone.trim() || '+234 800 000 0000',
+      ownerName: newTruckOwner.trim(),
+      ownerPhone: newTruckOwnerPhone.trim() || undefined,
       driverName: newDriverName.trim(),
       driverPhone: newDriverPhone.trim(),
-      driverLicense: newDriverLicense.trim() || `FRSC-LAG-${Math.floor(10000 + Math.random() * 90000)}`,
+      driverLicense: newDriverLicense.trim(),
       bankName: newDriverBankName,
       accountNumber: newDriverAccountNumber.trim(),
     });
@@ -626,7 +626,7 @@ export const SiteAgentTerminal: React.FC = () => {
       ownerPhone: currentTruck?.owner_phone,
       driverName: quickDriverName.trim(),
       driverPhone: quickDriverPhone.trim(),
-      driverLicense: quickDriverLicense.trim() || `FRSC-LAG-${Math.floor(10000 + Math.random() * 90000)}`,
+      driverLicense: quickDriverLicense.trim(),
       bankName: quickDriverBankName,
       accountNumber: quickDriverAccountNumber.trim(),
     });
