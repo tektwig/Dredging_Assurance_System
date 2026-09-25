@@ -862,8 +862,12 @@ export const SiteAgentTerminal: React.FC = () => {
       />
 
       {/* Main Two-Column Terminal Layout */}
-      <div className="field-two-col">
+      <div
+        className="field-two-col"
+        style={movementType === 'delivery' ? { gridTemplateColumns: 'minmax(0, 1fr)' } : undefined}
+      >
         {/* Left Column: Camera Viewfinder & OCR Extraction */}
+        {movementType === 'pickup' && (
         <div className="card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
             <h3 style={{ fontSize: '0.95rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
@@ -1582,6 +1586,7 @@ export const SiteAgentTerminal: React.FC = () => {
             </div>
           )}
         </div>
+        )}
 
         {/* Right Column: THE CHOICE & SAVE PANEL */}
         <div className="card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -1871,6 +1876,47 @@ export const SiteAgentTerminal: React.FC = () => {
                     <Camera size={16} /> Device Camera
                   </button>
                 </div>
+
+                {cameraError && (
+                  <div style={{ flexBasis: '100%', width: '100%', padding: '0.65rem 0.8rem', borderRadius: 'var(--radius-md)', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', fontSize: '0.75rem' }}>
+                    {cameraError}
+                  </div>
+                )}
+
+                {isLiveCameraActive && (
+                  <div className="camera-viewfinder-box" style={{ flexBasis: '100%', width: '100%' }}>
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="camera-video-feed"
+                      onLoadedMetadata={() => setIsCameraReady(true)}
+                    />
+                    <div className="camera-reticle-overlay">
+                      <div className="camera-scanline-laser" />
+                      <span className="camera-reticle-label">ALIGN ARRIVING TRUCK PLATE — FULL FRAME SAVED</span>
+                    </div>
+                    <div className="camera-live-pill">LIVE DELIVERY CAMERA</div>
+                    <div style={{ position: 'absolute', zIndex: 10, left: 10, right: 10, bottom: 10, display: 'flex', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <button type="button" className="btn btn-secondary" onClick={switchWebsiteCamera} style={{ backgroundColor: 'rgba(15, 23, 42, 0.88)', color: '#FFFFFF' }}>
+                        <SwitchCamera size={14} /> Flip
+                      </button>
+                      <button type="button" className="btn btn-primary" onClick={captureFullWebsiteFrame} disabled={!isCameraReady}>
+                        <Camera size={16} /> {isCameraReady ? 'Take Full Photo' : 'Starting...'}
+                      </button>
+                      <button type="button" className="btn btn-secondary" onClick={stopLiveCamera} style={{ backgroundColor: 'rgba(15, 23, 42, 0.88)', color: '#FFFFFF' }}>
+                        <VideoOff size={14} /> Close
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {isScanning && (
+                  <div style={{ flexBasis: '100%', width: '100%', fontSize: '0.75rem', fontWeight: 700, color: '#9A3412' }}>
+                    {ocrStatus} — {Math.round(ocrProgress * 100)}%
+                  </div>
+                )}
               </div>
 
               {/* Linked Inbound Waybill Card */}
