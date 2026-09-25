@@ -87,12 +87,12 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
 
   // Builder form state (when creating new invoice)
   const [selectedClientIndex, setSelectedClientIndex] = useState<number>(0);
-  const [customerName, setCustomerName] = useState(COMMERCIAL_CLIENT_PRESETS[0].name);
-  const [customerEmail, setCustomerEmail] = useState(COMMERCIAL_CLIENT_PRESETS[0].email);
-  const [customerPhone, setCustomerPhone] = useState(COMMERCIAL_CLIENT_PRESETS[0].phone);
-  const [customerAddress, setCustomerAddress] = useState(COMMERCIAL_CLIENT_PRESETS[0].address);
-  const [customerTin, setCustomerTin] = useState(COMMERCIAL_CLIENT_PRESETS[0].tin);
-  const [projectSite, setProjectSite] = useState(COMMERCIAL_CLIENT_PRESETS[0].default_project);
+  const [customerName, setCustomerName] = useState(COMMERCIAL_CLIENT_PRESETS[0]?.name ?? '');
+  const [customerEmail, setCustomerEmail] = useState(COMMERCIAL_CLIENT_PRESETS[0]?.email ?? '');
+  const [customerPhone, setCustomerPhone] = useState(COMMERCIAL_CLIENT_PRESETS[0]?.phone ?? '');
+  const [customerAddress, setCustomerAddress] = useState(COMMERCIAL_CLIENT_PRESETS[0]?.address ?? '');
+  const [customerTin, setCustomerTin] = useState(COMMERCIAL_CLIENT_PRESETS[0]?.tin ?? '');
+  const [projectSite, setProjectSite] = useState(COMMERCIAL_CLIENT_PRESETS[0]?.default_project ?? '');
   const [paymentTerms, setPaymentTerms] = useState('Net 14 Days');
   const taxRate = 7.5;
 

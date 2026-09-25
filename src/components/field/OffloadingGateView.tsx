@@ -151,7 +151,7 @@ export const OffloadingGateView: React.FC = () => {
               Gate 2 Weighbridge & Offloading Terminal — {activeSite?.name}
             </h4>
             <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-              Operator: <strong>Faith (Weighbridge Officer)</strong> • Awaiting Arrival: {openTrips.length} Vehicles
+              Operator: <strong>Signed-in Offloading Officer</strong> • Awaiting Arrival: {openTrips.length} Vehicles
             </p>
           </div>
         </div>

@@ -173,7 +173,7 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({ trip, onClose,
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem', fontSize: '0.85rem' }}>
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>Gate OCR Candidate:</span>{' '}
-                <strong className="mono" style={{ color: '#fff' }}>{trip.loading_event?.extracted_number || 'APP482XA'}</strong>
+                <strong className="mono" style={{ color: '#fff' }}>{trip.loading_event?.extracted_number || 'Not available'}</strong>
               </div>
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>Confirmed Plate:</span>{' '}
@@ -182,7 +182,7 @@ export const TripDetailModal: React.FC<TripDetailModalProps> = ({ trip, onClose,
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>OCR Confidence:</span>{' '}
                 <span style={{ color: '#34D399', fontWeight: 700 }}>
-                  {trip.loading_event?.confidence_score || 96.5}% Verified
+                  {trip.loading_event?.confidence_score ?? 0}% Verified
                 </span>
               </div>
               <div>

@@ -1,5 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAppState } from '../../context/AppStateContext';
+import {
+  approvePendingSignup,
+  fetchPendingSignups,
+  PendingSignup,
+} from '../../services/liveOperations';
 import { PlateDisplay } from '../common/PlateDisplay';
 import {
   ShieldAlert,
@@ -10,13 +15,64 @@ import {
   CheckCircle2,
   AlertCircle,
   Users,
+  UserCheck,
+  Loader2,
 } from 'lucide-react';
 
 export const AdminAuditView: React.FC = () => {
   const { trucks, drivers, sites, auditLogs, addTruck, addDriver } = useAppState();
 
-  const [activeTab, setActiveTab] = useState<'audit' | 'fleet' | 'sites'>('audit');
+  const [activeTab, setActiveTab] = useState<'audit' | 'fleet' | 'sites' | 'users'>('audit');
   const [searchQuery, setSearchQuery] = useState('');
+  const [pendingSignups, setPendingSignups] = useState<PendingSignup[]>([]);
+  const [signupSites, setSignupSites] = useState<Record<string, string>>({});
+  const [signupError, setSignupError] = useState('');
+  const [signupSuccess, setSignupSuccess] = useState('');
+  const [loadingSignups, setLoadingSignups] = useState(true);
+  const [approvingSignupId, setApprovingSignupId] = useState<string | null>(null);
+
+  const loadPendingSignups = async () => {
+    setLoadingSignups(true);
+    try {
+      setPendingSignups(await fetchPendingSignups());
+      setSignupError('');
+    } catch (error: unknown) {
+      setSignupError(error instanceof Error ? error.message : 'Pending registrations could not be loaded.');
+    } finally {
+      setLoadingSignups(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadPendingSignups();
+  }, []);
+
+  const handleApproveSignup = async (signup: PendingSignup) => {
+    const isFieldRole = signup.requestedRole === 'loading_officer' || signup.requestedRole === 'offloading_officer';
+    const compatibleSites = sites.filter((site) => site.site_type === (signup.requestedRole === 'loading_officer' ? 'loading' : 'offloading'));
+    const siteId = signupSites[signup.id] || compatibleSites[0]?.id;
+    if (isFieldRole && !siteId) {
+      setSignupError('Create or activate a compatible operating site before approving this field account.');
+      return;
+    }
+
+    setApprovingSignupId(signup.id);
+    setSignupError('');
+    setSignupSuccess('');
+    try {
+      await approvePendingSignup({
+        profileId: signup.id,
+        role: signup.requestedRole,
+        siteId: isFieldRole ? siteId : undefined,
+      });
+      setSignupSuccess(`${signup.displayName} has been activated successfully.`);
+      await loadPendingSignups();
+    } catch (error: unknown) {
+      setSignupError(error instanceof Error ? error.message : 'The account could not be approved.');
+    } finally {
+      setApprovingSignupId(null);
+    }
+  };
 
   // Modals state
   const [showTruckModal, setShowTruckModal] = useState(false);
@@ -178,8 +234,114 @@ export const AdminAuditView: React.FC = () => {
             <MapPin size={14} />
             Operating Sites ({sites.length})
           </button>
+          <button
+            type="button"
+            className="btn"
+            style={{
+              padding: '0.4rem 1rem',
+              minHeight: '34px',
+              fontSize: '0.8125rem',
+              backgroundColor: activeTab === 'users' ? '#FFFFFF' : 'transparent',
+              boxShadow: activeTab === 'users' ? 'var(--shadow-xs)' : 'none',
+              color: activeTab === 'users' ? 'var(--text-primary)' : 'var(--text-secondary)',
+            }}
+            onClick={() => setActiveTab('users')}
+          >
+            <UserCheck size={14} />
+            Access Requests ({pendingSignups.length})
+          </button>
         </div>
       </div>
+
+      {activeTab === 'users' && (
+        <div className="card">
+          <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
+            <div>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Pending Account Registrations</h3>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                Review requested access and assign a site before activating field accounts.
+              </p>
+            </div>
+            <button type="button" className="btn btn-secondary" onClick={() => void loadPendingSignups()} disabled={loadingSignups}>
+              {loadingSignups ? <Loader2 size={14} className="spin-animation" /> : 'Refresh'}
+            </button>
+          </div>
+
+          {(signupError || signupSuccess) && (
+            <div style={{ margin: '1rem', padding: '0.75rem', borderRadius: 'var(--radius-md)', backgroundColor: signupError ? '#FEF2F2' : '#ECFDF5', color: signupError ? '#991B1B' : '#065F46', fontSize: '0.8125rem', fontWeight: 600 }}>
+              {signupError || signupSuccess}
+            </div>
+          )}
+
+          {loadingSignups ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+              <Loader2 size={22} className="spin-animation" />
+            </div>
+          ) : pendingSignups.length === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+              No pending account registrations.
+            </div>
+          ) : (
+            <div className="table-wrapper">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Requested Access</th>
+                    <th>Operating Site</th>
+                    <th>Requested</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingSignups.map((signup) => {
+                    const isLoadingRole = signup.requestedRole === 'loading_officer';
+                    const isFieldRole = isLoadingRole || signup.requestedRole === 'offloading_officer';
+                    const compatibleSites = sites.filter((site) => site.site_type === (isLoadingRole ? 'loading' : 'offloading'));
+                    return (
+                      <tr key={signup.id}>
+                        <td>
+                          <div style={{ fontWeight: 700 }}>{signup.displayName}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{signup.email}</div>
+                        </td>
+                        <td style={{ fontSize: '0.8125rem' }}>{signup.requestedRole.replace(/_/g, ' ')}</td>
+                        <td>
+                          {isFieldRole ? (
+                            <select
+                              className="form-select"
+                              value={signupSites[signup.id] || compatibleSites[0]?.id || ''}
+                              onChange={(event) => setSignupSites((current) => ({ ...current, [signup.id]: event.target.value }))}
+                              style={{ minHeight: 36, minWidth: 180 }}
+                            >
+                              {compatibleSites.length === 0 && <option value="">No compatible site</option>}
+                              {compatibleSites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
+                            </select>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Not required</span>
+                          )}
+                        </td>
+                        <td style={{ fontSize: '0.78rem' }}>{new Date(signup.createdAt).toLocaleDateString()}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            disabled={approvingSignupId === signup.id}
+                            onClick={() => void handleApproveSignup(signup)}
+                            style={{ minHeight: 36 }}
+                          >
+                            {approvingSignupId === signup.id ? <Loader2 size={14} className="spin-animation" /> : <CheckCircle2 size={14} />}
+                            Approve
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {activeTab === 'audit' && (
         <div className="card">
@@ -504,7 +666,7 @@ export const AdminAuditView: React.FC = () => {
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g. KJA-482XY"
+                  placeholder="Enter registration plate"
                   value={newPlate}
                   onChange={(e) => setNewPlate(e.target.value.toUpperCase())}
                   style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, textTransform: 'uppercase' }}
@@ -547,7 +709,7 @@ export const AdminAuditView: React.FC = () => {
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g. Alhaji Bello Haulage Ent."
+                  placeholder="Enter owner or company name"
                   value={newOwner}
                   onChange={(e) => setNewOwner(e.target.value)}
                   required

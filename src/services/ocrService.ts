@@ -349,7 +349,7 @@ export function extractNigerianPlateFromText(
     }
   };
 
-  // OCR often adds one character at an edge (e.g. IWSF135KS). Sliding valid-length
+  // OCR often adds one character at an edge. Sliding valid-length
   // windows recovers the plate rather than treating the entire noisy token as one.
   words.forEach(addCandidateWindows);
   const compactLine = cleaned.replace(/[^A-Z0-9]/g, '');
@@ -369,7 +369,7 @@ export function extractNigerianPlateFromText(
     if (parsed) candidateList.push(parsed);
   }
 
-  // Strategy C: Check single tokens (e.g. ["APP482XA"] or ["APP-482-XA"])
+  // Strategy C: Check individual OCR tokens with or without separators.
   for (const word of words) {
     const parsed = normalizePlateStructure(word);
     if (parsed) candidateList.push(parsed);

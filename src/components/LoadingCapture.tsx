@@ -42,8 +42,8 @@ export const LoadingCapture: React.FC = () => {
   const [ocrStatus, setOcrStatus] = useState('Ready');
   const [ocrProgress, setOcrProgress] = useState(0);
   const [rawOcrText, setRawOcrText] = useState('');
-  const [candidatePlate, setCandidatePlate] = useState(trucks[0]?.registration_number || 'APP-482-XA');
-  const [confidenceScore, setConfidenceScore] = useState(96.5);
+  const [candidatePlate, setCandidatePlate] = useState(trucks[0]?.registration_number || '');
+  const [confidenceScore, setConfidenceScore] = useState(0);
   const [ocrMatchType, setOcrMatchType] = useState<'EXACT_FLEET' | 'FUZZY_FLEET' | 'SYNTACTIC_VALID' | 'FALLBACK' | null>(null);
   const [preprocessedImageUrl, setPreprocessedImageUrl] = useState<string | null>(null);
   const [capturedImagePreview, setCapturedImagePreview] = useState<string | null>(null);

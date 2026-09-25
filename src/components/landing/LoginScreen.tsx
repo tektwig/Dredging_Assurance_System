@@ -11,6 +11,8 @@ import {
   AlertCircle,
   Loader2,
   ShieldCheck,
+  UserPlus,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface LoginScreenProps {
@@ -19,10 +21,15 @@ interface LoginScreenProps {
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) => {
+  const [authMode, setAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
+  const [fullName, setFullName] = useState('');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [requestedRole, setRequestedRole] = useState<'loading_officer' | 'offloading_officer' | 'operations_manager' | 'finance_officer'>('loading_officer');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -31,6 +38,60 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
 
     const cleanId = identifier.trim().toLowerCase();
     const cleanPassword = password.trim();
+
+    if (authMode === 'sign-up') {
+      const cleanName = fullName.trim();
+      if (!isSupabaseLive || !supabase) {
+        setErrorMessage('Account registration is temporarily unavailable. Please try again when the live service is connected.');
+        return;
+      }
+      if (cleanName.length < 2) {
+        setErrorMessage('Please enter your full name.');
+        return;
+      }
+      if (!cleanId || !cleanId.includes('@')) {
+        setErrorMessage('Please enter a valid email address.');
+        return;
+      }
+      if (cleanPassword.length < 8) {
+        setErrorMessage('Password must contain at least 8 characters.');
+        return;
+      }
+      if (cleanPassword !== confirmPassword) {
+        setErrorMessage('The passwords do not match.');
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email: cleanId,
+          password: cleanPassword,
+          options: {
+            data: {
+              display_name: cleanName,
+              requested_role: requestedRole,
+            },
+          },
+        });
+        if (error) throw error;
+        if (!data.user) throw new Error('The account could not be created.');
+        if (data.session) await supabase.auth.signOut();
+
+        setFullName('');
+        setIdentifier('');
+        setPassword('');
+        setConfirmPassword('');
+        setSuccessMessage(
+          'Account created. Verify your email if prompted, then wait for an administrator to assign and activate your operational access.'
+        );
+      } catch (error: unknown) {
+        setErrorMessage(error instanceof Error ? error.message : 'The account could not be created.');
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
 
     if (!cleanId || !cleanPassword) {
       setErrorMessage('Please enter both your corporate ID / email and password.');
@@ -262,7 +323,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
                 border: '1px solid #DBEAFE',
               }}
             >
-              <ShieldCheck size={26} />
+              {authMode === 'sign-in' ? <ShieldCheck size={26} /> : <UserPlus size={26} />}
             </div>
             <h1
               style={{
@@ -273,11 +334,49 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
                 marginBottom: '0.35rem',
               }}
             >
-              Terminal Sign In
+              {authMode === 'sign-in' ? 'Terminal Sign In' : 'Create Account'}
             </h1>
             <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-              Enter your authorized operational credentials to continue
+              {authMode === 'sign-in'
+                ? 'Enter your authorized operational credentials to continue'
+                : 'Register securely and request the operational access you need'}
             </p>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '0.4rem',
+              padding: '0.3rem',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: '#F1F5F9',
+              marginBottom: '1.25rem',
+            }}
+          >
+            {(['sign-in', 'sign-up'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => {
+                  setAuthMode(mode);
+                  setErrorMessage(null);
+                  setSuccessMessage(null);
+                }}
+                style={{
+                  minHeight: 40,
+                  border: 'none',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: authMode === mode ? '#FFFFFF' : 'transparent',
+                  color: authMode === mode ? 'var(--brand-primary)' : 'var(--text-secondary)',
+                  fontWeight: 750,
+                  cursor: 'pointer',
+                  boxShadow: authMode === mode ? 'var(--shadow-xs)' : 'none',
+                }}
+              >
+                {mode === 'sign-in' ? 'Sign In' : 'Sign Up'}
+              </button>
+            ))}
           </div>
 
           {/* Error Banner */}
@@ -303,8 +402,69 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
             </div>
           )}
 
+          {successMessage && (
+            <div
+              role="status"
+              style={{
+                padding: '0.75rem 0.85rem',
+                backgroundColor: '#ECFDF5',
+                border: '1px solid #A7F3D0',
+                borderRadius: 'var(--radius-md)',
+                color: '#065F46',
+                fontSize: '0.8125rem',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '0.5rem',
+                marginBottom: '1.25rem',
+                lineHeight: 1.4,
+              }}
+            >
+              <CheckCircle2 size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>{successMessage}</span>
+            </div>
+          )}
+
           {/* Form */}
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
+            {authMode === 'sign-up' && (
+              <>
+                <div>
+                  <label htmlFor="user-full-name" style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
+                    Full Name
+                  </label>
+                  <input
+                    id="user-full-name"
+                    type="text"
+                    autoComplete="name"
+                    required
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    style={{ width: '100%', minHeight: 48, padding: '0.75rem', fontSize: '0.9375rem', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-default)', boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="requested-role" style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
+                    Requested Access
+                  </label>
+                  <select
+                    id="requested-role"
+                    className="form-select"
+                    value={requestedRole}
+                    onChange={(e) => setRequestedRole(e.target.value as typeof requestedRole)}
+                    style={{ minHeight: 48, width: '100%' }}
+                  >
+                    <option value="loading_officer">Loading Site Agent</option>
+                    <option value="offloading_officer">Delivery / Offloading Agent</option>
+                    <option value="operations_manager">Operations Manager</option>
+                    <option value="finance_officer">Finance Officer</option>
+                  </select>
+                  <p style={{ marginTop: '0.35rem', fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                    An administrator must approve this request before terminal access is enabled.
+                  </p>
+                </div>
+              </>
+            )}
             {/* Identity Field */}
             <div>
               <label
@@ -317,7 +477,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
                   marginBottom: '0.4rem',
                 }}
               >
-                Corporate Email or Username
+                {authMode === 'sign-in' ? 'Corporate Email or Username' : 'Email Address'}
               </label>
               <div style={{ position: 'relative' }}>
                 <div
@@ -336,8 +496,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
                 </div>
                 <input
                   id="user-login-identifier"
-                  type="text"
-                  autoComplete="username"
+                  type={authMode === 'sign-up' ? 'email' : 'text'}
+                  autoComplete={authMode === 'sign-up' ? 'email' : 'username'}
                   autoCapitalize="none"
                   autoCorrect="off"
                   required
@@ -394,7 +554,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
                 <input
                   id="user-login-password"
                   type={showPassword ? 'text' : 'password'}
-                  autoComplete="current-password"
+                  autoComplete={authMode === 'sign-up' ? 'new-password' : 'current-password'}
                   required
                   value={password}
                   onChange={(e) => {
@@ -440,6 +600,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
               </div>
             </div>
 
+            {authMode === 'sign-up' && (
+              <div>
+                <label htmlFor="user-confirm-password" style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
+                  Confirm Password
+                </label>
+                <input
+                  id="user-confirm-password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  required
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  style={{ width: '100%', minHeight: 48, padding: '0.75rem', fontSize: '0.9375rem', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-default)', boxSizing: 'border-box' }}
+                />
+              </div>
+            )}
+
             {/* Submit Button */}
             <button
               type="submit"
@@ -464,10 +641,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
               {isLoading ? (
                 <>
                   <Loader2 size={18} className="spin-animation" />
-                  <span>Verifying Credentials...</span>
+                  <span>{authMode === 'sign-in' ? 'Verifying Credentials...' : 'Creating Account...'}</span>
                 </>
               ) : (
-                <span>Sign In to Terminal</span>
+                <span>{authMode === 'sign-in' ? 'Sign In to Terminal' : 'Create Account'}</span>
               )}
             </button>
           </form>

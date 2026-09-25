@@ -26,17 +26,15 @@ export const LoadingGateView: React.FC = () => {
   } = useAppState();
 
   // Field Form State
-  const [candidatePlate, setCandidatePlate] = useState('KJA-482XY');
-  const [confirmedPlate, setConfirmedPlate] = useState('KJA-482XY');
-  const [confidenceScore, setConfidenceScore] = useState(96.8);
-  const [selectedTruckId, setSelectedTruckId] = useState('trk-1');
-  const [selectedDriverId, setSelectedDriverId] = useState('drv-1');
-  const [destinationSiteId, setDestinationSiteId] = useState('site-lkk-01');
+  const [candidatePlate] = useState('');
+  const [confirmedPlate, setConfirmedPlate] = useState('');
+  const [confidenceScore] = useState(0);
+  const [selectedTruckId, setSelectedTruckId] = useState('');
+  const [selectedDriverId, setSelectedDriverId] = useState('');
+  const [destinationSiteId, setDestinationSiteId] = useState('');
   const [estimatedTonnes, setEstimatedTonnes] = useState(30);
-  const [photoUrl, setPhotoUrl] = useState(
-    'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=600&auto=format&fit=crop&q=80'
-  );
-  const [isScanning, setIsScanning] = useState(false);
+  const [photoUrl] = useState('');
+  const [isScanning] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
   // Available offloading destinations
@@ -45,22 +43,6 @@ export const LoadingGateView: React.FC = () => {
   // Selected truck & driver info
   const currentTruck = trucks.find((t) => t.id === selectedTruckId);
   const currentDriver = drivers.find((d) => d.id === selectedDriverId);
-
-  // Handler when plate candidate changes or test button is clicked
-  const handleSelectPresetPlate = (plate: string, truckId: string, driverId: string, img: string) => {
-    setIsScanning(true);
-    setTimeout(() => {
-      setCandidatePlate(plate);
-      setConfirmedPlate(plate);
-      setSelectedTruckId(truckId);
-      setSelectedDriverId(driverId);
-      setPhotoUrl(img);
-      setConfidenceScore(Number((94 + Math.random() * 5).toFixed(1)));
-      const trk = trucks.find((t) => t.id === truckId);
-      if (trk) setEstimatedTonnes(trk.capacity_tonnes || trk.capacity || 30);
-      setIsScanning(false);
-    }, 450);
-  };
 
   const handleManualPlateEdit = (newPlate: string) => {
     setConfirmedPlate(newPlate);
@@ -131,7 +113,7 @@ export const LoadingGateView: React.FC = () => {
               Gate 1 Loading Station — {activeSite?.name}
             </h4>
             <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-              Operator: <strong>Faith (Field Loading Officer)</strong> • Shift Target: 1,200 Tonnes
+              Operator: <strong>Signed-in Loading Officer</strong>
             </p>
           </div>
         </div>
@@ -218,60 +200,6 @@ export const LoadingGateView: React.FC = () => {
               <span style={{ color: '#38BDF8', fontWeight: 700 }}>
                 Confidence: {confidenceScore}%
               </span>
-            </div>
-          </div>
-
-          {/* Quick Simulation Plate Selectors */}
-          <div>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '0.5rem' }}>
-              ⚡ Field Test Vehicles (Tap to simulate camera scan):
-            </span>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', minHeight: '36px' }}
-                onClick={() =>
-                  handleSelectPresetPlate(
-                    'KJA-482XY',
-                    'trk-1',
-                    'drv-1',
-                    'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=600&auto=format&fit=crop&q=80'
-                  )
-                }
-              >
-                Mack 30T (KJA-482XY)
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', minHeight: '36px' }}
-                onClick={() =>
-                  handleSelectPresetPlate(
-                    'APP-914AA',
-                    'trk-2',
-                    'drv-2',
-                    'https://images.unsplash.com/photo-1586191582056-a602167d4f61?w=600&auto=format&fit=crop&q=80'
-                  )
-                }
-              >
-                Sino 35T (APP-914AA)
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem', minHeight: '36px' }}
-                onClick={() =>
-                  handleSelectPresetPlate(
-                    'EPE-303ZZ',
-                    'trk-3',
-                    'drv-3',
-                    'https://images.unsplash.com/photo-1519003722824-194d4455a60c?w=600&auto=format&fit=crop&q=80'
-                  )
-                }
-              >
-                Actros 28T (EPE-303ZZ)
-              </button>
             </div>
           </div>
 

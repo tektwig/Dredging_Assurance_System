@@ -11,6 +11,14 @@ export interface LiveSnapshot {
   assignedSiteId?: string;
 }
 
+export interface PendingSignup {
+  id: string;
+  email: string;
+  displayName: string;
+  requestedRole: 'loading_officer' | 'offloading_officer' | 'operations_manager' | 'finance_officer';
+  createdAt: string;
+}
+
 const mapExceptionType = (value: string): ExceptionType => {
   if (value === 'unknown_truck') return 'unlisted_truck';
   if (value === 'offloading_mismatch') return 'quantity_mismatch';
@@ -343,6 +351,38 @@ export async function resolveLiveTripException(params: { exceptionId: string; re
   const { error } = await client.rpc('resolve_trip_exception', {
     p_exception_id: params.exceptionId,
     p_reason: params.reason,
+  });
+  if (error) throw error;
+}
+
+export async function fetchPendingSignups(): Promise<PendingSignup[]> {
+  const client = await ensureAuthenticatedClient();
+  const { data, error } = await client
+    .from('profiles')
+    .select('id,email,display_name,requested_role,created_at')
+    .eq('is_active', false)
+    .not('requested_role', 'is', null)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data || []).map((row: JsonObject) => ({
+    id: row.id,
+    email: row.email || '',
+    displayName: row.display_name || 'New user',
+    requestedRole: row.requested_role,
+    createdAt: row.created_at,
+  }));
+}
+
+export async function approvePendingSignup(params: {
+  profileId: string;
+  role: PendingSignup['requestedRole'];
+  siteId?: string;
+}): Promise<void> {
+  const client = await ensureAuthenticatedClient();
+  const { error } = await client.rpc('approve_signup', {
+    p_profile_id: params.profileId,
+    p_role: params.role,
+    p_site_id: params.siteId || null,
   });
   if (error) throw error;
 }

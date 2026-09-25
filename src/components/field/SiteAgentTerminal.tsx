@@ -90,13 +90,11 @@ export const SiteAgentTerminal: React.FC = () => {
   const [hasScanned, setHasScanned] = useState(false);
 
   // 1. Camera & Scan State
-  const [confirmedPlate, setConfirmedPlate] = useState('KJA-482XY');
-  const [confidenceScore, setConfidenceScore] = useState(97.6);
-  const [selectedTruckId, setSelectedTruckId] = useState('trk-1');
-  const [selectedDriverId, setSelectedDriverId] = useState('drv-1');
-  const [photoUrl, setPhotoUrl] = useState(
-    'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=600&auto=format&fit=crop&q=80'
-  );
+  const [confirmedPlate, setConfirmedPlate] = useState('');
+  const [confidenceScore, setConfidenceScore] = useState(0);
+  const [selectedTruckId, setSelectedTruckId] = useState('');
+  const [selectedDriverId, setSelectedDriverId] = useState('');
+  const [photoUrl, setPhotoUrl] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [ocrStatus, setOcrStatus] = useState('Ready for capture');
   const [ocrProgress, setOcrProgress] = useState(0);
@@ -119,11 +117,11 @@ export const SiteAgentTerminal: React.FC = () => {
   const [driverSearchQuery, setDriverSearchQuery] = useState('');
 
   // Unregistered Vehicle & Driver Form State
-  const [newTruckPlate, setNewTruckPlate] = useState('IKD-882ZX');
+  const [newTruckPlate, setNewTruckPlate] = useState('');
   const [newTruckType, setNewTruckType] = useState('Mack 10-Wheeler Tipper');
   const [newTruckCapacity, setNewTruckCapacity] = useState(30);
-  const [newTruckOwner, setNewTruckOwner] = useState('Coastal Sands Logistics Ltd');
-  const [newTruckOwnerPhone, setNewTruckOwnerPhone] = useState('+234 803 551 0921');
+  const [newTruckOwner, setNewTruckOwner] = useState('');
+  const [newTruckOwnerPhone, setNewTruckOwnerPhone] = useState('');
   const [newDriverName, setNewDriverName] = useState('');
   const [newDriverPhone, setNewDriverPhone] = useState('');
   const [newDriverBankName, setNewDriverBankName] = useState('Zenith Bank PLC');
@@ -183,12 +181,12 @@ export const SiteAgentTerminal: React.FC = () => {
   };
 
   // 4. Pickup Specific Form State
-  const [destinationSiteId, setDestinationSiteId] = useState('site-lkk-01');
+  const [destinationSiteId, setDestinationSiteId] = useState('');
   const [estimatedTonnes, setEstimatedTonnes] = useState(30);
   const [pickupNotes, setPickupNotes] = useState('');
 
   // 5. Delivery Specific Form State
-  const [scaleTicketNumber, setScaleTicketNumber] = useState('WT-2026-9041');
+  const [scaleTicketNumber, setScaleTicketNumber] = useState('');
   const [deliveredTonnes, setDeliveredTonnes] = useState(29.8);
   const [ticketPhotoUrl, setTicketPhotoUrl] = useState(
     'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=80'
@@ -784,7 +782,7 @@ export const SiteAgentTerminal: React.FC = () => {
               </span>
             </div>
             <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-              Station: <strong>{activeSite?.name}</strong> • Operator: <strong>Faith (Site Agent)</strong>
+              Station: <strong>{activeSite?.name || 'Loading site'}</strong> • Operator: <strong>Signed-in Site Agent</strong>
             </p>
           </div>
         </div>
@@ -1492,7 +1490,7 @@ export const SiteAgentTerminal: React.FC = () => {
                         <input
                           type="text"
                           required
-                          placeholder="e.g. Babatunde Lawal"
+                          placeholder="Enter driver's full name"
                           value={quickDriverName}
                           onChange={(e) => setQuickDriverName(e.target.value)}
                           style={{ width: '100%', padding: '0.35rem 0.5rem', fontSize: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-default)' }}
@@ -2356,7 +2354,7 @@ export const SiteAgentTerminal: React.FC = () => {
                       type="text"
                       className="form-input"
                       required
-                      placeholder="e.g. Coastal Sands Ltd"
+                      placeholder="Enter owner or company name"
                       value={newTruckOwner}
                       onChange={(e) => setNewTruckOwner(e.target.value)}
                     />
@@ -2388,7 +2386,7 @@ export const SiteAgentTerminal: React.FC = () => {
                       type="text"
                       className="form-input"
                       required
-                      placeholder="e.g. Babatunde Lawal"
+                      placeholder="Enter driver's full name"
                       value={newDriverName}
                       onChange={(e) => setNewDriverName(e.target.value)}
                     />
