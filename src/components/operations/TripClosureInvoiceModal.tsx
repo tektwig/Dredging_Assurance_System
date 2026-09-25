@@ -1,5 +1,5 @@
-import React from 'react';
-import { X, Printer, Download, Truck, User, MapPin, Scale, ExternalLink, Shield, Calendar, Hash } from 'lucide-react';
+import React, { useState, useCallback } from 'react';
+import { X, Printer, Download, Truck, User, MapPin, Scale, Eye, Shield, Calendar, Hash } from 'lucide-react';
 import { TripClosureInvoice } from '../../types';
 import { PlateDisplay } from '../common/PlateDisplay';
 import jsPDF from 'jspdf';
@@ -321,12 +321,16 @@ const buildInvoicePdf = (inv: TripClosureInvoice): jsPDF => {
   return doc;
 };
 
-/** Open the PDF in a new browser tab for viewing. */
-export const viewTripClosureInvoice = (invoice: TripClosureInvoice) => {
+/** Build the PDF and return a blob URL for embedding. */
+export const getInvoiceBlobUrl = (invoice: TripClosureInvoice): string => {
   const doc = buildInvoicePdf(invoice);
   const blob = doc.output('blob');
-  const url = URL.createObjectURL(blob);
-  window.open(url, '_blank');
+  return URL.createObjectURL(blob);
+};
+
+/** Open the PDF in a new browser tab for viewing. */
+export const viewTripClosureInvoice = (invoice: TripClosureInvoice) => {
+  window.open(getInvoiceBlobUrl(invoice), '_blank');
 };
 
 /** Download the PDF directly. */
@@ -338,6 +342,19 @@ export const downloadTripClosureInvoice = (invoice: TripClosureInvoice) => {
 /* ─── MODAL COMPONENT ─────────────────────────────────────────── */
 
 export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = ({ invoice, onClose }) => {
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+
+  const openPdfPreview = useCallback(() => {
+    if (!invoice) return;
+    const url = getInvoiceBlobUrl(invoice);
+    setPdfPreviewUrl(url);
+  }, [invoice]);
+
+  const closePdfPreview = useCallback(() => {
+    if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
+    setPdfPreviewUrl(null);
+  }, [pdfPreviewUrl]);
+
   if (!invoice) return null;
 
   const openedAt = new Date(invoice.opened_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -349,12 +366,13 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
     : '0.0';
 
   return (
-    <div className="modal-backdrop" onClick={onClose} role="presentation">
+    <div className="modal-overlay" onClick={onClose} role="presentation">
       <div
-        className="card"
+        className="modal-card closure-invoice-modal"
         onClick={(event) => event.stopPropagation()}
         style={{
           width: 'min(780px, calc(100vw - 2rem))',
+          maxWidth: '780px',
           maxHeight: '92vh',
           overflowY: 'auto',
           padding: 0,
@@ -431,10 +449,10 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
         </div>
 
         {/* ── BODY ── */}
-        <div style={{ padding: '1.5rem 1.75rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <div className="closure-invoice-body" style={{ padding: '1.5rem 1.75rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
           {/* Meta row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+          <div className="closure-invoice-meta-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
             {[
               { icon: <Hash size={13} />, label: 'Invoice No.', value: invoice.invoice_number },
               { icon: <Hash size={13} />, label: 'Waybill Ref', value: invoice.trip_number },
@@ -462,7 +480,7 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
               <div style={{ width: 3, height: 16, borderRadius: 2, background: '#0F766E' }} />
               <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Transport Details</span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+            <div className="closure-invoice-transport-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               {/* Truck */}
               <div style={{
                 padding: '1rem',
@@ -502,7 +520,7 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
               <div style={{ width: 3, height: 16, borderRadius: 2, background: '#0F766E' }} />
               <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Route & Timeline</span>
             </div>
-            <div style={{
+            <div className="closure-invoice-route-grid" style={{
               padding: '1rem 1.25rem',
               border: '1px solid var(--border-subtle)',
               borderRadius: '10px',
@@ -624,14 +642,14 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
           </div>
 
           {/* Action Buttons */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem', paddingTop: '0.25rem', borderTop: '1px solid var(--border-subtle)' }}>
+          <div className="closure-invoice-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem', paddingTop: '0.25rem', borderTop: '1px solid var(--border-subtle)' }}>
             <button
               type="button"
-              className="btn btn-secondary"
-              onClick={() => viewTripClosureInvoice(invoice)}
+              className="btn btn-primary"
+              onClick={openPdfPreview}
               style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
             >
-              <ExternalLink size={15} /> View PDF
+              <Eye size={15} /> View PDF
             </button>
             <button
               type="button"
@@ -643,7 +661,7 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
             </button>
             <button
               type="button"
-              className="btn btn-primary"
+              className="btn btn-secondary"
               onClick={() => window.print()}
               style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
             >
@@ -652,6 +670,104 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
           </div>
         </div>
       </div>
+
+      {/* ── PDF PREVIEW POPUP ── */}
+      {pdfPreviewUrl && (
+        <div
+          className="pdf-preview-overlay"
+          onClick={closePdfPreview}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10000,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+          }}
+        >
+          {/* Toolbar */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(900px, 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '0.6rem 1rem',
+              background: 'rgba(15, 23, 42, 0.95)',
+              borderRadius: '12px 12px 0 0',
+              borderBottom: '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fff' }}>
+              <Shield size={16} color="#34D399" />
+              <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>{invoice.invoice_number}</span>
+              <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)' }}>— PDF Preview</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); downloadTripClosureInvoice(invoice); }}
+                style={{
+                  background: 'rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: '6px',
+                  padding: '0.35rem 0.7rem',
+                  color: '#fff',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.3rem',
+                  transition: 'background 0.15s',
+                }}
+                title="Download PDF"
+              >
+                <Download size={13} /> Download
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); closePdfPreview(); }}
+                style={{
+                  background: 'rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: '6px',
+                  padding: '0.35rem',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background 0.15s',
+                }}
+                title="Close preview"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+
+          {/* PDF iframe */}
+          <iframe
+            onClick={(e) => e.stopPropagation()}
+            src={pdfPreviewUrl}
+            title={`Invoice ${invoice.invoice_number}`}
+            style={{
+              width: 'min(900px, 100%)',
+              flex: 1,
+              border: 'none',
+              borderRadius: '0 0 12px 12px',
+              background: '#fff',
+              minHeight: '300px',
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };

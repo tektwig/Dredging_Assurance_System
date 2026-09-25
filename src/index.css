@@ -1305,3 +1305,175 @@ p {
   animation: scanLaser 2.2s ease-in-out infinite;
 }
 
+
+/* --- Movement Cards --- */
+.movement-card {
+  padding: 0.75rem 0.85rem;
+  background-color: #F8FAFC;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  transition: box-shadow 0.15s ease;
+}
+
+.movement-card:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.movement-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.movement-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex-shrink: 0;
+}
+
+/* --- Mobile Responsive: Movement Cards & Sections --- */
+@media (max-width: 520px) {
+  .movement-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .movement-card-top {
+    gap: 0.5rem;
+  }
+
+  .movement-card-bottom {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .movement-card .plate-box {
+    max-width: 110px;
+    flex-shrink: 0;
+  }
+
+  .movement-card .plate-text {
+    font-size: 0.72rem !important;
+    padding: 0.1rem 0.35rem !important;
+    letter-spacing: 0.06em;
+  }
+
+  .movement-card .plate-flag {
+    padding: 0.15rem 0.25rem;
+    font-size: 0.5rem !important;
+  }
+
+  .card-header {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+
+  .card-header > div:last-child {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  .card-header .btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: center;
+    font-size: 0.7rem !important;
+    padding: 0.2rem 0.45rem !important;
+  }
+
+  .closure-invoice-modal {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    height: 100vh;
+    border-radius: 0 !important;
+    margin: 0;
+  }
+}
+
+@media (max-width: 380px) {
+  .movement-card .plate-box {
+    max-width: 90px;
+  }
+
+  .movement-card .plate-text {
+    font-size: 0.65rem !important;
+    padding: 0.08rem 0.25rem !important;
+  }
+
+  .movement-card-bottom .btn {
+    font-size: 0.65rem !important;
+    padding: 0.2rem 0.4rem !important;
+    min-height: 26px !important;
+  }
+
+  .movement-card-bottom .badge {
+    font-size: 0.62rem !important;
+    padding: 0.12rem 0.4rem !important;
+  }
+}
+
+/* --- Closure Invoice Modal Mobile Responsive --- */
+@media (max-width: 520px) {
+  .closure-invoice-modal {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    height: 100dvh;
+    border-radius: 0 !important;
+    margin: 0;
+  }
+
+  .closure-invoice-body {
+    padding: 1rem !important;
+    gap: 1rem !important;
+  }
+
+  .closure-invoice-meta-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.5rem !important;
+  }
+
+  .closure-invoice-transport-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.6rem !important;
+  }
+
+  .closure-invoice-route-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.6rem !important;
+    text-align: left !important;
+  }
+
+  .closure-invoice-route-grid > div:last-child {
+    text-align: left !important;
+  }
+
+  .closure-invoice-route-grid > div:nth-child(2) {
+    display: none;
+  }
+
+  .closure-invoice-actions {
+    flex-direction: column !important;
+    gap: 0.5rem !important;
+  }
+
+  .closure-invoice-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

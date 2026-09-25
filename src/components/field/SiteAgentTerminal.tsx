@@ -2387,23 +2387,16 @@ export const SiteAgentTerminal: React.FC = () => {
               return (
               <div
                 key={trip.id}
+                className="movement-card"
                 onClick={() => closureInvoice && setSelectedClosureInvoiceId(trip.id)}
                 style={{
-                  padding: '0.75rem 0.85rem',
-                  backgroundColor: '#F8FAFC',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--border-subtle)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '0.75rem',
                   cursor: closureInvoice ? 'pointer' : undefined,
                 }}
                 title={closureInvoice ? 'Click to review the closure invoice' : undefined}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0 }}>
+                <div className="movement-card-top">
                   <PlateDisplay plate={trip.truck?.registration_number || 'UNKNOWN'} size="sm" />
-                  <div style={{ minWidth: 0 }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--brand-primary)', fontFamily: 'var(--font-mono)' }}>
                       #{trip.trip_number}
                     </div>
@@ -2413,13 +2406,13 @@ export const SiteAgentTerminal: React.FC = () => {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.45rem', flexShrink: 0 }}>
+                <div className="movement-card-bottom">
                   <StatusBadge status={trip.status} />
                   {trip.status === 'closed' && closureInvoice && (
                     <button
                       type="button"
                       className="btn btn-secondary"
-                      style={{ minHeight: '30px', padding: '0.25rem 0.55rem', fontSize: '0.7rem' }}
+                      style={{ minHeight: '30px', padding: '0.25rem 0.55rem', fontSize: '0.7rem', whiteSpace: 'nowrap' }}
                       onClick={(event) => {
                         event.stopPropagation();
                         setSelectedClosureInvoiceId(trip.id);
