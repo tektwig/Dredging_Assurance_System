@@ -1,6 +1,7 @@
 import { supabase } from '../../../lib/supabase';
 import type { OpenTripFailureCode, OpenTripRequest, OpenTripResult, OpenTripSuccess } from '../types';
 import { platePreview } from '../utils/operationalDate';
+import { captureMethod } from '../utils/captureMethod';
 import { LoadingAuthorizationError, TripOutcomeUnknownError } from './errors';
 
 const businessCodes: readonly OpenTripFailureCode[] = [
@@ -18,19 +19,55 @@ function object(value: unknown): Record<string, unknown> | null {
 }
 function string(value: unknown): value is string { return typeof value === 'string' && value.length > 0; }
 
+// The same frozen request object is reused for an ambiguous RPC retry. A
+// confirmed upload must not be repeated or overwritten on that retry.
+const uploadedRequests = new WeakSet<OpenTripRequest>();
+async function ensureEvidenceUploaded(request: OpenTripRequest): Promise<void> {
+  const evidence = request.review.capture;
+  if (!evidence || uploadedRequests.has(request)) return;
+  if (!supabase || evidence.image.type !== 'image/jpeg' || evidence.image.size < 1
+    || evidence.image.size > 5242880) throw new TripOutcomeUnknownError();
+  const bucket = supabase.storage.from('loading-plate-evidence');
+  try {
+    const { error } = await bucket.upload(evidence.imagePath, evidence.image,
+      { contentType: 'image/jpeg', upsert: false });
+    if (error) {
+      if (String(error.statusCode) === '401' || String(error.statusCode) === '403') throw new LoadingAuthorizationError();
+      if (String(error.statusCode) !== '409') throw new TripOutcomeUnknownError();
+      // A retry may find that its earlier upload actually succeeded. Verify
+      // the private object is byte-identical before linking it to the trip.
+      const existing = await bucket.download(evidence.imagePath);
+      if (existing.error || !existing.data || existing.data.size !== evidence.image.size) throw new TripOutcomeUnknownError();
+      const [actual, expected] = await Promise.all([existing.data.arrayBuffer(), evidence.image.arrayBuffer()]);
+      const [actualHash, expectedHash] = await Promise.all([
+        crypto.subtle.digest('SHA-256', actual), crypto.subtle.digest('SHA-256', expected),
+      ]);
+      if (!new Uint8Array(actualHash).every((value, index) => value === new Uint8Array(expectedHash)[index])) {
+        throw new TripOutcomeUnknownError();
+      }
+    }
+    uploadedRequests.add(request);
+  } catch (error) {
+    if (error instanceof LoadingAuthorizationError) throw error;
+    throw new TripOutcomeUnknownError();
+  }
+}
+
 export async function openLoadingTrip(request: OpenTripRequest): Promise<OpenTripResult> {
   if (!supabase) throw new TripOutcomeUnknownError();
   const { review } = request;
+  await ensureEvidenceUploaded(request);
+  const method = captureMethod(review);
   const { data, error } = await supabase.rpc('create_loading_trip_v2', {
     p_request_id: request.requestId,
     p_plate: review.plate,
     p_driver_id: review.actualDriver.id,
     p_expected_assignment_id: review.site.assignmentId,
-    p_capture_method: 'MANUAL',
+    p_capture_method: method,
     p_captured_at: request.capturedAt,
-    p_ocr_detected_plate: null,
-    p_ocr_confidence: null,
-    p_image_path: null,
+    p_ocr_detected_plate: review.capture?.candidate ?? null,
+    p_ocr_confidence: review.capture?.confidence ?? null,
+    p_image_path: review.capture?.imagePath ?? null,
     p_make_default_driver: review.makeRegular,
   });
   if (error?.code === '42501') throw new LoadingAuthorizationError();
@@ -53,7 +90,7 @@ export async function openLoadingTrip(request: OpenTripRequest): Promise<OpenTri
     || !string(trip.opened_at) || !string(trip.opened_by) || trip.quantity_tonnes !== null
     || capture.confirmed_plate !== review.plate
     || capture.normalized_confirmed_plate !== platePreview(review.plate)
-    || capture.capture_method !== 'MANUAL' || capture.image_recorded !== false
+    || capture.capture_method !== method || capture.image_recorded !== !!review.capture
     || typeof row.default_driver_changed !== 'boolean'
     || (row.default_driver_changed && !review.makeRegular)) throw new TripOutcomeUnknownError();
   const result: OpenTripSuccess = { kind: 'success', requestId: row.request_id,
@@ -64,7 +101,7 @@ export async function openLoadingTrip(request: OpenTripRequest): Promise<OpenTri
       openedBy: trip.opened_by, quantityTonnes: null },
     capture: { confirmedPlate: capture.confirmed_plate,
       normalizedConfirmedPlate: capture.normalized_confirmed_plate,
-      captureMethod: 'MANUAL', imageRecorded: false },
+      captureMethod: method, imageRecorded: !!review.capture },
     defaultDriverChanged: row.default_driver_changed };
   return result;
 }

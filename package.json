@@ -8,15 +8,15 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.app.json --noEmit --incremental false && tsc -p tsconfig.node.json --noEmit --incremental false",
-    "test:frontend": "node scripts/test-frontend-foundation.mjs && node scripts/test-loading-portal.mjs && node scripts/test-loading-driver-workflow.mjs && node scripts/test-loading-trip-opening.mjs"
+    "test:frontend": "node scripts/test-frontend-foundation.mjs && node scripts/test-loading-portal.mjs && node scripts/test-loading-driver-workflow.mjs && node scripts/test-loading-trip-opening.mjs && node scripts/test-loading-ocr.mjs"
   },
   "dependencies": {
+    "@paddleocr/paddleocr-js": "^0.4.2",
     "@supabase/supabase-js": "^2.49.1",
     "lucide-react": "^0.477.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "6.30.4",
-    "tesseract.js": "^7.0.0"
+    "react-router-dom": "6.30.4"
   },
   "devDependencies": {
     "@types/node": "^22.13.9",

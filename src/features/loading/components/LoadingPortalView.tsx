@@ -15,6 +15,7 @@ type Props = {
   onRetrySite: () => void;
   onRetryStatistics: () => void;
   driverPanel?: ReactNode;
+  capturePanel?: ReactNode;
   tripPanel?: ReactNode;
   tripStage?: string;
   lateOpenedTrip?: string | null;
@@ -160,7 +161,8 @@ export function LoadingPortalView(props: Props) {
       </div>}
       {canProcess ? <>
         <div className="loading-section-heading"><h2>Process Truck</h2>
-          <p>Enter the plate as you see it. Spaces and hyphens are accepted.</p></div>
+          <p>Capture a plate image or enter the plate manually. Spaces and hyphens are accepted.</p></div>
+        {(!props.tripStage || !['submitting', 'ambiguous', 'success'].includes(props.tripStage)) && props.capturePanel}
         <form className="loading-plate-form" onSubmit={event => { event.preventDefault(); props.onLookup(); }} aria-busy={props.lookup.pending}>
           <label htmlFor="loading-plate">Vehicle Plate Number</label>
           <div className="loading-entry-row">

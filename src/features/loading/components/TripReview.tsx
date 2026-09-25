@@ -1,4 +1,5 @@
 import type { OpenTripState } from '../utils/openTripController';
+import { captureMethod } from '../utils/captureMethod';
 
 const failureMessages: Record<string, string> = {
   INVALID_REQUEST_ID: 'Start a new review and try again.',
@@ -60,6 +61,8 @@ export function TripReview({ state, canReview, operationalDate, onReview, onBack
       <div><dt>Actual driver</dt><dd>{review.actualDriver.fullName}<span>{review.actualDriver.phoneNumber}</span></dd></div>
       <div><dt>Assigned loading site</dt><dd>{review.site.siteName}</dd></div>
       <div><dt>Operational date · Africa/Lagos</dt><dd>{operationalDate}</dd></div>
+      <div><dt>Plate capture</dt><dd>{review.capture ? captureMethod(review) === 'OCR'
+        ? 'OCR suggestion confirmed' : 'OCR suggestion corrected' : 'Manual entry'}</dd></div>
       {review.actualDriver.id !== review.regularDriverId && <div><dt>Regular driver</dt>
         <dd>{review.makeRegular ? 'Set selected driver as regular when the trip opens' : 'Leave unchanged'}</dd></div>}
     </dl>

@@ -130,6 +130,16 @@ export type OpenTripReview = {
   regularDriverId: string;
   site: AssignedLoadingSite;
   makeRegular: boolean;
+  capture?: PlateCaptureEvidence;
+};
+
+export type PlateCaptureEvidence = {
+  id: string;
+  imagePath: string;
+  image: Blob;
+  candidate: string;
+  confidence: number | null;
+  capturedAt: string;
 };
 
 export type OpenTripRequest = {
@@ -165,7 +175,8 @@ export type OpenTripSuccess = {
   kind: 'success';
   requestId: string;
   trip: OpenedTrip;
-  capture: { confirmedPlate: string; normalizedConfirmedPlate: string; captureMethod: 'MANUAL'; imageRecorded: false };
+  capture: { confirmedPlate: string; normalizedConfirmedPlate: string;
+    captureMethod: 'MANUAL' | 'OCR' | 'OCR_CORRECTED'; imageRecorded: boolean };
   defaultDriverChanged: boolean;
 };
 

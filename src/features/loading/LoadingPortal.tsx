@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../auth/AuthProvider';
 import { DriverIdentification } from './components/DriverIdentification';
+import { PlateCapture } from './components/PlateCapture';
 import { LoadingPortalView } from './components/LoadingPortalView';
 import { TripReview } from './components/TripReview';
 import { loadAssignedSite, loadLoadingStatistics, lookupLoadingTruck } from './services/loadingData';
 import { registerLoadingParticipant, searchLoadingDrivers } from './services/driverData';
 import { LoadingAuthorizationError } from './services/errors';
 import { openLoadingTrip } from './services/tripData';
+import { createPlateOcrService } from './services/plateOcr';
 import type { SavedRegistrationReceipt, SiteContextState, StatisticsState } from './types';
 import { LoadingLookupController, type LookupSnapshot } from './utils/lookupController';
 import { DriverWorkflowController, type DriverWorkflowSnapshot } from './utils/driverWorkflowController';
 import { operationalDateKey, operationalDateLabel } from './utils/operationalDate';
 import { OpenTripController, type OpenTripState } from './utils/openTripController';
 import { reviewForSelection } from './utils/reviewSelection';
+import { PlateCaptureController, type PlateCaptureState } from './utils/plateCaptureController';
 import './loading.css';
 
 export function LoadingPortal() {
@@ -34,6 +37,7 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
   const [lateRegistration, setLateRegistration] = useState<SavedRegistrationReceipt | null>(null);
   const [openState, setOpenState] = useState<OpenTripState>({ status: 'idle' });
   const [lateOpenedTrip, setLateOpenedTrip] = useState<string | null>(null);
+  const [capture, setCapture] = useState<PlateCaptureState>({ status: 'idle' });
   const siteRef = useRef(site);
   const lookupAssignmentRef = useRef<string | null>(null);
   siteRef.current = site;
@@ -60,14 +64,26 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     () => { setSite({ status: 'blocked', reason: 'unauthorized' }); setSiteRevision(value => value + 1); },
     undefined, undefined, result => { setLateOpenedTrip(result.trip.tripNumber); setStatisticsRevision(value => value + 1); },
   ), []);
+  const ocrService = useMemo(() => createPlateOcrService(), []);
+  const captureController = useMemo(() => new PlateCaptureController(actorId,
+    (file, report) => ocrService.process(file, report), setCapture, candidate => {
+      openController.setInput(null);
+      lookupAssignmentRef.current = null;
+      controller.editPlate();
+      driverController.reset();
+      setPlate(candidate);
+    }), [actorId, ocrService, openController, controller, driverController]);
   const dateKey = operationalDateKey(now);
 
   useEffect(() => {
     controller.resume();
     driverController.resume();
     openController.resume();
-    return () => { controller.dispose(); driverController.dispose(); openController.dispose(); };
-  }, [controller, driverController, openController]);
+    captureController.resume();
+    ocrService.resume();
+    return () => { controller.dispose(); driverController.dispose(); openController.dispose();
+      captureController.dispose(); ocrService.dispose(); };
+  }, [controller, driverController, openController, captureController, ocrService]);
 
   useEffect(() => {
     if (site.status !== 'ready' || lookupAssignmentRef.current !== site.site.assignmentId) return;
@@ -86,9 +102,10 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
   }, [driverController, site, lookupSnapshot.state]);
 
   const assignmentId = site.status === 'ready' ? site.site.assignmentId : null;
-  const openInput = reviewForSelection(site, lookupSnapshot, driverSnapshot);
+  const evidence = capture.status === 'detected' ? capture.evidence : null;
+  const openInput = reviewForSelection(site, lookupSnapshot, driverSnapshot, evidence);
   const inputKey = openInput ? JSON.stringify([openInput.plate, openInput.truck.id, openInput.actualDriver.id,
-    openInput.site.assignmentId, openInput.makeRegular]) : null;
+    openInput.site.assignmentId, openInput.makeRegular, openInput.capture?.id ?? null]) : null;
   useEffect(() => { openController.setInput(openInput); }, [openController, inputKey]);
   useEffect(() => {
     const saved = driverController.current.saved;
@@ -96,7 +113,8 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     lookupAssignmentRef.current = null;
     controller.editPlate();
     driverController.reset();
-  }, [assignmentId, controller, driverController]);
+    captureController.clear();
+  }, [assignmentId, controller, driverController, captureController]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 60_000);
@@ -127,6 +145,7 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
 
   function onPlateChange(value: string) {
     openController.setInput(null);
+    captureController.cancelPending();
     const saved = driverController.current.saved;
     if (saved && saved.status !== 'ready') setLateRegistration(saved.receipt);
     setPlate(value);
@@ -143,6 +162,31 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     lookupAssignmentRef.current = site.site.assignmentId;
     driverController.reset();
     void controller.submit(plate, site.site.assignmentId);
+  }
+
+  function onCapture(file: File) {
+    if (siteRef.current.status !== 'ready' || openState.status === 'submitting'
+      || openState.status === 'ambiguous' || openState.status === 'success'
+      || driverController.current.registration.status === 'submitting'
+      || driverController.current.registration.status === 'refreshing') return;
+    const saved = driverController.current.saved;
+    if (saved && saved.status !== 'ready') setLateRegistration(saved.receipt);
+    openController.setInput(null);
+    lookupAssignmentRef.current = null;
+    controller.editPlate();
+    driverController.reset();
+    setPlate('');
+    void captureController.capture(file);
+  }
+
+  function useManualPlate() {
+    const saved = driverController.current.saved;
+    if (saved && saved.status !== 'ready') setLateRegistration(saved.receipt);
+    captureController.clear();
+    openController.setInput(null);
+    lookupAssignmentRef.current = null;
+    controller.editPlate();
+    driverController.reset();
   }
 
   const driverPanel = driverSnapshot && (lookupSnapshot.state.status === 'known_ready'
@@ -167,6 +211,7 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     lookupAssignmentRef.current = null;
     controller.editPlate();
     driverController.reset();
+    captureController.clear();
     setLateRegistration(null);
     setLateOpenedTrip(null);
   }
@@ -176,17 +221,24 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     onOpen={() => { void openController.submit(); }} onNext={nextTruck} />;
   const showDriverPanel = openState.status === 'idle' || openState.status === 'site_changed'
     || openState.status === 'authorization';
+  const locked = driverSnapshot?.registration.status === 'submitting' || driverSnapshot?.registration.status === 'refreshing'
+    || openState.status === 'submitting' || openState.status === 'ambiguous' || openState.status === 'success';
+  const capturePanel = <PlateCapture state={capture} disabled={locked}
+    resetKey={JSON.stringify([plate, assignmentId, openState.status])}
+    onCapture={onCapture} onManual={useManualPlate}
+    onScanStart={() => captureController.clear()} />;
 
   return <LoadingPortalView officerName={officerName} now={now} site={site} statistics={statistics}
     plate={plate} lookup={lookupSnapshot} driverPanel={showDriverPanel ? driverPanel : undefined}
     tripPanel={tripPanel} tripStage={openState.status}
+    capturePanel={capturePanel}
     lateOpenedTrip={lateOpenedTrip} onDismissLateOpenedTrip={() => setLateOpenedTrip(null)}
     savedRegistration={driverSnapshot?.saved ?? null} lateRegistration={lateRegistration}
     onDismissLateRegistration={() => setLateRegistration(null)}
     onRetryRegistrationCheck={() => { void driverController.retrySavedValidation(); }}
-    plateLocked={driverSnapshot?.registration.status === 'submitting' || driverSnapshot?.registration.status === 'refreshing'
-      || openState.status === 'submitting' || openState.status === 'ambiguous' || openState.status === 'success'}
+    plateLocked={locked}
     onPlateChange={onPlateChange} onLookup={onLookup}
-    onRetrySite={() => { openController.setInput(null); lookupAssignmentRef.current = null; controller.editPlate(); driverController.reset(); setSiteRevision(value => value + 1); }}
+    onRetrySite={() => { openController.setInput(null); lookupAssignmentRef.current = null;
+      controller.editPlate(); driverController.reset(); captureController.clear(); setSiteRevision(value => value + 1); }}
     onRetryStatistics={() => setStatisticsRevision(value => value + 1)} />;
 }
