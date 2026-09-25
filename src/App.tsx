@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthProvider';
 import { StatusPage } from './components/StatusPage';
 import { LoadingPortal } from './features/loading/LoadingPortal';
+import { OffloadingPortal } from './features/offloading/OffloadingPortal';
 import { AuthenticatedLayout } from './layouts/AuthenticatedLayout';
 import { configurationError } from './lib/supabase';
 import { AccessDeniedPage } from './pages/AccessDeniedPage';
@@ -24,7 +25,8 @@ export default function App() {
         <Route key={role} element={<RequireRole role={role} />}>
           <Route element={<AuthenticatedLayout />}>
             <Route path={PORTALS[role].path} element={role === 'loading_officer'
-              ? <LoadingPortal /> : <PortalPage role={role} />} />
+              ? <LoadingPortal /> : role === 'offloading_officer'
+                ? <OffloadingPortal /> : <PortalPage role={role} />} />
           </Route>
         </Route>
       )}

@@ -66,6 +66,7 @@ export interface Database {
         p_ocr_confidence?: number | null; p_image_path?: string | null;
         p_make_default_driver?: boolean;
       }; Returns: unknown };
+      lookup_offloading_open_trip: { Args: { p_plate: string }; Returns: unknown };
     };
     Enums: { app_role: AppRole };
     CompositeTypes: { [_ in never]: never };

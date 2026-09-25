@@ -4,10 +4,12 @@ import type { PlateCaptureState } from '../utils/plateCaptureController';
 import { CameraSession, captureGuideFrame, classifyCameraFailure, type CameraFailure } from '../utils/cameraSession';
 
 type Props = { state: PlateCaptureState; disabled: boolean; resetKey?: string;
-  onCapture: (file: File) => void; onManual: () => void; onScanStart: () => void };
+  onCapture: (file: File) => void; onManual: () => void; onScanStart: () => void;
+  lookupActionLabel?: string };
 type CameraState = 'idle' | 'initializing' | 'preview' | 'capturing' | CameraFailure;
 
-export function PlateCapture({ state, disabled, resetKey, onCapture, onManual, onScanStart }: Props) {
+export function PlateCapture({ state, disabled, resetKey, onCapture, onManual, onScanStart,
+  lookupActionLabel = 'Find Truck' }: Props) {
   const imageInput = useRef<HTMLInputElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const camera = useRef(new CameraSession(constraints => navigator.mediaDevices.getUserMedia(constraints)));
@@ -117,7 +119,7 @@ export function PlateCapture({ state, disabled, resetKey, onCapture, onManual, o
     } Manual entry remains available.</p>}
     {state.status === 'detected' && <div className="loading-scan-result" role="status">
       <span>Detected plate</span><strong>{state.evidence.candidate}</strong>
-      <p>Check or correct the plate below, then select Find Truck. No lookup has started.</p>
+      <p>Check or correct the plate below, then select {lookupActionLabel}. No lookup has started.</p>
       <button className="button secondary" type="button" disabled={disabled} onClick={onManual}>Use manual entry instead</button>
     </div>}
     {state.status === 'error' && <div className="loading-scan-error" role="status">
