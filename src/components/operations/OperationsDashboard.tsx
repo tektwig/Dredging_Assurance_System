@@ -228,16 +228,27 @@ export const OperationsDashboard: React.FC = () => {
               ) : (
                 filteredTrips.map((trip) => {
                   const hasException = trip.status === 'exception';
+                  const closureInvoice = tripInvoices.find((invoice) => invoice.trip_id === trip.id);
+                  const opensInvoice = trip.status === 'closed' && Boolean(closureInvoice);
                   const elapsedMins = Math.floor(
                     (Date.now() - new Date(trip.loaded_at).getTime()) / (60 * 1000)
                   );
 
                   return (
-                    <tr key={trip.id}>
+                    <tr
+                      key={trip.id}
+                      onClick={() => (opensInvoice ? setSelectedClosureInvoiceId(trip.id) : setInspectedTrip(trip))}
+                      style={{ cursor: opensInvoice ? 'pointer' : undefined }}
+                      title={opensInvoice ? 'Click to view the closure invoice' : undefined}
+                    >
                       <td className="mono" style={{ fontWeight: 700, color: 'var(--brand-primary)' }}>
                         <button
                           type="button"
-                          onClick={() => setInspectedTrip(trip)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (opensInvoice) setSelectedClosureInvoiceId(trip.id);
+                            else setInspectedTrip(trip);
+                          }}
                           style={{
                             background: 'none',
                             border: 'none',
@@ -248,7 +259,7 @@ export const OperationsDashboard: React.FC = () => {
                             fontFamily: 'var(--font-mono)',
                             textDecoration: 'underline',
                           }}
-                          title="Click to view full digital waybill"
+                          title={opensInvoice ? 'Click to view closure invoice' : 'Click to view full digital waybill'}
                         >
                           {trip.trip_number}
                         </button>
@@ -295,7 +306,10 @@ export const OperationsDashboard: React.FC = () => {
                         <StatusBadge status={trip.status} size="sm" />
                       </td>
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <div
+                          style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                          onClick={(event) => event.stopPropagation()}
+                        >
                           <button
                             type="button"
                             className="btn btn-secondary"
