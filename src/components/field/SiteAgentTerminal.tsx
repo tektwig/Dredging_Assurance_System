@@ -695,15 +695,24 @@ export const SiteAgentTerminal: React.FC = () => {
   };
 
   // Raise Exception on Delivery
-  const handleRaiseDeliveryException = (e: React.FormEvent) => {
+  const handleRaiseDeliveryException = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!matchingOpenTrip) return;
 
-    raiseTripException(matchingOpenTrip.id, {
-      type: exceptionType,
-      description: exceptionDesc || `Delivered ${deliveredTonnes}T deviates from dispatched payload.`,
-      severity: 'high',
-    });
+    try {
+      await raiseTripException(matchingOpenTrip.id, {
+        type: exceptionType,
+        description: exceptionDesc || `Delivered ${deliveredTonnes}T deviates from dispatched payload.`,
+        severity: 'high',
+      });
+    } catch (error: unknown) {
+      setToastMessage({
+        text: error instanceof Error ? error.message : 'The exception could not be saved.',
+        type: 'warning',
+      });
+      setTimeout(() => setToastMessage(null), 4500);
+      return;
+    }
 
     setIsFlaggingException(false);
     setToastMessage({

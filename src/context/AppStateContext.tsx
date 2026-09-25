@@ -23,6 +23,8 @@ import {
   LiveTruckLookup,
   lookupLiveTruck,
   registerLiveParticipant,
+  raiseLiveTripException,
+  resolveLiveTripException,
   subscribeToLiveTrips,
 } from '../services/liveOperations';
 
@@ -100,7 +102,7 @@ interface AppStateContextType {
       description: string;
       severity: 'low' | 'medium' | 'high' | 'critical';
     }
-  ) => void;
+  ) => Promise<void>;
 
   resolveTripException: (
     tripId: string,
@@ -109,7 +111,7 @@ interface AppStateContextType {
       reasonCode: string;
       adjustedQuantity?: number;
     }
-  ) => void;
+  ) => Promise<void>;
 
   createPayoutBatch: (tripIds: string[]) => PayoutBatch;
   approvePayoutBatch: (batchId: string) => void;
@@ -644,6 +646,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const { data: sessionData } = await supabase.auth.getSession();
     if (!sessionData.session) {
       setLiveSyncError('Live session expired. Sign out and sign in again.');
+      signOut();
       return;
     }
 
@@ -667,7 +670,13 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     if (!isAuthenticated || !isSupabaseLive || !supabase) return;
-    void refreshLiveData();
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) {
+        signOut();
+        return;
+      }
+      void refreshLiveData();
+    });
     return subscribeToLiveTrips(() => void refreshLiveData());
     // Authentication changes establish a new RLS scope and realtime channel.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -979,12 +988,28 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   // Raise Exception
-  const raiseTripException: AppStateContextType['raiseTripException'] = (
+  const raiseTripException: AppStateContextType['raiseTripException'] = async (
     tripId,
     { type, description, severity }
   ) => {
     const targetTrip = trips.find((t) => t.id === tripId);
     if (!targetTrip) return;
+
+    if (isSupabaseLive && supabase && navigator.onLine) {
+      try {
+        await raiseLiveTripException({
+          tripId,
+          truckId: targetTrip.truck_id,
+          type,
+          description,
+        });
+        await refreshLiveData();
+      } catch (error: unknown) {
+        setLiveSyncError(error instanceof Error ? error.message : 'The exception could not be saved to the live ledger.');
+        throw error;
+      }
+      return;
+    }
 
     const now = new Date().toISOString();
     const newException = {
@@ -1030,10 +1055,26 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   // Resolve Exception (Operations Manager)
-  const resolveTripException: AppStateContextType['resolveTripException'] = (
+  const resolveTripException: AppStateContextType['resolveTripException'] = async (
     tripId,
     { resolutionNotes, reasonCode, adjustedQuantity }
   ) => {
+    const targetTrip = trips.find((trip) => trip.id === tripId);
+    const liveException = targetTrip?.exceptions?.find((exception) => exception.status === 'open');
+    if (isSupabaseLive && supabase && navigator.onLine && liveException) {
+      try {
+        await resolveLiveTripException({
+          exceptionId: liveException.id,
+          reason: `${reasonCode}: ${resolutionNotes}${adjustedQuantity === undefined ? '' : ` (Adjusted quantity: ${adjustedQuantity})`}`,
+        });
+        await refreshLiveData();
+      } catch (error: unknown) {
+        setLiveSyncError(error instanceof Error ? error.message : 'The exception resolution could not be saved to the live ledger.');
+        throw error;
+      }
+      return;
+    }
+
     const now = new Date().toISOString();
 
     setTrips((prev) =>

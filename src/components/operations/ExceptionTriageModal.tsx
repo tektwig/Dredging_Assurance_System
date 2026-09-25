@@ -7,7 +7,7 @@ interface ExceptionTriageModalProps {
   trip: Trip;
   exception: TripException;
   onClose: () => void;
-  onResolve: (tripId: string, params: { resolutionNotes: string; reasonCode: string; adjustedQuantity?: number }) => void;
+  onResolve: (tripId: string, params: { resolutionNotes: string; reasonCode: string; adjustedQuantity?: number }) => void | Promise<void>;
 }
 
 export const ExceptionTriageModal: React.FC<ExceptionTriageModalProps> = ({
@@ -18,18 +18,24 @@ export const ExceptionTriageModal: React.FC<ExceptionTriageModalProps> = ({
 }) => {
   const [reasonCode, setReasonCode] = useState('SCALE_CALIBRATION_ADJUSTMENT');
   const [resolutionNotes, setResolutionNotes] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [adjustedQuantity, setAdjustedQuantity] = useState<number>(
     trip.loading_event?.estimated_tonnes || 30
   );
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onResolve(trip.id, {
-      resolutionNotes,
-      reasonCode,
-      adjustedQuantity,
-    });
-    onClose();
+    setSubmitError(null);
+    try {
+      await onResolve(trip.id, {
+        resolutionNotes,
+        reasonCode,
+        adjustedQuantity,
+      });
+      onClose();
+    } catch (error: unknown) {
+      setSubmitError(error instanceof Error ? error.message : 'The exception resolution could not be saved.');
+    }
   };
 
   return (
@@ -76,6 +82,11 @@ export const ExceptionTriageModal: React.FC<ExceptionTriageModalProps> = ({
         </div>
 
         <div className="card-body">
+          {submitError && (
+            <div className="form-error" role="alert" style={{ marginBottom: '1rem' }}>
+              {submitError}
+            </div>
+          )}
           {/* Discrepancy Evidence Box */}
           <div
             style={{

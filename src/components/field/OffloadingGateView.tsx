@@ -89,15 +89,24 @@ export const OffloadingGateView: React.FC = () => {
     }
   };
 
-  const handleRaiseException = (e: React.FormEvent) => {
+  const handleRaiseException = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTripId) return;
 
-    raiseTripException(selectedTripId, {
-      type: exceptionType,
-      description: exceptionDesc || `Delivered ${quantity}T deviates by ${variancePercent}% from expected ${estimatedTonnes}T.`,
-      severity: 'high',
-    });
+    try {
+      await raiseTripException(selectedTripId, {
+        type: exceptionType,
+        description: exceptionDesc || `Delivered ${quantity}T deviates by ${variancePercent}% from expected ${estimatedTonnes}T.`,
+        severity: 'high',
+      });
+    } catch (error: unknown) {
+      setToastMessage({
+        text: error instanceof Error ? error.message : 'The exception could not be saved.',
+        type: 'warning',
+      });
+      setTimeout(() => setToastMessage(null), 4500);
+      return;
+    }
 
     setIsFlaggingException(false);
     setToastMessage({

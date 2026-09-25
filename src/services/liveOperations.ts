@@ -1,4 +1,4 @@
-import { Driver, Site, Trip, Truck, UserRole } from '../types';
+import { Driver, ExceptionType, Site, Trip, TripException, Truck, UserRole } from '../types';
 import { isSupabaseLive, supabase } from './supabase';
 
 type JsonObject = Record<string, any>;
@@ -10,6 +10,14 @@ export interface LiveSnapshot {
   trips: Trip[];
   assignedSiteId?: string;
 }
+
+const mapExceptionType = (value: string): ExceptionType => {
+  if (value === 'unknown_truck') return 'unlisted_truck';
+  if (value === 'offloading_mismatch') return 'quantity_mismatch';
+  if (value === 'invalid_driver') return 'unregistered_vehicle';
+  if (value === 'dispute') return 'other';
+  return 'other';
+};
 
 export interface LiveTruckLookup {
   found: boolean;
@@ -27,6 +35,13 @@ export interface LiveParticipantRegistration {
 const ensureClient = () => {
   if (!isSupabaseLive || !supabase) throw new Error('Live Supabase service is not configured.');
   return supabase;
+};
+
+const ensureAuthenticatedClient = async () => {
+  const client = ensureClient();
+  const { data } = await client.auth.getSession();
+  if (!data.session) throw new Error('Your live session has expired. Please sign in again.');
+  return client;
 };
 
 const mapSite = (row: JsonObject): Site => ({
@@ -66,7 +81,7 @@ const mapDriver = (row: JsonObject): Driver => ({
   account_number_last4: row.account_number_last4,
 });
 
-function mapTrip(row: JsonObject, sites: Site[], trucks: Truck[], drivers: Driver[]): Trip {
+function mapTrip(row: JsonObject, sites: Site[], trucks: Truck[], drivers: Driver[], exceptionRows: JsonObject[]): Trip {
   const truck = trucks.find((item) => item.id === row.truck_id);
   const driver = drivers.find((item) => item.id === row.driver_id) || (row.driver_name_at_loading
     ? {
@@ -79,6 +94,22 @@ function mapTrip(row: JsonObject, sites: Site[], trucks: Truck[], drivers: Drive
     : undefined);
   const openedAt = row.opened_at || row.loaded_at || row.created_at;
 
+  const exceptions: TripException[] = exceptionRows
+    .filter((exception) => exception.trip_id === row.id)
+    .map((exception) => ({
+      id: exception.id,
+      trip_id: row.id,
+      trip_number: row.trip_number,
+      exception_type: mapExceptionType(exception.exception_type),
+      description: exception.description,
+      severity: exception.blocks_operations ? 'high' : 'medium',
+      status: exception.status === 'resolved' ? 'resolved' : 'open',
+      flagged_by: exception.reported_by || 'Operational officer',
+      flagged_at: exception.created_at,
+      resolution_notes: exception.resolution_reason,
+      resolved_at: exception.resolved_at,
+    }));
+
   return {
     id: row.id,
     trip_number: row.trip_number,
@@ -86,7 +117,7 @@ function mapTrip(row: JsonObject, sites: Site[], trucks: Truck[], drivers: Drive
     driver_id: row.driver_id,
     loading_site_id: row.loading_site_id,
     offloading_site_id: row.offloading_site_id,
-    status: row.status,
+    status: row.status === 'open' && exceptions.some((exception) => exception.status === 'open') ? 'exception' : row.status,
     loaded_at: openedAt,
     closed_at: row.closed_at,
     created_at: row.created_at,
@@ -114,19 +145,21 @@ function mapTrip(row: JsonObject, sites: Site[], trucks: Truck[], drivers: Drive
           closed_by_name: 'Offloading officer',
         }
       : undefined,
+    exceptions,
   };
 }
 
 export async function fetchLiveSnapshot(role: UserRole | null): Promise<LiveSnapshot> {
   const client = ensureClient();
-  const [sitesResult, trucksResult, tripsResult, assignmentsResult] = await Promise.all([
+  const [sitesResult, trucksResult, tripsResult, assignmentsResult, exceptionsResult] = await Promise.all([
     client.from('sites').select('*').eq('is_active', true),
     client.from('trucks').select('*').eq('is_active', true),
     client.from('trips').select('*').order('opened_at', { ascending: false }).limit(500),
     client.from('user_site_assignments').select('site_id').is('ended_at', null).limit(1),
+    client.from('exceptions').select('*').order('created_at', { ascending: false }).limit(500),
   ]);
 
-  const firstError = sitesResult.error || trucksResult.error || tripsResult.error;
+  const firstError = sitesResult.error || trucksResult.error || tripsResult.error || exceptionsResult.error;
   if (firstError) throw firstError;
 
   let driverRows: JsonObject[] = [];
@@ -139,7 +172,7 @@ export async function fetchLiveSnapshot(role: UserRole | null): Promise<LiveSnap
   const sites = (sitesResult.data || []).map(mapSite);
   const trucks = (trucksResult.data || []).map(mapTruck);
   const drivers = driverRows.map(mapDriver);
-  const trips = (tripsResult.data || []).map((row) => mapTrip(row, sites, trucks, drivers));
+  const trips = (tripsResult.data || []).map((row) => mapTrip(row, sites, trucks, drivers, exceptionsResult.data || []));
 
   return {
     sites,
@@ -151,7 +184,7 @@ export async function fetchLiveSnapshot(role: UserRole | null): Promise<LiveSnap
 }
 
 export async function lookupLiveTruck(plate: string): Promise<LiveTruckLookup> {
-  const client = ensureClient();
+  const client = await ensureAuthenticatedClient();
   const { data, error } = await client.rpc('lookup_loading_truck', { p_plate: plate });
   if (error) return { found: false, error: error.message };
   const result = data as JsonObject;
@@ -180,7 +213,7 @@ export async function registerLiveParticipant(params: {
   ownerName?: string;
   ownerPhone?: string;
 }): Promise<LiveParticipantRegistration> {
-  const client = ensureClient();
+  const client = await ensureAuthenticatedClient();
   const { data, error } = await client.rpc('register_loading_participant', {
     p_request_id: crypto.randomUUID(),
     p_plate: params.plate,
@@ -228,10 +261,9 @@ export async function createLiveLoadingTrip(params: {
   plateImageUrl: string;
   confidenceScore: number;
 }): Promise<JsonObject> {
-  const client = ensureClient();
+  const client = await ensureAuthenticatedClient();
   const { data: sessionData } = await client.auth.getSession();
-  const user = sessionData.session?.user;
-  if (!user) throw new Error('Your live session has expired. Please sign in again.');
+  const user = sessionData.session!.user;
 
   const lookup = await lookupLiveTruck(params.plate);
   if (!lookup.found || !lookup.assignmentId) {
@@ -270,7 +302,7 @@ export async function closeLiveTrip(params: {
   offloadingSiteId: string;
   quantityTonnes: number;
 }): Promise<JsonObject> {
-  const client = ensureClient();
+  const client = await ensureAuthenticatedClient();
   const { data, error } = await client.rpc('close_trip', {
     p_trip_id: params.tripId,
     p_offloading_site_id: params.offloadingSiteId,
@@ -280,6 +312,39 @@ export async function closeLiveTrip(params: {
   const result = data as JsonObject;
   if (!result?.ok) throw new Error(result?.code || 'The live trip could not be closed.');
   return result.trip;
+}
+
+export async function raiseLiveTripException(params: {
+  type: string;
+  description: string;
+  tripId: string;
+  truckId?: string;
+}): Promise<string> {
+  const client = await ensureAuthenticatedClient();
+  const type = params.type === 'unlisted_truck'
+    ? 'unknown_truck'
+    : params.type === 'quantity_mismatch' || params.type === 'plate_discrepancy'
+      ? 'offloading_mismatch'
+      : 'dispute';
+  const { data, error } = await client.rpc('raise_trip_exception', {
+    p_type: type,
+    p_description: params.description,
+    p_truck_id: params.truckId || null,
+    p_trip_id: params.tripId,
+    p_entered_plate: null,
+    p_blocks_operations: true,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+export async function resolveLiveTripException(params: { exceptionId: string; reason: string }) {
+  const client = await ensureAuthenticatedClient();
+  const { error } = await client.rpc('resolve_trip_exception', {
+    p_exception_id: params.exceptionId,
+    p_reason: params.reason,
+  });
+  if (error) throw error;
 }
 
 export function subscribeToLiveTrips(onChange: () => void) {
