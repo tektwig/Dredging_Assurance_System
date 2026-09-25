@@ -7,7 +7,6 @@ import {
   Truck as TruckIcon,
   User,
   MapPin,
-  Sparkles,
   CheckCircle,
   AlertCircle,
   X,
@@ -32,8 +31,8 @@ export const LoadingCapture: React.FC = () => {
   );
 
   // Form states
-  const [selectedTruckId, setSelectedTruckId] = useState(trucks[0]?.id || '');
-  const [selectedDriverId, setSelectedDriverId] = useState(drivers[0]?.id || '');
+  const [selectedTruckId, setSelectedTruckId] = useState('');
+  const [selectedDriverId, setSelectedDriverId] = useState('');
   const [notes, setNotes] = useState('');
 
   // OCR & Image state
@@ -42,7 +41,7 @@ export const LoadingCapture: React.FC = () => {
   const [ocrStatus, setOcrStatus] = useState('Ready');
   const [ocrProgress, setOcrProgress] = useState(0);
   const [rawOcrText, setRawOcrText] = useState('');
-  const [candidatePlate, setCandidatePlate] = useState(trucks[0]?.registration_number || '');
+  const [candidatePlate, setCandidatePlate] = useState('');
   const [confidenceScore, setConfidenceScore] = useState(0);
   const [ocrMatchType, setOcrMatchType] = useState<'EXACT_FLEET' | 'FUZZY_FLEET' | 'SYNTACTIC_VALID' | 'FALLBACK' | null>(null);
   const [preprocessedImageUrl, setPreprocessedImageUrl] = useState<string | null>(null);
@@ -66,43 +65,6 @@ export const LoadingCapture: React.FC = () => {
   const isPlateRecognized = trucks.some(
     (t) => t.normalized_registration === candidatePlate.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
   );
-
-  // Helper to generate a realistic Nigerian license plate image onto an in-memory canvas
-  const createSamplePlateImage = (plateNumber: string): string => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 400;
-    canvas.height = 140;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return '';
-
-    // Plate background (Commercial yellow)
-    ctx.fillStyle = '#FED766';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Dark border
-    ctx.strokeStyle = '#0F172A';
-    ctx.lineWidth = 8;
-    ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
-
-    // Header strip
-    ctx.fillStyle = '#065F46';
-    ctx.font = 'bold 16px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('FEDERAL REPUBLIC OF NIGERIA', canvas.width / 2, 28);
-
-    // Main plate number
-    ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 44px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(plateNumber, canvas.width / 2, 85);
-
-    // Footer
-    ctx.fillStyle = '#1E293B';
-    ctx.font = 'bold 14px sans-serif';
-    ctx.fillText('CENTRE OF EXCELLENCE', canvas.width / 2, 120);
-
-    return canvas.toDataURL('image/png');
-  };
 
   // Perform actual OCR recognition on an image source
   const runActualOCR = async (imageSrc: string | File) => {
@@ -197,7 +159,7 @@ export const LoadingCapture: React.FC = () => {
       if (msg.includes('NotAllowedError') || msg.includes('Permission')) {
         setCameraError('Camera permission was denied. Please allow camera access in browser permissions, or use "Upload Photo".');
       } else if (msg.includes('NotFoundError') || msg.includes('DevicesNotFoundError')) {
-        setCameraError('No video camera device detected. Please use "Upload Photo" or "Test Sample Plate".');
+        setCameraError('No video camera device was detected. Please use the photo upload option.');
       } else {
         setCameraError(`Camera error: ${msg}. Please use "Upload Photo" to select an image from your files.`);
       }
@@ -247,16 +209,6 @@ export const LoadingCapture: React.FC = () => {
     stopLiveCamera();
     setCapturedImagePreview(dataUrl);
     runActualOCR(dataUrl);
-  };
-
-  const handleSimulateSampleScan = () => {
-    if (isLiveCameraActive) {
-      stopLiveCamera();
-    }
-    const randomTruck = trucks[Math.floor(Math.random() * trucks.length)];
-    const sampleImg = createSamplePlateImage(randomTruck.registration_number);
-    setCapturedImagePreview(sampleImg);
-    runActualOCR(sampleImg);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -507,7 +459,7 @@ export const LoadingCapture: React.FC = () => {
 
               <h4 style={{ marginBottom: '0.35rem' }}>Gate Camera & Tesseract.js OCR Engine</h4>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', maxWidth: '540px', margin: '0 auto 1.25rem' }}>
-                Capture live plate video from your camera, upload an existing photo, or generate a test plate. The on-device OCR engine will extract and match the license plate automatically.
+                Capture live plate video from your camera or upload an existing photo. The on-device OCR engine will extract and match the license plate automatically.
               </p>
 
               {capturedImagePreview && (
@@ -535,18 +487,6 @@ export const LoadingCapture: React.FC = () => {
                 >
                   <Camera size={16} />
                   {isCameraStarting ? 'Opening Camera...' : 'Take Live Photo'}
-                </button>
-
-                {/* Button 3: Test Sample Plate */}
-                <button
-                  type="button"
-                  onClick={handleSimulateSampleScan}
-                  className="btn btn-secondary"
-                  id="btn-test-sample-plate"
-                  title="Generates a Nigerian plate and feeds it to Tesseract.js"
-                >
-                  <Sparkles size={16} />
-                  Test Sample Plate
                 </button>
               </div>
             </div>

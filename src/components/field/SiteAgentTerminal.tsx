@@ -335,12 +335,41 @@ export const SiteAgentTerminal: React.FC = () => {
 
   const retakePlatePhoto = () => {
     capturePurposeRef.current = movementType === 'delivery' ? 'delivery' : 'general';
+    setConfirmedPlate('');
+    setConfidenceScore(0);
+    setSelectedTruckId('');
+    setSelectedDriverId('');
+    setPhotoUrl('');
     setHasScanned(false);
     setIsScanning(false);
     setOcrProgress(0);
     setOcrStatus('Ready for capture');
     setIsUnregisteredModalOpen(false);
     openDeviceCamera();
+  };
+
+  const startPickupWebsiteCamera = () => {
+    setConfirmedPlate('');
+    setConfidenceScore(0);
+    setSelectedTruckId('');
+    setSelectedDriverId('');
+    setPhotoUrl('');
+    setHasScanned(false);
+    setPickupSaved(false);
+    setIsUnregisteredModalOpen(false);
+    void startLiveCamera('general', 'environment');
+  };
+
+  const openPickupDeviceCamera = () => {
+    setConfirmedPlate('');
+    setConfidenceScore(0);
+    setSelectedTruckId('');
+    setSelectedDriverId('');
+    setPhotoUrl('');
+    setHasScanned(false);
+    setPickupSaved(false);
+    setIsUnregisteredModalOpen(false);
+    openDeviceCamera('general');
   };
 
   const captureDeliveryPlate = () => {
@@ -424,8 +453,7 @@ export const SiteAgentTerminal: React.FC = () => {
         const driver = liveLookup.driver
           || matchedOpenTrip?.driver
           || drivers.find((item) => item.id === openTripDriverId)
-          || drivers.find((item) => item.assigned_truck_id === matched.id)
-          || drivers[0];
+          || drivers.find((item) => item.assigned_truck_id === matched.id);
         if (driver) setSelectedDriverId(driver.id);
         setIsUnregisteredModalOpen(false);
       } else if (!matched && !isDeliveryScan) {
@@ -914,7 +942,7 @@ export const SiteAgentTerminal: React.FC = () => {
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <button
                 type="button"
-                onClick={() => void startLiveCamera()}
+                onClick={startPickupWebsiteCamera}
                 className="btn btn-primary"
                 disabled={isCameraStarting || isScanning}
                 style={{ minHeight: '38px', fontSize: '0.8rem', fontWeight: 700 }}
@@ -925,7 +953,7 @@ export const SiteAgentTerminal: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => openDeviceCamera()}
+                onClick={openPickupDeviceCamera}
                 className="btn btn-secondary"
                 disabled={isCameraStarting || isScanning}
                 style={{ minHeight: '38px', fontSize: '0.8rem', fontWeight: 700 }}
@@ -1117,6 +1145,8 @@ export const SiteAgentTerminal: React.FC = () => {
             </div>
           )}
 
+          {hasScanned && confirmedPlate && (
+            <>
           {/* Read-Only Verified Plate Display (Anti-Fraud Lock) */}
           <div
             style={{
@@ -1620,6 +1650,8 @@ export const SiteAgentTerminal: React.FC = () => {
                 )}
               </div>
             </div>
+          )}
+            </>
           )}
         </div>
         )}
