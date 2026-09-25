@@ -28,7 +28,7 @@ import {
   Building,
 } from 'lucide-react';
 import { SiteAgentModeSheet } from './SiteAgentModeSheet';
-import { TripClosureInvoiceModal, downloadTripClosureInvoice } from '../operations/TripClosureInvoiceModal';
+import { TripClosureInvoiceModal, downloadTripClosureInvoice, viewTripClosureInvoice } from '../operations/TripClosureInvoiceModal';
 import { QuantityUnit, ExceptionType, Trip } from '../../types';
 import { recognizeLicensePlate, OCRProgress } from '../../services/ocrService';
 
@@ -2422,12 +2422,11 @@ export const SiteAgentTerminal: React.FC = () => {
                       style={{ minHeight: '30px', padding: '0.25rem 0.55rem', fontSize: '0.7rem' }}
                       onClick={(event) => {
                         event.stopPropagation();
-                        downloadTripClosureInvoice(closureInvoice);
                         setSelectedClosureInvoiceId(trip.id);
                       }}
-                      title="Download and review this closure invoice"
+                      title="View trip closure invoice"
                     >
-                      <Download size={12} /> Download Invoice
+                      <FileText size={12} /> View Invoice
                     </button>
                   )}
                 </div>
