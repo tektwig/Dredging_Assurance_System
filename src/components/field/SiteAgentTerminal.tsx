@@ -227,6 +227,10 @@ export const SiteAgentTerminal: React.FC = () => {
   const matchingOpenTrip = openTrips.find((trip) => trip.id === selectedDeliveryTripId) || null;
 
   const normalizePlate = (plate: string) => plate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  const hasCompletedValidPlateScan =
+    hasScanned &&
+    !isScanning &&
+    /^[A-Z]{3}\d{2,4}[A-Z]{2}$/.test(normalizePlate(confirmedPlate));
   const expectedDeliveryPlate = matchingOpenTrip?.truck?.registration_number || '';
   const deliveryPlateMatchesTrip = !!deliveryPlateEvidence && !!matchingOpenTrip &&
     normalizePlate(deliveryPlateEvidence.plate) === normalizePlate(expectedDeliveryPlate);
@@ -438,6 +442,19 @@ export const SiteAgentTerminal: React.FC = () => {
       capturePurposeRef.current = 'general';
 
       const normalized = result.candidatePlate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      const isValidPlateNumber = /^[A-Z]{3}\d{2,4}[A-Z]{2}$/.test(normalized);
+      if (!isDeliveryScan && !isValidPlateNumber) {
+        setSelectedTruckId('');
+        setSelectedDriverId('');
+        setIsUnregisteredModalOpen(false);
+        setToastMessage({
+          text: 'No valid plate number was detected. Retake the photo with the full plate clearly visible.',
+          type: 'warning',
+        });
+        setTimeout(() => setToastMessage(null), 5000);
+        return;
+      }
+
       const liveLookup = await lookupTruckByPlate(result.candidatePlate);
       const matched = liveLookup.truck || result.matchedTruck || trucks.find((t) => t.normalized_registration === normalized);
       const matchedOpenTrip = matched
@@ -1145,7 +1162,7 @@ export const SiteAgentTerminal: React.FC = () => {
             </div>
           )}
 
-          {hasScanned && confirmedPlate && (
+          {hasCompletedValidPlateScan && (
             <>
           {/* Read-Only Verified Plate Display (Anti-Fraud Lock) */}
           <div
