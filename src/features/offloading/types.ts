@@ -49,6 +49,7 @@ export type ClosureSuccess = {
     closedAt: string; closedBy: string };
   capture: { confirmedPlate: string; normalizedConfirmedPlate: string;
     method: 'MANUAL' | 'OCR' | 'OCR_CORRECTED'; imageRecorded: boolean };
+  waybill: { invoiceNumber: string };
   notificationQueued: boolean;
 };
 export type ClosureResult = ClosureSuccess | { kind: 'business_failure'; code: ClosureFailureCode; tripNumber?: string };

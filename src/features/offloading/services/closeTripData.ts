@@ -65,8 +65,9 @@ export function parseCloseTripResponse(value: unknown, request: ClosureRequest):
   }
   const trip = record(value.trip) ? value.trip : null;
   const capture = record(value.capture) ? value.capture : null;
+  const waybill = record(value.waybill) ? value.waybill : null;
   const review = request.review;
-  if (value.ok !== true || value.request_id !== request.requestId || !trip || !capture
+  if (value.ok !== true || value.request_id !== request.requestId || !trip || !capture || !waybill
     || trip.id !== review.trip.id || !nonempty(trip.trip_number) || trip.status !== 'closed'
     || trip.truck_id !== review.trip.truckId || trip.driver_id !== review.trip.driverId
     || trip.offloading_site_id !== review.assignment.siteId
@@ -76,6 +77,8 @@ export function parseCloseTripResponse(value: unknown, request: ClosureRequest):
     || capture.normalized_confirmed_plate !== platePreview(review.capture.confirmedPlate)
     || capture.capture_method !== review.capture.method
     || capture.image_recorded !== !!review.capture.imagePath
+    || typeof waybill.invoice_number !== 'string'
+    || !/^INV-[0-9]{4}-[0-9]{6,}$/.test(waybill.invoice_number)
     || typeof value.notification_queued !== 'boolean') throw new ClosureOutcomeUnknownError();
   return { kind: 'success', requestId: value.request_id as string,
     trip: { id: trip.id as string, tripNumber: trip.trip_number as string, status: 'closed',
@@ -84,6 +87,7 @@ export function parseCloseTripResponse(value: unknown, request: ClosureRequest):
       closedAt: trip.closed_at, closedBy: trip.closed_by },
     capture: { confirmedPlate: capture.confirmed_plate, normalizedConfirmedPlate: capture.normalized_confirmed_plate,
       method: capture.capture_method as 'MANUAL' | 'OCR' | 'OCR_CORRECTED', imageRecorded: capture.image_recorded },
+    waybill: { invoiceNumber: waybill.invoice_number },
     notificationQueued: value.notification_queued };
 }
 

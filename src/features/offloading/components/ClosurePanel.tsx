@@ -24,6 +24,7 @@ export function ClosurePanel({ lookup, state, quantity, onQuantity, onReview, on
   if (state.status === 'success') return <div className="loading-trip-success" role="status">
     <p className="eyebrow">Trip closed</p><h3>{state.result.trip.tripNumber}</h3>
     <dl className="loading-details">
+      <div><dt>Waybill</dt><dd>{state.result.waybill.invoiceNumber}</dd></div>
       <div><dt>Confirmed plate</dt><dd>{state.result.capture.confirmedPlate}</dd></div>
       <div><dt>Tonnage</dt><dd>{state.result.trip.quantityTonnes.toFixed(2)} tonnes</dd></div>
       <div><dt>Status</dt><dd>Closed</dd></div>

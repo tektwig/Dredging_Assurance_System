@@ -72,10 +72,14 @@ const serverSuccess = { ok: true, request_id: 'request-a', trip: {
   driver_id: 'driver-a', offloading_site_id: 'site-a', quantity_tonnes: 12.5,
   closed_at: '2026-09-25T09:00:00Z', closed_by: 'actor-a',
 }, capture: { confirmed_plate: 'ABC-123', normalized_confirmed_plate: 'ABC123',
-  capture_method: 'OCR', image_recorded: true }, notification_queued: true };
+  capture_method: 'OCR', image_recorded: true },
+waybill: { invoice_number: 'INV-2026-000007' }, notification_queued: true };
 const service = load('src/features/offloading/services/closeTripData.ts');
 rpcResult = serverSuccess;
-assert.equal((await service.closeOffloadingTrip(request)).kind, 'success');
+const parsedSuccess = await service.closeOffloadingTrip(request);
+assert.equal(parsedSuccess.kind, 'success');
+assert.deepEqual(parsedSuccess.waybill, { invoiceNumber: 'INV-2026-000007' });
+assert.equal(JSON.stringify(parsedSuccess).includes('account_number'), false);
 assert.equal(uploads.length, 1);
 assert.deepEqual(uploads[0].options, { contentType: 'image/jpeg', upsert: false });
 assert.deepEqual(rpcCalls[0], { name: 'close_trip_v2', args: {
@@ -115,6 +119,11 @@ rpcResult = { ok: false, code: 'SITE_ASSIGNMENT_CHANGED', details: {} };
 assert.equal((await service.closeOffloadingTrip(manualRequest)).code, 'SITE_ASSIGNMENT_CHANGED');
 rpcResult = { ok: true, request_id: 'manual-request', trip: { id: 'bad-trip' } };
 await assert.rejects(service.closeOffloadingTrip(manualRequest), service.ClosureOutcomeUnknownError);
+rpcResult = { ...serverSuccess, request_id: 'manual-request', waybill: undefined,
+  capture: { ...serverSuccess.capture, capture_method: 'MANUAL', image_recorded: false } };
+await assert.rejects(service.closeOffloadingTrip(manualRequest), service.ClosureOutcomeUnknownError);
+rpcResult = { ...rpcResult, waybill: { invoice_number: 'invalid-reference' } };
+await assert.rejects(service.closeOffloadingTrip(manualRequest), service.ClosureOutcomeUnknownError);
 rpcError = { code: '42501', message: 'private database detail' };
 await assert.rejects(service.closeOffloadingTrip(manualRequest));
 rpcError = null;
@@ -152,7 +161,8 @@ finish.resolve({ kind: 'success', requestId: frozen.requestId,
     driverId: 'driver-a', offloadingSiteId: 'site-a', quantityTonnes: 12.5,
     closedAt: '2026-09-25T09:00:00Z', closedBy: 'actor-a' },
   capture: { confirmedPlate: 'ABC-123', normalizedConfirmedPlate: 'ABC123',
-    method: 'MANUAL', imageRecorded: false }, notificationQueued: true });
+    method: 'MANUAL', imageRecorded: false },
+  waybill: { invoiceNumber: 'INV-2026-000007' }, notificationQueued: true });
 await retry;
 assert.equal(state.status, 'success');
 assert.equal(controller.reset(), true);
@@ -189,11 +199,17 @@ const reviewHtml = panel({ state: { status: 'review', review: manualReview } });
 assert(reviewHtml.includes('Confirm &amp; Close Trip'));
 assert(reviewHtml.includes('Offloading Site') && reviewHtml.includes('John Driver'));
 assert(panel({ state: { status: 'ambiguous', review: manualReview } }).includes('Retry Same Request'));
-assert(panel({ state: { status: 'success', result: {
+const successHtml = panel({ state: { status: 'success', result: {
   kind: 'success', requestId: 'x', trip: { ...serverSuccess.trip, tripNumber: 'TRP-0000000006',
     quantityTonnes: 12.5, closedAt: '2026-09-25T09:00:00Z' },
-  capture: { confirmedPlate: 'ABC-123' }, notificationQueued: true,
-} } }).includes('Notification queued successfully.'));
+  capture: { confirmedPlate: 'ABC-123' }, waybill: { invoiceNumber: 'INV-2026-000007' },
+  notificationQueued: true,
+} } });
+assert(successHtml.includes('Notification queued successfully.'));
+assert(successHtml.includes('<dt>Waybill</dt><dd>INV-2026-000007</dd>'));
+assert(successHtml.includes('TRP-0000000006') && successHtml.includes('ABC-123')
+  && successHtml.includes('12.50 tonnes') && successHtml.includes('Closed'));
+assert(!successHtml.includes('account_number') && !successHtml.includes('bank_name'));
 assert(panel({ state: { status: 'business_failure', review: manualReview,
   code: 'TRIP_NOT_OPEN', tripNumber: 'TRP-0000000006' } }).includes('Contact Operations'));
 console.log('PASS tonnage, explicit review, frozen retry, evidence upload, closure response and reset');
