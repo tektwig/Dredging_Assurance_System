@@ -2,13 +2,36 @@ import type { ReactNode } from 'react';
 import { operationalDateLabel, platePreview } from '../../loading/utils/operationalDate';
 import type { OffloadingLookupSnapshot } from '../utils/offloadingLookupController';
 import type { ClosureState } from '../utils/closureController';
+import type { OffloadingStatisticsState } from '../types';
 
 type Props = { officerName: string; plate: string; lookup: OffloadingLookupSnapshot;
   closure: ClosureState; closurePanel: ReactNode; capturePanel: ReactNode;
+  statistics: OffloadingStatisticsState; now: Date; onRetryStatistics: () => void;
   onPlateChange: (plate: string) => void; onLookup: () => void; onReset: () => void };
 
+export function OffloadingStatistics({ state, retry }: { state: OffloadingStatisticsState; retry: () => void }) {
+  if (state.status === 'loading') return <p className="loading-note" role="status">Loading today's figures…</p>;
+  if (state.status === 'error') return <div className="loading-note" role="status">
+    <p>Today's figures are unavailable. Trip lookup remains available. Try again shortly.</p>
+    <button className="button secondary" type="button" onClick={retry}>Retry figures</button>
+  </div>;
+  const cards = [
+    ['Trips Closed Today', state.statistics.tripsClosedToday.toLocaleString('en-NG')],
+    ['Open Trips', state.statistics.openTrips.toLocaleString('en-NG')],
+    ['Tonnage Processed Today', state.statistics.tonnageProcessedToday.toLocaleString('en-NG', {
+      minimumFractionDigits: 2, maximumFractionDigits: 2,
+    })],
+    ['Trucks Processed Today', state.statistics.trucksProcessedToday.toLocaleString('en-NG')],
+  ] as const;
+  return <div className="loading-stat-grid" aria-label="Offloading statistics">
+    {cards.map(([label, value]) => <div className="loading-stat" key={label}>
+      <span>{label}</span><strong>{value}</strong>
+    </div>)}
+  </div>;
+}
+
 export function OffloadingPortalView({ officerName, plate, lookup, capturePanel,
-  closure, closurePanel, onPlateChange, onLookup, onReset }: Props) {
+  closure, closurePanel, statistics, now, onRetryStatistics, onPlateChange, onLookup, onReset }: Props) {
   const state = lookup.state;
   const locked = closure.status !== 'idle';
   const showCapture = closure.status === 'idle';
@@ -21,7 +44,7 @@ export function OffloadingPortalView({ officerName, plate, lookup, capturePanel,
           <strong>{state.status === 'found' ? state.assignment.siteName : 'Will be verified when you find a trip'}</strong></p>
       </div>
       <div className="loading-date"><span>Operational date · Africa/Lagos</span>
-        <strong>{operationalDateLabel()}</strong></div>
+        <strong>{operationalDateLabel(now)}</strong></div>
     </header>
     <section className="loading-work-card" aria-label="Find open trip">
       <div className="loading-section-heading"><h2>Find Open Trip</h2>
@@ -77,6 +100,11 @@ export function OffloadingPortalView({ officerName, plate, lookup, capturePanel,
         && closure.status !== 'submitting' && closure.status !== 'ambiguous'
         && <button className="button secondary offloading-next" type="button"
         onClick={onReset}>Scan Next Truck</button>}
+    </section>
+    <section className="loading-stat-section" aria-label="Today's Offloading activity">
+      <div className="loading-section-heading"><h2>Today’s activity</h2>
+        <p>Figures reflect your closures. Open Trips counts all currently open trips available for lookup.</p></div>
+      <OffloadingStatistics state={statistics} retry={onRetryStatistics} />
     </section>
   </div>;
 }

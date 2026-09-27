@@ -1,6 +1,17 @@
 import type { PlateCaptureEvidence } from '../loading/types';
 
 export type OffloadingAssignment = { assignmentId: string; siteId: string; siteName: string };
+export type OffloadingStatistics = {
+  tripsClosedToday: number;
+  openTrips: number;
+  tonnageProcessedToday: number;
+  trucksProcessedToday: number;
+};
+export type OffloadingStatisticsState =
+  | { status: 'loading' }
+  | { status: 'ready'; statistics: OffloadingStatistics }
+  | { status: 'error' };
+
 export type OpenTripSummary = {
   id: string; tripNumber: string; truckId: string; registrationNumber: string;
   normalizedRegistration: string; driverId: string; driverName: string;

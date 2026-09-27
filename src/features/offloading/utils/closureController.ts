@@ -30,7 +30,8 @@ export class ClosureController {
   constructor(private readonly close: (request: ClosureRequest) => Promise<ClosureResult>,
     private readonly notify: (state: ClosureState) => void,
     private readonly onAuthorizationLost: () => void,
-    private readonly newUuid: () => string = () => crypto.randomUUID()) {}
+    private readonly newUuid: () => string = () => crypto.randomUUID(),
+    private readonly onSuccess: () => void = () => {}) {}
 
   get current() { return this.state; }
   get frozenRequest() { return this.request; }
@@ -76,6 +77,7 @@ export class ClosureController {
       if (this.disposed || revision !== this.revision) return;
       if (result.kind === 'success') {
         this.request = null;
+        this.onSuccess();
         this.publish({ status: 'success', result });
       } else if (['SITE_REVIEW_REQUIRED', 'SITE_ASSIGNMENT_REQUIRED', 'INVALID_SITE_ASSIGNMENT',
         'INACTIVE_SITE', 'SITE_ASSIGNMENT_CHANGED'].includes(result.code)) {

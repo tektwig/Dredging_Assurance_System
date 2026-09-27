@@ -10,6 +10,9 @@ import { closeOffloadingTrip } from './services/closeTripData';
 import { ClosureController, type ClosureState } from './utils/closureController';
 import { parseTonnage } from './utils/tonnage';
 import { ClosurePanel } from './components/ClosurePanel';
+import { loadOffloadingStatistics } from './services/offloadingStatistics';
+import type { OffloadingStatisticsState } from './types';
+import { operationalDateKey } from '../loading/utils/operationalDate';
 import '../loading/loading.css';
 import './offloading.css';
 
@@ -25,13 +28,17 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
   const [plate, setPlate] = useState('');
   const [quantity, setQuantity] = useState('');
   const [closure, setClosure] = useState<ClosureState>({ status: 'idle' });
+  const [statistics, setStatistics] = useState<OffloadingStatisticsState>({ status: 'loading' });
+  const [statisticsRevision, setStatisticsRevision] = useState(0);
+  const [now, setNow] = useState(() => new Date());
   const [capture, setCapture] = useState<PlateCaptureState>({ status: 'idle' });
   const [lookup, setLookup] = useState<OffloadingLookupSnapshot>({ state: { status: 'idle' }, pending: false });
   const [resetEpoch, setResetEpoch] = useState(0);
   const plateRef = useRef(plate);
   plateRef.current = plate;
   const lookupController = useMemo(() => new OffloadingLookupController(lookupOffloadingOpenTrip, setLookup), []);
-  const closureController = useMemo(() => new ClosureController(closeOffloadingTrip, setClosure, retry), [retry]);
+  const closureController = useMemo(() => new ClosureController(closeOffloadingTrip, setClosure, retry,
+    undefined, () => setStatisticsRevision(value => value + 1)), [retry]);
   const ocrService = useMemo(() => createPlateOcrService(), []);
   const captureController = useMemo(() => new PlateCaptureController(actorId,
     (file, report) => ocrService.process(file, report), setCapture, candidate => {
@@ -47,6 +54,7 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
 
   const found = lookup.state.status === 'found' ? lookup.state : null;
   const parsedQuantity = parseTonnage(quantity);
+  const dateKey = operationalDateKey(now);
   const review = found && parsedQuantity !== null ? {
     assignment: found.assignment, trip: found.trip, capture: found.capture, quantityTonnes: parsedQuantity,
   } : null;
@@ -54,6 +62,20 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
     review.assignment.assignmentId, review.quantityTonnes, review.capture.method,
     review.capture.capturedAt, review.capture.imagePath]) : null;
   useEffect(() => { closureController.setInput(review); }, [closureController, reviewKey]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let current = true;
+    setStatistics({ status: 'loading' });
+    void loadOffloadingStatistics().then(value => {
+      if (current) setStatistics({ status: 'ready', statistics: value });
+    }).catch(() => { if (current) setStatistics({ status: 'error' }); });
+    return () => { current = false; };
+  }, [actorId, dateKey, statisticsRevision]);
 
   useEffect(() => {
     if (closure.status !== 'site_changed') return;
@@ -105,7 +127,8 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
   }
   const evidence = capture.status === 'detected' ? capture.evidence : null;
   return <OffloadingPortalView officerName={officerName} plate={plate} lookup={lookup}
-    closure={closure}
+    closure={closure} statistics={statistics} now={now}
+    onRetryStatistics={() => setStatisticsRevision(value => value + 1)}
     closurePanel={<ClosurePanel lookup={found} state={closure} quantity={quantity}
       onQuantity={value => { if (closureController.current.status === 'idle') setQuantity(value); }}
       onReview={() => { closureController.setInput(review); closureController.beginReview(); }}
