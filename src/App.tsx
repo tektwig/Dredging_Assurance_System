@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthProvider';
 import { StatusPage } from './components/StatusPage';
 import { LoadingPortal } from './features/loading/LoadingPortal';
@@ -9,7 +9,9 @@ import { AccessDeniedPage } from './pages/AccessDeniedPage';
 import { LoginPage } from './pages/LoginPage';
 import { PortalPage } from './pages/PortalPage';
 import { AccountGate, HomeRedirect, LoginOnly, RequireRole, RequireSession } from './routing/RouteGuards';
-import { PORTALS, type PortalRole } from './routing/roleRoutes';
+import { ADMIN_NAVIGATION, OPERATIONS_NAVIGATION, PORTALS, type PortalRole } from './routing/roleRoutes';
+
+const FIELD_PORTALS = ['loading_officer', 'offloading_officer'] as const satisfies readonly PortalRole[];
 
 export default function App() {
   if (configurationError) return <StatusPage title="Application configuration required">
@@ -21,15 +23,38 @@ export default function App() {
       <Route element={<RequireSession />}>
         <Route path="/access-denied" element={<AccessDeniedPage />} />
       </Route>
-      {(Object.keys(PORTALS) as PortalRole[]).map(role =>
+      {FIELD_PORTALS.map(role =>
         <Route key={role} element={<RequireRole role={role} />}>
           <Route element={<AuthenticatedLayout />}>
             <Route path={PORTALS[role].path} element={role === 'loading_officer'
-              ? <LoadingPortal /> : role === 'offloading_officer'
-                ? <OffloadingPortal /> : <PortalPage role={role} />} />
+              ? <LoadingPortal /> : <OffloadingPortal />} />
           </Route>
         </Route>
       )}
+      <Route element={<RequireRole role="operations_manager" />}>
+        <Route path={PORTALS.operations_manager.path} element={<AuthenticatedLayout navigation={{
+          basePath: PORTALS.operations_manager.path,
+          label: 'Operations',
+          items: OPERATIONS_NAVIGATION,
+        }} />}>
+          <Route index element={<PortalPage role="operations_manager" title={OPERATIONS_NAVIGATION[0].title} />} />
+          {OPERATIONS_NAVIGATION.slice(1).map(item => <Route key={item.route} path={item.route}
+            element={<PortalPage role="operations_manager" title={item.title} />} />)}
+          <Route path="*" element={<Navigate to={PORTALS.operations_manager.path} replace />} />
+        </Route>
+      </Route>
+      <Route element={<RequireRole role="system_administrator" />}>
+        <Route path={PORTALS.system_administrator.path} element={<AuthenticatedLayout navigation={{
+          basePath: PORTALS.system_administrator.path,
+          label: 'Administration',
+          items: ADMIN_NAVIGATION,
+        }} />}>
+          <Route index element={<PortalPage role="system_administrator" title={ADMIN_NAVIGATION[0].title} />} />
+          {ADMIN_NAVIGATION.slice(1).map(item => <Route key={item.route} path={item.route}
+            element={<PortalPage role="system_administrator" title={item.title} />} />)}
+          <Route path="*" element={<Navigate to={PORTALS.system_administrator.path} replace />} />
+        </Route>
+      </Route>
       <Route path="*" element={<HomeRedirect />} />
     </Route>
   </Routes></AuthProvider></BrowserRouter>;

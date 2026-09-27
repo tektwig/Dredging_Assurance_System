@@ -1,9 +1,12 @@
 import { Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { SignOutButton } from '../components/SignOutButton';
-import { ROLE_LABELS } from '../routing/roleRoutes';
+import { PortalNavigation } from '../components/PortalNavigation';
+import { ROLE_LABELS, type PortalNavigationItem } from '../routing/roleRoutes';
 
-export function AuthenticatedLayout() {
+type Navigation = { basePath: string; label: string; items: readonly PortalNavigationItem[] };
+
+export function AuthenticatedLayout({ navigation }: { navigation?: Navigation }) {
   const { account } = useAuth();
   if (account.status !== 'active') return null;
   return <div className="app-shell">
@@ -15,6 +18,7 @@ export function AuthenticatedLayout() {
         <SignOutButton />
       </div>
     </header>
+    {navigation && <PortalNavigation {...navigation} />}
     <main className="portal-content"><Outlet /></main>
   </div>;
 }
