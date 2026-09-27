@@ -175,6 +175,7 @@ Configure these **server-side secrets** at deployment:
 - `TRIP_NOTIFICATION_FROM`: verified sender address.
 - `TRIP_NOTIFICATION_FINANCE_EMAILS`: comma-separated trusted finance/admin recipients.
 - `TRIP_NOTIFICATION_WORKER_SECRET`: independent random secret, at least 32 characters.
+- `WAYBILL_PDF_WORKER_SECRET`: separate random secret, at least 32 characters, for the PDF worker scheduler.
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`: supplied by hosted Supabase.
 
 ### Environment files and local setup
@@ -183,7 +184,7 @@ Configure these **server-side secrets** at deployment:
 | --- | --- | --- |
 | `.env.example` | Browser-only variable names and fake examples | Safe to track |
 | `.env.local` | Developer's actual `VITE_SUPABASE_URL` and public `VITE_SUPABASE_ANON_KEY` | Ignored |
-| `supabase/functions/.env.example` | Four custom worker variable names plus commented runtime-injected variables | Safe to track; no credentials |
+| `supabase/functions/.env.example` | Five custom worker variable names plus commented runtime-injected variables | Safe to track; no credentials |
 | `supabase/functions/.env` | Developer's four actual custom worker settings | Ignored |
 
 Never overwrite another developer's environment file. The local files were
@@ -238,6 +239,25 @@ Function. No remote scheduler/webhook has been provisioned in this milestone.
 Missing provider/configuration leaves notifications queued without affecting
 trip closure. A development-only blank environment template is supplied; no
 existing environment files are replaced.
+
+### Waybill PDF processing
+
+Closing a trip creates the immutable Waybill and a separate pending
+`trip_closure_invoice_documents` row in the same database transaction. The row
+stores only document/job state and the deterministic `<year>/<invoice_number>.pdf`
+path. `process-waybill-pdfs` claims leased jobs, reads the invoice through a
+service-role-only lease-checked RPC, renders it with `pdf-lib`, uploads with
+upsert to the private `waybills` bucket and marks the document ready. PDF and
+Storage calls occur after closure commits; failures use sanitized error codes,
+bounded retries and do not modify the trip or invoice.
+
+Configure `WAYBILL_PDF_WORKER_SECRET` as an independent server-side secret of at
+least 32 characters. After separately authorized deployment, a trusted scheduler
+must POST to `/functions/v1/process-waybill-pdfs` every minute with that secret
+in `x-worker-secret`. No hosted scheduler has been provisioned. The service-role
+key remains runtime-only and is never configured in the frontend. Storage reads
+are limited to Operations Manager, Finance Officer, Audit Reviewer and System
+Administrator; field officers and anonymous users are denied.
 
 Retries use five-minute leases, up to eight attempts, bounded exponential backoff,
 and a stable provider idempotency key per outbox row. Driver and finance requests

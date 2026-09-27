@@ -8,6 +8,9 @@ project_id = "Dredging_Assurance_System"
 [functions.process-trip-notifications]
 verify_jwt = false
 
+[functions.process-waybill-pdfs]
+verify_jwt = false
+
 [api]
 enabled = true
 # Port to use for the API URL.
