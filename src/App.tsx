@@ -3,6 +3,7 @@ import { AuthProvider } from './auth/AuthProvider';
 import { StatusPage } from './components/StatusPage';
 import { LoadingPortal } from './features/loading/LoadingPortal';
 import { OffloadingPortal } from './features/offloading/OffloadingPortal';
+import { OperationsDashboard } from './features/operations/dashboard/OperationsDashboard';
 import { AuthenticatedLayout } from './layouts/AuthenticatedLayout';
 import { configurationError } from './lib/supabase';
 import { AccessDeniedPage } from './pages/AccessDeniedPage';
@@ -37,7 +38,7 @@ export default function App() {
           label: 'Operations',
           items: OPERATIONS_NAVIGATION,
         }} />}>
-          <Route index element={<PortalPage role="operations_manager" title={OPERATIONS_NAVIGATION[0].title} />} />
+          <Route index element={<OperationsDashboard />} />
           {OPERATIONS_NAVIGATION.slice(1).map(item => <Route key={item.route} path={item.route}
             element={<PortalPage role="operations_manager" title={item.title} />} />)}
           <Route path="*" element={<Navigate to={PORTALS.operations_manager.path} replace />} />

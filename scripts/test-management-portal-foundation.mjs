@@ -26,9 +26,9 @@ function load(path) {
     if (overrides.has(name)) return overrides.get(name);
     if (!name.startsWith('.')) return require(name);
     const base = resolve(dirname(full), name);
-    const target = [base, `${base}.ts`, `${base}.tsx`].find(existsSync);
+    const target = [base, `${base}.ts`, `${base}.tsx`, `${base}.css`].find(existsSync);
     assert(target, `Local import must resolve: ${name}`);
-    return load(target);
+    return target.endsWith('.css') ? {} : load(target);
   };
   new Function('require', 'module', 'exports', output)(localRequire, module, module.exports);
   return module.exports;
@@ -71,7 +71,10 @@ assert.deepEqual(ADMIN_NAVIGATION.map(item => item.route ? `/admin/${item.route}
 
 for (const path of operationsPaths) {
   const output = renderApp(path, 'operations_manager');
-  assert(output.includes('This module is a Phase 1 placeholder'));
+  if (path === '/operations') {
+    assert(output.includes('Loading results'));
+    assert(!output.includes('This module is a Phase 1 placeholder'));
+  } else assert(output.includes('This module is a Phase 1 placeholder'));
   assert(output.includes('Operations navigation'));
   assert(!renderApp(path, 'system_administrator').includes('This module is a Phase 1 placeholder'));
 }
@@ -107,7 +110,7 @@ const activeAdmin = renderApp('/admin/audit', 'system_administrator');
 assert(activeAdmin.includes('href="/admin/audit"'));
 assert(activeAdmin.includes('aria-current="page"'));
 assert(activeAdmin.includes('Audit Logs'));
-assert(renderApp('/operations', 'operations_manager').includes('<h1>Operations Dashboard</h1>'));
+assert(renderApp('/operations', 'operations_manager').includes('Loading results'));
 assert(renderApp('/admin', 'system_administrator').includes('<h1>Administration Dashboard</h1>'));
 console.log('PASS role-specific navigation, active route indication and module placeholders');
 
