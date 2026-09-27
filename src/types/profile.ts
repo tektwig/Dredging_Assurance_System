@@ -50,6 +50,13 @@ export interface Database {
     };
     Views: { [_ in never]: never };
     Functions: {
+      get_operations_trips: { Args: {
+        p_page?: number; p_page_size?: number; p_search?: string | null; p_status?: 'open' | 'closed' | 'cancelled' | null;
+        p_date_from?: string | null; p_date_to?: string | null; p_truck_filter?: string | null;
+        p_driver_filter?: string | null; p_loading_site_filter?: string | null; p_offloading_site_filter?: string | null;
+      }; Returns: unknown };
+      get_operations_trip_detail: { Args: { p_trip_id: string }; Returns: unknown };
+      cancel_trip: { Args: { p_trip_id: string; p_reason: string }; Returns: undefined };
       lookup_loading_truck: { Args: { p_plate: string }; Returns: unknown };
       get_loading_statistics: { Args: Record<string, never>; Returns: unknown };
       search_loading_drivers: { Args: { p_query: string; p_limit?: number }; Returns: unknown };
