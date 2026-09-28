@@ -266,6 +266,7 @@ p {
 .badge {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.375rem;
   padding: 0.25rem 0.625rem;
   font-size: 0.75rem;
@@ -274,6 +275,8 @@ p {
   border: 1px solid transparent;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .badge-open {
@@ -1476,4 +1479,135 @@ p {
     width: 100%;
     justify-content: center;
   }
+}
+
+/* ==========================================================================
+   Site Agent Terminal Modern Design Tokens (Clean Industrial Workspace)
+   ========================================================================== */
+.terminal-header-bar {
+  padding: 1rem 1.25rem;
+  background-color: #FFFFFF;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.terminal-icon-box {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background-color: #F1F5F9;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #E2E8F0;
+  flex-shrink: 0;
+}
+
+.pill-gate {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: var(--radius-full);
+}
+
+.pill-gate-pickup {
+  background-color: #F0F9FF;
+  color: #0284C7;
+  border: 1px solid #BAE6FD;
+}
+
+.pill-gate-delivery {
+  background-color: #ECFDF5;
+  color: #059669;
+  border: 1px solid #A7F3D0;
+}
+
+.pill-live-queue {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  background-color: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  color: #334155;
+}
+
+.pulse-dot-green {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #10B981;
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
+  animation: pulse-dot-anim 2s infinite;
+  display: inline-block;
+}
+
+@keyframes pulse-dot-anim {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.material-chips-container {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-top: 0.4rem;
+}
+
+.material-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-default);
+  background-color: #FFFFFF;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.material-chip:hover {
+  border-color: #0284C7;
+  color: #0284C7;
+  background-color: #F0F9FF;
+}
+
+.material-chip.active {
+  border-color: #0284C7;
+  background-color: #E0F2FE;
+  color: #0369A1;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(2, 132, 199, 0.12);
+}
+
+.field-manifest-card {
+  padding: 1.25rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background-color: #FFFFFF;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }

@@ -21,8 +21,10 @@ import {
   closeLiveTrip,
   createLiveLoadingTrip,
   fetchLiveSnapshot,
+  LiveOffloadingTripLookup,
   LiveTruckLookup,
   lookupLiveTruck,
+  lookupOffloadingOpenTrip,
   registerLiveParticipant,
   raiseLiveTripException,
   resolveLiveTripException,
@@ -86,6 +88,7 @@ interface AppStateContextType {
     params: {
       quantity: number;
       unit: QuantityUnit;
+      offloadingSiteId?: string;
       scaleTicketUrl?: string;
       scaleTicketNumber?: string;
       deliveryPlateImageUrl?: string;
@@ -96,6 +99,7 @@ interface AppStateContextType {
     }
   ) => Promise<{ success: boolean; varianceAlert?: boolean; message?: string }>;
   lookupTruckByPlate: (plate: string) => Promise<LiveTruckLookup>;
+  lookupOffloadingOpenTrip: (plate: string) => Promise<LiveOffloadingTripLookup>;
 
   raiseTripException: (
     tripId: string,
@@ -303,7 +307,19 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
       void refreshLiveData();
     });
-    return subscribeToLiveTrips(() => void refreshLiveData());
+
+    const unsubscribe = subscribeToLiveTrips(() => void refreshLiveData());
+
+    // Continuous 10-second heartbeat and window focus sync so the Operations Manager is always live
+    const intervalId = window.setInterval(() => void refreshLiveData(), 10000);
+    const handleFocus = () => void refreshLiveData();
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      unsubscribe();
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+    };
     // Authentication changes establish a new RLS scope and realtime channel.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, authenticatedRole]);
@@ -613,16 +629,21 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return { success: false, message: 'This terminal is offline. Reconnect before closing the live trip.' };
     }
 
-    const offloadingSite = sites.find(
-      (site) => site.id === activeSiteId && site.site_type === 'offloading' && site.status === 'active'
-    );
+    const offloadingSite =
+      sites.find(
+        (site) => (site.id === activeSiteId || site.id === params.offloadingSiteId) && site.site_type === 'offloading' && site.status === 'active'
+      ) ||
+      sites.find((site) => site.site_type === 'offloading' && site.status === 'active') ||
+      sites.find((site) => site.id === params.offloadingSiteId || site.id === activeSiteId);
 
-    if (!offloadingSite) return { success: false, message: 'Select your assigned offloading site before closing the trip.' };
+    const targetSiteId = params.offloadingSiteId || offloadingSite?.id || activeSiteId;
+
+    if (!targetSiteId) return { success: false, message: 'Select your assigned offloading site before closing the trip.' };
 
     try {
       await closeLiveTrip({
         tripId,
-        offloadingSiteId: offloadingSite.id,
+        offloadingSiteId: targetSiteId,
         quantityTonnes: params.quantity,
       });
       await refreshLiveData();
@@ -633,6 +654,45 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch (error: unknown) {
       return { success: false, message: error instanceof Error ? error.message : 'The live trip could not be closed.' };
     }
+  };
+
+  const lookupOffloadingOpenTripHandler: AppStateContextType['lookupOffloadingOpenTrip'] = async (plate) => {
+    if (isSupabaseLive && supabase && navigator.onLine) {
+      return lookupOffloadingOpenTrip(plate);
+    }
+
+    const cleanPlate = plate.trim().toUpperCase();
+    const normalized = cleanPlate.replace(/[^A-Za-z0-9]/g, '');
+    const localTrip = openTrips.find((t) => {
+      const reg = (t.truck?.registration_number || t.truck_registration_at_loading || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      return reg === normalized;
+    });
+
+    if (localTrip) {
+      return {
+        ok: true,
+        trip: {
+          id: localTrip.id,
+          trip_number: localTrip.trip_number,
+          truck_id: localTrip.truck_id,
+          driver_id: localTrip.driver_id,
+          opened_at: localTrip.loaded_at,
+          driver_name: localTrip.driver?.full_name,
+          loading_site_name: localTrip.loading_site?.name,
+          registration_number: localTrip.truck?.registration_number || cleanPlate,
+          normalized_registration: localTrip.truck?.normalized_registration || normalized,
+          estimated_tonnes: localTrip.loading_event?.estimated_tonnes,
+          capacity_tonnes: localTrip.truck?.capacity_tonnes,
+          offloading_site_id: localTrip.offloading_site_id,
+        },
+      };
+    }
+
+    return {
+      ok: false,
+      code: 'NO_OPEN_TRIP',
+      error: `No open in-transit waybill found for plate [${cleanPlate}].`,
+    };
   };
 
   const lookupTruckByPlate: AppStateContextType['lookupTruckByPlate'] = async (plate) => {
@@ -1216,6 +1276,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         createLoadingTrip,
         closeOffloadingTrip,
         lookupTruckByPlate,
+        lookupOffloadingOpenTrip: lookupOffloadingOpenTripHandler,
         raiseTripException,
         resolveTripException,
         createPayoutBatch,

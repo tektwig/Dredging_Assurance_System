@@ -41,6 +41,108 @@ export interface LiveParticipantRegistration {
   driver: Driver;
 }
 
+export interface LiveOffloadingTripLookup {
+  ok: boolean;
+  code?: string;
+  trip?: {
+    id: string;
+    trip_number: string;
+    truck_id: string;
+    driver_id: string;
+    opened_at: string;
+    driver_name?: string;
+    loading_site_name?: string;
+    registration_number?: string;
+    normalized_registration?: string;
+    estimated_tonnes?: number;
+    capacity_tonnes?: number;
+    offloading_site_id?: string;
+  };
+  assignment?: {
+    ok: boolean;
+    site_id: string;
+    site_name: string;
+    assignment_id: string;
+  };
+  error?: string;
+}
+
+const OPERATIONAL_ERROR_MESSAGES: Record<string, string> = {
+  DRIVER_MATCH_REQUIRES_REVIEW:
+    'A driver with this phone number is already registered in the system. Please select them from the existing driver list or verify the phone number.',
+  PLATE_ALREADY_REGISTERED:
+    'A vehicle with this license plate is already registered in the fleet ledger.',
+  INVALID_PHONE:
+    'Please enter a valid phone number (e.g. +234 802 345 6789 or 08023456789).',
+  INVALID_DRIVER_NAME:
+    'Please enter a valid driver full name (1 to 200 characters).',
+  INVALID_EMAIL:
+    'Please enter a valid email address.',
+  PAYMENT_DETAILS_REQUIRED:
+    'Driver settlement bank details (bank name, 10-digit NUBAN account number, and account name) are required.',
+  INVALID_BANK_NAME:
+    'Please select or enter a valid settlement bank.',
+  INVALID_ACCOUNT_NUMBER:
+    'Please enter a valid 10-digit NUBAN bank account number.',
+  INVALID_ACCOUNT_NAME:
+    'Please enter a valid bank account name matching the NUBAN number.',
+  DRIVER_NOT_FOUND:
+    'The selected driver profile could not be found.',
+  INACTIVE_DRIVER:
+    'This driver profile is currently deactivated. Please contact an administrator.',
+  UNKNOWN_TRUCK:
+    'This vehicle is not registered in the system. Please enroll the vehicle first.',
+  INACTIVE_TRUCK:
+    'This vehicle is currently marked as inactive in the system.',
+  INVALID_PLATE:
+    'Invalid license plate format. Plate numbers must contain valid alphanumeric characters.',
+  DRIVER_REQUIRED:
+    'A verified driver must be selected before opening a dispatch trip.',
+  INVALID_DEFAULT_OPTION:
+    'Invalid default driver selection option.',
+  INVALID_CAPTURE_METHOD:
+    'Invalid plate capture method.',
+  INVALID_CAPTURE_TIMESTAMP:
+    'Invalid capture timestamp. The device clock may be out of sync.',
+  INVALID_OCR_DATA:
+    'OCR verification failed. The scanned plate does not match the confirmed vehicle plate.',
+  IMAGE_NOT_FOUND:
+    'The plate evidence photo could not be uploaded or verified.',
+  IMAGE_ALREADY_USED:
+    'This plate evidence photo has already been submitted for another dispatch.',
+  TRUCK_BLOCKED:
+    'This vehicle already has an active open trip in transit. It must be delivered or resolved before a new trip can be dispatched.',
+  TRIP_ALREADY_CLOSED:
+    'This delivery trip has already been closed.',
+  TRIP_NOT_FOUND:
+    'The requested trip could not be found.',
+  NO_OPEN_TRIP:
+    'No active in-transit waybill found for this vehicle. Ensure the truck was dispatched from the loading site or verify the license plate.',
+  NOT_ASSIGNED_TO_OFFLOADING_SITE:
+    'Your account is not assigned to an active offloading site. Please contact an administrator.',
+  INVALID_OFFLOADING_SITE:
+    'The selected offloading site is invalid or inactive.',
+  UNAUTHORIZED:
+    'You do not have permission to perform this operational action.',
+};
+
+export function formatOperationalError(rawError: unknown): string {
+  if (!rawError) return 'An operational error occurred.';
+  const message = (typeof rawError === 'string' ? rawError : (rawError as any)?.message || String(rawError)).trim();
+
+  if (OPERATIONAL_ERROR_MESSAGES[message]) {
+    return OPERATIONAL_ERROR_MESSAGES[message];
+  }
+
+  for (const [code, friendly] of Object.entries(OPERATIONAL_ERROR_MESSAGES)) {
+    if (message.includes(code)) {
+      return friendly;
+    }
+  }
+
+  return message;
+}
+
 const ensureClient = () => {
   if (!isSupabaseLive || !supabase) throw new Error('Live Supabase service is not configured.');
   return supabase;
@@ -312,7 +414,7 @@ export async function registerLiveParticipant(params: {
   if (error) throw error;
 
   const result = data as JsonObject;
-  if (!result?.ok) throw new Error(result?.code || 'The truck and driver could not be registered.');
+  if (!result?.ok) throw new Error(formatOperationalError(result?.code) || 'The truck and driver could not be registered.');
 
   const truck: Truck = {
     ...mapTruck(result.truck),
@@ -376,8 +478,62 @@ export async function createLiveLoadingTrip(params: {
   });
   if (error) throw error;
   const result = data as JsonObject;
-  if (!result?.ok) throw new Error(result?.code || 'The live trip could not be opened.');
+  if (!result?.ok) throw new Error(formatOperationalError(result?.code) || 'The live trip could not be opened.');
   return result.trip;
+}
+
+export async function lookupOffloadingOpenTrip(plate: string): Promise<LiveOffloadingTripLookup> {
+  const client = await ensureAuthenticatedClient();
+  const cleanPlate = plate.trim().toUpperCase();
+  const { data, error } = await client.rpc('lookup_offloading_open_trip', {
+    p_plate: cleanPlate,
+  });
+
+  if (error) {
+    return {
+      ok: false,
+      code: error.code,
+      error: formatOperationalError(error.message) || error.message,
+    };
+  }
+
+  const result = data as JsonObject;
+  if (!result?.ok) {
+    return {
+      ok: false,
+      code: (result?.code as string) || 'NO_OPEN_TRIP',
+      error: formatOperationalError(result?.code as string) || 'No open in-transit waybill found for this vehicle.',
+    };
+  }
+
+  const tripObj = result.trip as JsonObject;
+  const assignObj = result.assignment as JsonObject | undefined;
+
+  return {
+    ok: true,
+    trip: {
+      id: tripObj.id as string,
+      trip_number: tripObj.trip_number as string,
+      truck_id: tripObj.truck_id as string,
+      driver_id: tripObj.driver_id as string,
+      opened_at: (tripObj.opened_at || tripObj.loaded_at || '') as string,
+      driver_name: (tripObj.driver_name || '') as string,
+      loading_site_name: (tripObj.loading_site_name || '') as string,
+      registration_number: (tripObj.registration_number || cleanPlate) as string,
+      normalized_registration: (tripObj.normalized_registration || '') as string,
+      estimated_tonnes: (tripObj.estimated_tonnes || tripObj.quantity_tonnes || 30) as number,
+      capacity_tonnes: (tripObj.capacity_tonnes || 30) as number,
+      offloading_site_id: (assignObj?.site_id || tripObj.offloading_site_id || '') as string,
+    },
+    assignment: assignObj
+      ? {
+          ok: Boolean(assignObj.ok),
+          site_id: assignObj.site_id as string,
+          site_name: assignObj.site_name as string,
+          assignment_id: assignObj.assignment_id as string,
+        }
+      : undefined,
+  };
 }
 
 export async function closeLiveTrip(params: {
@@ -393,7 +549,7 @@ export async function closeLiveTrip(params: {
   });
   if (error) throw error;
   const result = data as JsonObject;
-  if (!result?.ok) throw new Error(result?.code || 'The live trip could not be closed.');
+  if (!result?.ok) throw new Error(formatOperationalError(result?.code) || 'The live trip could not be closed.');
   return result.trip;
 }
 

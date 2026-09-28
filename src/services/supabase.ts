@@ -10,7 +10,13 @@ let isConfigured = false;
 
 try {
   if (supabaseUrl && supabaseAnonKey && supabaseAnonKey !== 'dummy_anon_key') {
-    client = createClient(supabaseUrl, supabaseAnonKey);
+    client = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        storage: typeof window !== 'undefined' ? window.sessionStorage : undefined,
+        persistSession: true,
+        autoRefreshToken: true,
+      },
+    });
     isConfigured = true;
   }
 } catch (err) {

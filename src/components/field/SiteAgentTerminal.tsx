@@ -10,7 +10,6 @@ import {
   ArrowRight,
   ShieldCheck,
   RotateCcw,
-  Clock,
   FileText,
   AlertTriangle,
   Check,
@@ -25,11 +24,14 @@ import {
   X,
   Phone,
   Building,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { SiteAgentModeSheet } from './SiteAgentModeSheet';
 import { TripClosureInvoiceModal } from '../operations/TripClosureInvoiceModal';
 import { QuantityUnit, ExceptionType, Trip } from '../../types';
 import { recognizeLicensePlate, OCRProgress } from '../../services/ocrService';
+import { formatOperationalError } from '../../services/liveOperations';
 
 const NIGERIAN_BANKS = [
   'Zenith Bank PLC',
@@ -51,15 +53,7 @@ const NIGERIAN_BANKS = [
   'Moniepoint MFB',
 ];
 
-const TRUCK_TYPES = [
-  'Mack 10-Wheeler Tipper',
-  'Sino 35T Heavy Dump',
-  'Mercedes Actros 28T',
-  'HOWO Sinotruk 32T',
-  'DAF CF Tipper 30T',
-  'MAN TGS 33T Articulated',
-  'Iveco Trakker 30T',
-];
+
 
 export const SiteAgentTerminal: React.FC = () => {
   const {
@@ -75,6 +69,7 @@ export const SiteAgentTerminal: React.FC = () => {
     closeOffloadingTrip,
     raiseTripException,
     lookupTruckByPlate,
+    lookupOffloadingOpenTrip,
     registerLoadingParticipant,
   } = useAppState();
 
@@ -106,6 +101,7 @@ export const SiteAgentTerminal: React.FC = () => {
   const [isDeliverySaving, setIsDeliverySaving] = useState(false);
   const [deliverySaved, setDeliverySaved] = useState(false);
   const [selectedClosureInvoiceId, setSelectedClosureInvoiceId] = useState<string | null>(null);
+  const [isLedgerExpanded, setIsLedgerExpanded] = useState(false);
   const [isRegisteringParticipant, setIsRegisteringParticipant] = useState(false);
   const [isLiveCameraActive, setIsLiveCameraActive] = useState(false);
   const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
@@ -121,7 +117,6 @@ export const SiteAgentTerminal: React.FC = () => {
 
   // Unregistered Vehicle & Driver Form State
   const [newTruckPlate, setNewTruckPlate] = useState('');
-  const [newTruckType, setNewTruckType] = useState('Mack 10-Wheeler Tipper');
   const [newTruckCapacity, setNewTruckCapacity] = useState(30);
   const [newTruckOwner, setNewTruckOwner] = useState('');
   const [newTruckOwnerPhone, setNewTruckOwnerPhone] = useState('');
@@ -186,6 +181,7 @@ export const SiteAgentTerminal: React.FC = () => {
   // 4. Pickup Specific Form State
   const [destinationSiteId, setDestinationSiteId] = useState('');
   const [estimatedTonnes, setEstimatedTonnes] = useState(30);
+  const [cargoMaterial, setCargoMaterial] = useState('Sharp White Dredged Lagoon Sand (Grade A)');
   const [pickupNotes, setPickupNotes] = useState('');
 
   // 5. Delivery Specific Form State
@@ -206,6 +202,24 @@ export const SiteAgentTerminal: React.FC = () => {
   const [exceptionType, setExceptionType] = useState<ExceptionType>('quantity_mismatch');
   const [exceptionDesc, setExceptionDesc] = useState('');
 
+  // Offloading open trip live lookup state
+  const [matchedOffloadingTrip, setMatchedOffloadingTrip] = useState<{
+    id: string;
+    trip_number: string;
+    truck_id: string;
+    driver_id: string;
+    opened_at: string;
+    driver_name?: string;
+    loading_site_name?: string;
+    registration_number?: string;
+    normalized_registration?: string;
+    estimated_tonnes?: number;
+    capacity_tonnes?: number;
+    offloading_site_id?: string;
+  } | null>(null);
+  const [manualDeliveryPlate, setManualDeliveryPlate] = useState('');
+  const [isManualLookingUp, setIsManualLookingUp] = useState(false);
+
   // Activity feed tab
   const [activityFilter, setActivityFilter] = useState<'all' | 'pickup' | 'delivery'>('all');
 
@@ -225,26 +239,39 @@ export const SiteAgentTerminal: React.FC = () => {
     }
   }, [destinationSiteId, offloadingSites]);
 
-  // Delivery is trip-first: the officer selects the inbound waybill, then OCR
-  // verifies that the arriving plate belongs to that exact open trip.
-  const matchingOpenTrip = openTrips.find((trip) => trip.id === selectedDeliveryTripId) || null;
+  // Delivery is trip-first: the officer selects the inbound waybill or enters/scans plate,
+  // then OCR or live lookup retrieves the matching open trip.
+  const matchingOpenTrip: any =
+    matchedOffloadingTrip ||
+    openTrips.find((trip) => trip.id === selectedDeliveryTripId) ||
+    null;
 
   const normalizePlate = (plate: string) => plate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
   const hasCompletedValidPlateScan =
     hasScanned &&
     !isScanning &&
     /^[A-Z]{3}\d{2,4}[A-Z]{2}$/.test(normalizePlate(confirmedPlate));
-  const expectedDeliveryPlate = matchingOpenTrip?.truck?.registration_number || '';
-  const deliveryPlateMatchesTrip = !!deliveryPlateEvidence && !!matchingOpenTrip &&
-    normalizePlate(deliveryPlateEvidence.plate) === normalizePlate(expectedDeliveryPlate);
+  const expectedDeliveryPlate =
+    matchingOpenTrip?.truck?.registration_number ||
+    (matchingOpenTrip as any)?.registration_number ||
+    (matchingOpenTrip as any)?.truck_registration_at_loading ||
+    '';
+  const deliveryPlateMatchesTrip =
+    !!matchingOpenTrip &&
+    (!deliveryPlateEvidence ||
+      normalizePlate(deliveryPlateEvidence.plate) === normalizePlate(expectedDeliveryPlate));
 
   useEffect(() => {
-    if (selectedDeliveryTripId && !openTrips.some((trip) => trip.id === selectedDeliveryTripId)) {
+    if (
+      selectedDeliveryTripId &&
+      !matchedOffloadingTrip &&
+      !openTrips.some((trip) => trip.id === selectedDeliveryTripId)
+    ) {
       setSelectedDeliveryTripId(null);
       setDeliveryPlateEvidence(null);
       setIsFlaggingException(false);
     }
-  }, [openTrips, selectedDeliveryTripId]);
+  }, [openTrips, selectedDeliveryTripId, matchedOffloadingTrip]);
 
   const stopLiveCamera = () => {
     cameraRequestIdRef.current += 1;
@@ -390,6 +417,7 @@ export const SiteAgentTerminal: React.FC = () => {
 
   const confirmDeliveryTripWithOCR = (trip: Trip) => {
     const expectedTonnes = trip.loading_event?.estimated_tonnes || trip.truck?.capacity_tonnes || 30;
+    setMatchedOffloadingTrip(null);
     setSelectedDeliveryTripId(trip.id);
     setSelectedTruckId(trip.truck_id);
     setSelectedDriverId(trip.driver_id);
@@ -405,6 +433,58 @@ export const SiteAgentTerminal: React.FC = () => {
     setOcrStatus('Ready for capture');
     capturePurposeRef.current = 'delivery';
     void startLiveCamera('delivery', 'environment');
+  };
+
+  // Manual plate lookup handler for offloading gate
+  const handleManualOffloadingLookup = async (plateInput?: string) => {
+    const raw = plateInput !== undefined ? plateInput : manualDeliveryPlate;
+    const cleanPlate = raw.trim().toUpperCase();
+    if (!cleanPlate) {
+      setToastMessage({ text: 'Please enter a truck plate number to find its waybill.', type: 'warning' });
+      setTimeout(() => setToastMessage(null), 4000);
+      return;
+    }
+
+    setIsManualLookingUp(true);
+    setCameraError(null);
+    setDeliverySaved(false);
+
+    try {
+      const res = await lookupOffloadingOpenTrip(cleanPlate);
+      if (res.ok && res.trip) {
+        setMatchedOffloadingTrip(res.trip);
+        setSelectedDeliveryTripId(res.trip.id);
+        setSelectedTruckId(res.trip.truck_id);
+        setSelectedDriverId(res.trip.driver_id);
+        const expectedTonnes = res.trip.estimated_tonnes || res.trip.capacity_tonnes || 30;
+        setDeliveredTonnes(expectedTonnes);
+        setDeliveryPlateEvidence({
+          plate: res.trip.registration_number || cleanPlate,
+          imageUrl: '',
+          confidence: 100,
+          capturedAt: new Date().toISOString(),
+        });
+        setToastMessage({
+          text: `Waybill #${res.trip.trip_number} retrieved for [${res.trip.registration_number || cleanPlate}]! Complete weighbridge net payload below.`,
+          type: 'success',
+        });
+      } else {
+        setMatchedOffloadingTrip(null);
+        setSelectedDeliveryTripId(null);
+        setToastMessage({
+          text: res.error || `No open in-transit waybill found for truck [${cleanPlate}].`,
+          type: 'warning',
+        });
+      }
+    } catch (err: any) {
+      setToastMessage({
+        text: err?.message || 'Error looking up open trip for vehicle.',
+        type: 'warning',
+      });
+    } finally {
+      setIsManualLookingUp(false);
+      setTimeout(() => setToastMessage(null), 5000);
+    }
   };
 
   // Real Tesseract OCR recognition pipeline
@@ -441,6 +521,30 @@ export const SiteAgentTerminal: React.FC = () => {
           confidence: result.confidence,
           capturedAt: new Date().toISOString(),
         });
+
+        // Live Offloading RPC lookup
+        const offloadLookup = await lookupOffloadingOpenTrip(result.candidatePlate);
+        if (offloadLookup.ok && offloadLookup.trip) {
+          setMatchedOffloadingTrip(offloadLookup.trip);
+          setSelectedDeliveryTripId(offloadLookup.trip.id);
+          setSelectedTruckId(offloadLookup.trip.truck_id);
+          setSelectedDriverId(offloadLookup.trip.driver_id);
+          const expectedTonnes = offloadLookup.trip.estimated_tonnes || offloadLookup.trip.capacity_tonnes || 30;
+          setDeliveredTonnes(expectedTonnes);
+          setToastMessage({
+            text: `Trip ${offloadLookup.trip.trip_number} confirmed by OCR for [${offloadLookup.trip.registration_number || result.candidatePlate}]! Complete weighbridge details below to close it.`,
+            type: 'success',
+          });
+        } else {
+          setMatchedOffloadingTrip(null);
+          setSelectedDeliveryTripId(null);
+          setToastMessage({
+            text: `Plate [${result.candidatePlate}] detected, but no open in-transit waybill matches this vehicle.`,
+            type: 'warning',
+          });
+        }
+        setTimeout(() => setToastMessage(null), 5000);
+        return;
       }
       capturePurposeRef.current = 'general';
 
@@ -460,9 +564,12 @@ export const SiteAgentTerminal: React.FC = () => {
 
       const liveLookup = await lookupTruckByPlate(result.candidatePlate);
       const matched = liveLookup.truck || result.matchedTruck || trucks.find((t) => t.normalized_registration === normalized);
-      const matchedOpenTrip = matched
-        ? openTrips.find((trip) => trip.truck_id === matched.id || normalizePlate(trip.truck?.registration_number || '') === normalized)
-        : undefined;
+      const matchedOpenTrip = openTrips.find((trip) => {
+        if (matched && trip.truck_id === matched.id) return true;
+        const reg1 = normalizePlate(trip.truck?.registration_number || '');
+        const reg2 = normalizePlate(trip.truck_registration_at_loading || '');
+        return (reg1 && reg1 === normalized) || (reg2 && reg2 === normalized);
+      });
 
       if (matched && !isDeliveryScan) {
         setSelectedTruckId(matched.id);
@@ -486,28 +593,32 @@ export const SiteAgentTerminal: React.FC = () => {
         setIsUnregisteredModalOpen(false);
       }
 
-      const selectedTrip = openTrips.find((trip) => trip.id === selectedDeliveryTripId);
-      const selectedTripPlate = selectedTrip?.truck?.registration_number || '';
-      const selectedTripPlateMatches = !!selectedTrip && normalizePlate(selectedTripPlate) === normalized;
+      let currentSelectedTrip = openTrips.find((trip) => trip.id === selectedDeliveryTripId);
+      if (isDeliveryScan && !currentSelectedTrip && matchedOpenTrip) {
+        setSelectedDeliveryTripId(matchedOpenTrip.id);
+        setSelectedTruckId(matchedOpenTrip.truck_id);
+        setSelectedDriverId(matchedOpenTrip.driver_id);
+        const expectedTonnes = matchedOpenTrip.loading_event?.estimated_tonnes || matchedOpenTrip.truck?.capacity_tonnes || 30;
+        setDeliveredTonnes(expectedTonnes);
+        currentSelectedTrip = matchedOpenTrip;
+      }
 
-      if (isDeliveryScan && !selectedTrip) {
+      const selectedTripPlate = currentSelectedTrip?.truck?.registration_number || currentSelectedTrip?.truck_registration_at_loading || '';
+      const selectedTripPlateMatches = !!currentSelectedTrip && (normalizePlate(selectedTripPlate) === normalized);
+
+      if (isDeliveryScan && currentSelectedTrip && selectedTripPlateMatches) {
         setToastMessage({
-          text: 'Select an open trip before scanning the arriving truck.',
-          type: 'warning',
-        });
-      } else if (isDeliveryScan && selectedTripPlateMatches) {
-        setToastMessage({
-          text: `Trip ${selectedTrip?.trip_number} confirmed by OCR for [${result.candidatePlate}]. Complete the delivery details to close it.`,
+          text: `Trip ${currentSelectedTrip.trip_number} confirmed by OCR for [${result.candidatePlate}]! Complete the weighbridge details below to close it.`,
           type: 'success',
         });
-      } else if (isDeliveryScan && !matched) {
+      } else if (isDeliveryScan && currentSelectedTrip && !selectedTripPlateMatches) {
         setToastMessage({
-          text: `Plate [${result.candidatePlate}] is not registered and does not confirm waybill ${selectedTrip?.trip_number}.`,
+          text: `Plate [${result.candidatePlate}] does not match ${selectedTripPlate} on waybill ${currentSelectedTrip.trip_number}. Discrepancy detected.`,
           type: 'warning',
         });
-      } else if (isDeliveryScan && !selectedTripPlateMatches) {
+      } else if (isDeliveryScan && !currentSelectedTrip) {
         setToastMessage({
-          text: `Plate [${result.candidatePlate}] does not match ${selectedTripPlate} on waybill ${selectedTrip?.trip_number}. Do not close this trip.`,
+          text: `Plate [${result.candidatePlate}] detected, but no open in-transit waybill matches this vehicle. Select waybill manually or flag an exception.`,
           type: 'warning',
         });
       } else {
@@ -565,7 +676,7 @@ export const SiteAgentTerminal: React.FC = () => {
     const registration = await registerLoadingParticipant({
       plate: cleanPlate,
       capacity: Number(newTruckCapacity) || 30,
-      truckType: newTruckType || 'Mack 10-Wheeler Tipper',
+      truckType: 'Tipper Truck',
       ownerName: newTruckOwner.trim(),
       ownerPhone: newTruckOwnerPhone.trim() || undefined,
       driverName: newDriverName.trim(),
@@ -578,7 +689,7 @@ export const SiteAgentTerminal: React.FC = () => {
     setIsRegisteringParticipant(false);
 
     if (!registration.success || !registration.truck || !registration.driver) {
-      setToastMessage({ text: registration.error || 'Failed to register truck and driver.', type: 'warning' });
+      setToastMessage({ text: formatOperationalError(registration.error) || 'Failed to register truck and driver.', type: 'warning' });
       return;
     }
 
@@ -595,10 +706,10 @@ export const SiteAgentTerminal: React.FC = () => {
     setNewDriverAccountNumber('');
 
     setToastMessage({
-      text: `Vehicle [${cleanPlate}] and Driver [${registration.driver.full_name}] saved live and ready for dispatch!`,
+      text: `Vehicle [${cleanPlate}] and Driver [${registration.driver.full_name}] saved live! Review dispatch details and click "Issue Live Waybill & Dispatch" below to open trip.`,
       type: 'success',
     });
-    setTimeout(() => setToastMessage(null), 5000);
+    setTimeout(() => setToastMessage(null), 5500);
   };
 
   // Register New Driver for Existing Registered Truck
@@ -649,7 +760,7 @@ export const SiteAgentTerminal: React.FC = () => {
       setTimeout(() => setToastMessage(null), 5000);
     } else {
       setToastMessage({
-        text: registration.error || 'Failed to register driver.',
+        text: formatOperationalError(registration.error) || 'Failed to register driver.',
         type: 'warning',
       });
     }
@@ -687,6 +798,13 @@ export const SiteAgentTerminal: React.FC = () => {
     pickupSaveLockRef.current = true;
     setIsPickupSaving(true);
     try {
+      const dispatchNotes = [
+        cargoMaterial ? `Material: ${cargoMaterial}` : '',
+        pickupNotes.trim(),
+      ]
+        .filter(Boolean)
+        .join(' • ');
+
       const newTrip = await createLoadingTrip({
         plate: confirmedPlate,
         truckId: selectedTruckId,
@@ -695,7 +813,7 @@ export const SiteAgentTerminal: React.FC = () => {
         estimatedTonnes,
         plateImageUrl: photoUrl,
         confidenceScore,
-        notes: pickupNotes,
+        notes: dispatchNotes,
       });
       setToastMessage({
         text: `Live waybill issued! Trip ${newTrip.trip_number} is now visible at the delivery gate.`,
@@ -705,7 +823,7 @@ export const SiteAgentTerminal: React.FC = () => {
       setPickupNotes('');
     } catch (error: unknown) {
       setToastMessage({
-        text: error instanceof Error ? error.message : 'The live waybill could not be issued.',
+        text: formatOperationalError(error instanceof Error ? error.message : error) || 'The live waybill could not be issued.',
         type: 'warning',
       });
     } finally {
@@ -749,6 +867,7 @@ export const SiteAgentTerminal: React.FC = () => {
     const result = await closeOffloadingTrip(matchingOpenTrip.id, {
       quantity: deliveredTonnes,
       unit: 'tonnes' as QuantityUnit,
+      offloadingSiteId: matchedOffloadingTrip?.offloading_site_id,
       scaleTicketNumber,
       scaleTicketUrl: ticketPhotoUrl,
       deliveryPlateImageUrl: deliveryPlateEvidence.imageUrl,
@@ -769,9 +888,11 @@ export const SiteAgentTerminal: React.FC = () => {
       setDeliveryNotes('');
       setDeliveryPlateEvidence(null);
       setSelectedDeliveryTripId(null);
+      setMatchedOffloadingTrip(null);
+      setManualDeliveryPlate('');
       setTimeout(() => setToastMessage(null), 4500);
     } else {
-      setToastMessage({ text: result.message || 'The live trip could not be closed.', type: 'warning' });
+      setToastMessage({ text: formatOperationalError(result.message) || 'The live trip could not be closed.', type: 'warning' });
       setTimeout(() => setToastMessage(null), 5000);
     }
   };
@@ -806,10 +927,10 @@ export const SiteAgentTerminal: React.FC = () => {
 
   // Recent trips processed
   const filteredRecentTrips = trips.filter((t) => {
-    if (activityFilter === 'pickup') return t.status === 'open';
+    if (activityFilter === 'pickup') return true; // Show all trips dispatched from loading
     if (activityFilter === 'delivery') return t.status === 'closed';
     return true;
-  }).slice(0, 6);
+  }).slice(0, 8);
 
   // Variance calculation for delivery
   const expectedTonnage = matchingOpenTrip?.loading_event?.estimated_tonnes || currentTruck?.capacity_tonnes || 30;
@@ -821,81 +942,33 @@ export const SiteAgentTerminal: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      {/* Site Agent Shift Header */}
-      <div
-        className="card"
-        style={{
-          padding: '1rem 1.25rem',
-          backgroundColor: '#FFFFFF',
-          borderLeft: '4px solid #B45309',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '0.75rem',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div
-            style={{
-              padding: '0.5rem',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: '#FEF3C7',
-              color: '#B45309',
-            }}
-          >
-            <Camera size={22} />
+      {/* Site Agent Shift Header — Streamlined Modern Industrial Bar */}
+      <div className="terminal-header-bar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+          <div className="terminal-icon-box">
+            <Camera size={20} />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 800, color: '#0F172A' }}>
-                Site Agent Terminal — Scan & Record
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0F172A', margin: 0, letterSpacing: '-0.01em' }}>
+                Site Agent Terminal
               </h3>
-              <span
-                style={{
-                  fontSize: '0.65rem',
-                  fontWeight: 800,
-                  backgroundColor: '#FEF3C7',
-                  color: '#B45309',
-                  padding: '0.15rem 0.5rem',
-                  borderRadius: 'var(--radius-full)',
-                  border: '1px solid #FCD34D',
-                }}
-              >
-                SITE AGENT
+              <span className={`pill-gate ${movementType === 'pickup' ? 'pill-gate-pickup' : 'pill-gate-delivery'}`}>
+                {movementType === 'pickup' ? <TruckIcon size={13} /> : <Scale size={13} />}
+                <span>{movementType === 'pickup' ? 'Gate 1 • Pickup' : 'Gate 2 • Delivery'}</span>
               </span>
             </div>
-            <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-              Station: <strong>{activeSite?.name || 'Loading site'}</strong> • Operator: <strong>Signed-in Site Agent</strong>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0.15rem 0 0 0' }}>
+              Station: <strong>{activeSite?.name || 'Loading site'}</strong> • Signed-in Site Agent
             </p>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          {/* Locked Assigned Mode Post Badge */}
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              padding: '0.35rem 0.75rem',
-              fontSize: '0.78rem',
-              fontWeight: 800,
-              borderRadius: 'var(--radius-full)',
-              backgroundColor: movementType === 'pickup' ? '#FEF3C7' : '#E0F2FE',
-              color: movementType === 'pickup' ? '#B45309' : '#0369A1',
-              border: `1.5px solid ${movementType === 'pickup' ? '#FCD34D' : '#BAE6FD'}`,
-              minHeight: '32px',
-            }}
-          >
-            {movementType === 'pickup' ? <TruckIcon size={14} /> : <Scale size={14} />}
-            <span>Assigned Post: {movementType === 'pickup' ? 'Gate 1 (Pickup)' : 'Gate 2 (Delivery)'}</span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8125rem' }}>
-            <Clock size={14} color="var(--text-muted)" />
-            <span style={{ color: 'var(--text-muted)' }}>Active Queue:</span>
-            <strong style={{ color: '#0284C7' }}>{openTrips.length} In-Transit</strong>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <div className="pill-live-queue">
+            <span className="pulse-dot-green" />
+            <span style={{ color: 'var(--text-secondary)' }}>Live Queue:</span>
+            <strong style={{ color: '#0F172A' }}>{openTrips.length} In-Transit</strong>
           </div>
         </div>
       </div>
@@ -952,10 +1025,10 @@ export const SiteAgentTerminal: React.FC = () => {
       >
         {/* Left Column: Camera Viewfinder & OCR Extraction */}
         {movementType === 'pickup' && (
-        <div className="card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
-              <Camera size={18} color="#B45309" />
+        <div className="field-manifest-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.75rem' }}>
+            <h3 style={{ fontSize: '0.98rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0, color: '#0F172A' }}>
+              <Camera size={18} color="#0284C7" />
               <span>Plate Scanner</span>
             </h3>
 
@@ -1090,8 +1163,8 @@ export const SiteAgentTerminal: React.FC = () => {
           {isScanning && (
             <div
               style={{
-                backgroundColor: '#FEF3C7',
-                border: '1px solid #FCD34D',
+                backgroundColor: '#F0F9FF',
+                border: '1px solid #BAE6FD',
                 borderRadius: 'var(--radius-md)',
                 padding: '0.75rem 1rem',
                 display: 'flex',
@@ -1099,7 +1172,7 @@ export const SiteAgentTerminal: React.FC = () => {
                 gap: '0.4rem',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', fontWeight: 700, color: '#B45309' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', fontWeight: 700, color: '#0369A1' }}>
                 <span>{ocrStatus}</span>
                 <span>{Math.round(ocrProgress * 100)}%</span>
               </div>
@@ -1107,7 +1180,7 @@ export const SiteAgentTerminal: React.FC = () => {
                 style={{
                   width: '100%',
                   height: '6px',
-                  backgroundColor: 'rgba(180, 83, 9, 0.15)',
+                  backgroundColor: 'rgba(2, 132, 199, 0.15)',
                   borderRadius: 'var(--radius-full)',
                   overflow: 'hidden',
                 }}
@@ -1116,7 +1189,7 @@ export const SiteAgentTerminal: React.FC = () => {
                   style={{
                     width: `${Math.round(ocrProgress * 100)}%`,
                     height: '100%',
-                    backgroundColor: '#B45309',
+                    backgroundColor: '#0284C7',
                     borderRadius: 'var(--radius-full)',
                     transition: 'width 0.2s ease',
                   }}
@@ -1676,101 +1749,32 @@ export const SiteAgentTerminal: React.FC = () => {
         </div>
         )}
 
-        {/* Right Column: THE CHOICE & SAVE PANEL */}
-        <div className="card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          <div>
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0F172A', marginBottom: '0.25rem' }}>
-              2. Save Truck Movement Record
-            </h3>
-            <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
-              Terminal locked to your assigned operational post:
-            </p>
-          </div>
-
-          {/* LOCKED ASSIGNED POST BANNER (NO TOGGLING ALLOWED) */}
-          <div
-            style={{
-              padding: '0.9rem 1.1rem',
-              borderRadius: 'var(--radius-lg)',
-              border: `2px solid ${movementType === 'pickup' ? '#FCD34D' : '#6EE7B7'}`,
-              backgroundColor: movementType === 'pickup' ? '#FEF3C7' : '#D1FAE5',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '0.75rem',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-              <div
-                style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: '#FFFFFF',
-                  color: movementType === 'pickup' ? '#B45309' : '#047857',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  border: `1px solid ${movementType === 'pickup' ? '#FCD34D' : '#6EE7B7'}`,
-                  flexShrink: 0,
-                }}
-              >
-                {movementType === 'pickup' ? <TruckIcon size={18} /> : <Scale size={18} />}
-              </div>
-              <div>
-                <strong style={{ display: 'block', fontSize: '0.92rem', color: movementType === 'pickup' ? '#92400E' : '#065F46' }}>
-                  {movementType === 'pickup' ? 'Gate 1 Dredge Pit — Pickup Dispatch' : 'Gate 2 Weighbridge — Delivery Check'}
-                </strong>
-                <span style={{ fontSize: '0.72rem', color: movementType === 'pickup' ? '#B45309' : '#047857' }}>
-                  {movementType === 'pickup' ? 'Digital waybill & haulage authorization' : 'Scale ticket verification & trip closure'}
-                </span>
-              </div>
+        {/* Right Column: Manifest & Authorization Panel */}
+        <div className="field-manifest-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.85rem' }}>
+            <div>
+              <h3 style={{ fontSize: '1rem', fontWeight: 800, color: '#0F172A', margin: 0 }}>
+                {movementType === 'pickup' ? 'Dispatch Manifest Form' : 'Delivery Verification & Scale Ticket'}
+              </h3>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0.15rem 0 0 0' }}>
+                {movementType === 'pickup'
+                  ? `Issuing digital waybill from ${activeSite?.name || 'pit'}`
+                  : `Closing haulage trip at ${activeSite?.name || 'depot'}`}
+              </p>
             </div>
-
-            <span
-              style={{
-                fontSize: '0.68rem',
-                fontWeight: 800,
-                backgroundColor: '#FFFFFF',
-                color: movementType === 'pickup' ? '#B45309' : '#047857',
-                border: `1px solid ${movementType === 'pickup' ? '#FCD34D' : '#6EE7B7'}`,
-                padding: '0.25rem 0.55rem',
-                borderRadius: 'var(--radius-sm)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.04em',
-                flexShrink: 0,
-              }}
-            >
-              LOCKED POST
+            <span className={`pill-gate ${movementType === 'pickup' ? 'pill-gate-pickup' : 'pill-gate-delivery'}`}>
+              {movementType === 'pickup' ? <TruckIcon size={12} /> : <Scale size={12} />}
+              <span>{movementType === 'pickup' ? 'Gate 1 Active' : 'Gate 2 Active'}</span>
             </span>
           </div>
 
           {/* SUB-FORM A: PICKUP WORKFLOW */}
           {movementType === 'pickup' && (
             <form onSubmit={handleDispatchPickup} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div
-                style={{
-                  padding: '0.65rem 0.85rem',
-                  backgroundColor: '#FEF3C7',
-                  border: '1px solid #FCD34D',
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: '0.78rem',
-                  color: '#92400E',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                }}
-              >
-                <TruckIcon size={16} />
-                <span>
-                  Recording <strong>Pickup</strong> at <strong>{activeSite?.name}</strong>. Waybill will be created with status OPEN.
-                </span>
-              </div>
-
               {/* Destination & Payload Estimation */}
-              <div className="grid-2">
+              <div className="grid-2" style={{ gap: '0.85rem' }}>
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Designated Offloading Depot</label>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '0.78rem' }}>Designated Offloading Depot</label>
                   <select
                     className="form-select"
                     value={destinationSiteId}
@@ -1788,7 +1792,7 @@ export const SiteAgentTerminal: React.FC = () => {
                 </div>
 
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Estimated Payload (Tonnes)</label>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '0.78rem' }}>Estimated Payload (Tonnes)</label>
                   <input
                     type="number"
                     className="form-input"
@@ -1802,20 +1806,47 @@ export const SiteAgentTerminal: React.FC = () => {
                 </div>
               </div>
 
-              {/* Material Type & Notes */}
+              {/* Material Type with Quick-Chips & Editable Mandatory Text Input */}
               <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Cargo Material Specification</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                  <label className="form-label" style={{ fontWeight: 700, fontSize: '0.78rem', margin: 0 }}>
+                    Cargo Material Specification <span style={{ color: '#DC2626' }}>*</span>
+                  </label>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Quick-select chip or type custom</span>
+                </div>
+                <div className="material-chips-container" style={{ marginBottom: '0.5rem' }}>
+                  {[
+                    { label: 'Sharp White Sand', value: 'Sharp White Dredged Lagoon Sand (Grade A)' },
+                    { label: 'Filling Sand', value: 'Reclamation / Filling Sand' },
+                    { label: 'Lagoon Gravel', value: 'Coarse Lagoon Gravel / Aggregate' },
+                    { label: 'Fine Sand', value: 'Fine Dredged Sand (Plaster Grade)' },
+                  ].map((chip) => {
+                    const isSelected = cargoMaterial === chip.value;
+                    return (
+                      <button
+                        key={chip.value}
+                        type="button"
+                        className={`material-chip ${isSelected ? 'active' : ''}`}
+                        onClick={() => setCargoMaterial(chip.value)}
+                      >
+                        {isSelected && <CheckCircle2 size={12} color="#0284C7" />}
+                        <span>{chip.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
                 <input
                   type="text"
+                  required
                   className="form-input"
-                  value="Sharp White Dredged Lagoon Sand (Grade A)"
-                  readOnly
-                  style={{ backgroundColor: '#F8FAFC', color: 'var(--text-secondary)' }}
+                  value={cargoMaterial}
+                  onChange={(e) => setCargoMaterial(e.target.value)}
+                  placeholder="Enter cargo material specification (Required)"
                 />
               </div>
 
               <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Operator Field Notes (Optional)</label>
+                <label className="form-label" style={{ fontWeight: 700, fontSize: '0.78rem' }}>Operator Field Notes (Optional)</label>
                 <input
                   type="text"
                   className="form-input"
@@ -1825,11 +1856,11 @@ export const SiteAgentTerminal: React.FC = () => {
                 />
               </div>
 
-              {/* Dispatch Action Button */}
+              {/* Registration Notice */}
               {(!selectedTruckId || !selectedDriverId) && (
                 <div
                   style={{
-                    padding: '0.6rem 0.8rem',
+                    padding: '0.65rem 0.85rem',
                     backgroundColor: '#FEF2F2',
                     border: '1px solid #FECACA',
                     borderRadius: 'var(--radius-md)',
@@ -1846,18 +1877,28 @@ export const SiteAgentTerminal: React.FC = () => {
                   </span>
                 </div>
               )}
+
+              {/* Modern High-Contrast Dispatch Action Button */}
               <button
                 type="submit"
                 className="btn btn-primary btn-lg"
                 disabled={pickupActionDisabled}
-                title={pickupSaved ? 'This pickup has already been saved. Scan the next truck.' : !hasScanned ? 'Scan the truck plate before issuing a live waybill' : 'Issue the live waybill'}
+                title={pickupSaved ? 'This pickup has already been saved. Scan the next truck.' : !hasScanned ? 'Scan the truck plate before issuing a live waybill' : 'Authorize and dispatch movement'}
                 style={{
                   width: '100%',
-                  marginTop: '0.25rem',
-                  backgroundColor: pickupActionDisabled ? '#94A3B8' : '#B45309',
-                  borderColor: pickupActionDisabled ? '#94A3B8' : '#92400E',
+                  minHeight: '48px',
+                  marginTop: '0.35rem',
+                  fontSize: '0.92rem',
+                  fontWeight: 700,
+                  backgroundColor: pickupActionDisabled ? '#94A3B8' : '#0284C7',
+                  borderColor: pickupActionDisabled ? '#94A3B8' : '#0369A1',
                   cursor: pickupActionDisabled ? 'not-allowed' : 'pointer',
-                  boxShadow: pickupActionDisabled ? 'none' : '0 2px 4px 0 rgba(180, 83, 9, 0.25)',
+                  boxShadow: pickupActionDisabled ? 'none' : '0 4px 14px rgba(2, 132, 199, 0.3)',
+                  transition: 'all 0.2s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
                 }}
               >
                 <TruckIcon size={18} />
@@ -1865,12 +1906,12 @@ export const SiteAgentTerminal: React.FC = () => {
                   {isPickupSaving
                     ? 'Saving Live Pickup...'
                     : pickupSaved
-                    ? 'Pickup Saved — Scan Next Truck'
+                    ? 'Pickup Saved — Ready for Next Truck'
                     : !hasScanned
-                    ? 'Scan Plate to Issue Waybill'
+                    ? 'Scan Plate to Authorize Dispatch'
                     : (!selectedTruckId || !selectedDriverId)
-                    ? 'Registration Required to Issue Waybill'
-                    : 'Save as Pickup & Issue Digital Waybill'}
+                    ? 'Registration Required to Authorize Dispatch'
+                    : 'Authorize & Dispatch Movement'}
                 </span>
                 <ArrowRight size={16} />
               </button>
@@ -1880,23 +1921,233 @@ export const SiteAgentTerminal: React.FC = () => {
           {/* SUB-FORM B: DELIVERY WORKFLOW */}
           {movementType === 'delivery' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* 1. WEIGHBRIDGE INBOUND SCANNER (ALWAYS ACCESSIBLE) */}
               <div
+                className="field-manifest-card"
                 style={{
-                  padding: '0.65rem 0.85rem',
-                  backgroundColor: '#D1FAE5',
-                  border: '1px solid #6EE7B7',
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: '0.78rem',
-                  color: '#065F46',
+                  padding: '1.15rem',
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
+                  flexDirection: 'column',
+                  gap: '0.85rem',
                 }}
               >
-                <Scale size={16} />
-                <span>
-                  Recording <strong>Delivery</strong> at <strong>{activeSite?.name}</strong>. Matching with in-transit waybill.
-                </span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div style={{ padding: '0.35rem', borderRadius: '6px', backgroundColor: '#ECFDF5', color: '#059669' }}>
+                        <Camera size={18} />
+                      </div>
+                      <strong style={{ fontSize: '0.95rem', color: '#0F172A', fontWeight: 800 }}>
+                        Scan Arriving Truck (OCR)
+                      </strong>
+                      <span className="pill-gate pill-gate-delivery" style={{ fontSize: '0.68rem' }}>WEIGHBRIDGE</span>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem', display: 'block' }}>
+                      Point camera at the arriving truck license plate. The system will detect the plate and auto-match its open in-transit waybill.
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={captureDeliveryPlate}
+                      disabled={isScanning || isCameraStarting}
+                      style={{ minHeight: '40px', gap: '0.4rem', backgroundColor: '#0284C7', borderColor: '#0369A1' }}
+                    >
+                      <Video size={16} /> Scan Plate (Live Camera)
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setDeliveryPlateEvidence(null);
+                        setHasScanned(false);
+                        openDeviceCamera('delivery');
+                      }}
+                      disabled={isScanning || isCameraStarting}
+                      style={{ minHeight: '40px', gap: '0.4rem' }}
+                    >
+                      <Camera size={16} /> Snap / Upload Photo
+                    </button>
+                    {matchingOpenTrip && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          setSelectedDeliveryTripId(null);
+                          setMatchedOffloadingTrip(null);
+                          setDeliveryPlateEvidence(null);
+                        }}
+                        style={{ minHeight: '40px', fontSize: '0.75rem' }}
+                        title="Deselect currently matched waybill"
+                      >
+                        <X size={15} /> Clear Match
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Manual Plate Entry fallback / shortcut for Weighbridge */}
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '0.5rem',
+                    alignItems: 'center',
+                    padding: '0.65rem 0.85rem',
+                    backgroundColor: '#FFFFFF',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-default)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: '180px' }}>
+                    <Search size={16} color="var(--text-secondary)" />
+                    <input
+                      type="text"
+                      value={manualDeliveryPlate}
+                      onChange={(e) => setManualDeliveryPlate(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          void handleManualOffloadingLookup();
+                        }
+                      }}
+                      placeholder="Enter truck plate (e.g. ABC-123-XY)..."
+                      style={{
+                        border: 'none',
+                        outline: 'none',
+                        width: '100%',
+                        fontSize: '0.82rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.04em',
+                        color: '#0F172A',
+                        backgroundColor: 'transparent',
+                      }}
+                    />
+                    {manualDeliveryPlate && (
+                      <button
+                        type="button"
+                        onClick={() => setManualDeliveryPlate('')}
+                        style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => void handleManualOffloadingLookup()}
+                    disabled={isManualLookingUp || !manualDeliveryPlate.trim()}
+                    style={{ minHeight: '34px', fontSize: '0.78rem', padding: '0 0.85rem' }}
+                  >
+                    {isManualLookingUp ? 'Searching...' : 'Lookup Waybill'}
+                  </button>
+                </div>
+
+                {cameraError && (
+                  <div style={{ padding: '0.65rem 0.8rem', borderRadius: 'var(--radius-md)', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', fontSize: '0.75rem' }}>
+                    {cameraError}
+                  </div>
+                )}
+
+                {/* Live Camera Viewfinder for Delivery Gate */}
+                {isLiveCameraActive && (
+                  <div className="camera-viewfinder-box" style={{ width: '100%' }}>
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="camera-video-feed"
+                      onLoadedMetadata={() => setIsCameraReady(true)}
+                    />
+                    <div className="camera-reticle-overlay">
+                      <div className="camera-scanline-laser" />
+                      <span className="camera-reticle-label">ALIGN ARRIVING TRUCK PLATE — FULL FRAME SAVED</span>
+                    </div>
+                    <div className="camera-live-pill">LIVE WEIGHBRIDGE SCANNER</div>
+                    <div style={{ position: 'absolute', zIndex: 10, left: 10, right: 10, bottom: 10, display: 'flex', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <button type="button" className="btn btn-secondary" onClick={switchWebsiteCamera} style={{ backgroundColor: 'rgba(15, 23, 42, 0.88)', color: '#FFFFFF' }}>
+                        <SwitchCamera size={14} /> Flip
+                      </button>
+                      <button type="button" className="btn btn-primary" onClick={captureFullWebsiteFrame} disabled={!isCameraReady}>
+                        <Camera size={16} /> {isCameraReady ? 'Capture Plate' : 'Starting...'}
+                      </button>
+                      <button type="button" className="btn btn-secondary" onClick={stopLiveCamera} style={{ backgroundColor: 'rgba(15, 23, 42, 0.88)', color: '#FFFFFF' }}>
+                        <VideoOff size={14} /> Close
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {isScanning && (
+                  <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#EFF6FF', borderRadius: 'var(--radius-md)', border: '1px solid #BFDBFE', fontSize: '0.75rem', fontWeight: 700, color: '#1E40AF', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div className="spinner" style={{ width: '14px', height: '14px', border: '2px solid #3B82F6', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                    {ocrStatus} — {Math.round(ocrProgress * 100)}%
+                  </div>
+                )}
+
+                {/* Plate Evidence Result Strip */}
+                {deliveryPlateEvidence && (
+                  <div
+                    style={{
+                      padding: '0.8rem 1rem',
+                      backgroundColor: deliveryPlateMatchesTrip ? '#F0FDF4' : matchingOpenTrip ? '#FFF7ED' : '#FEF2F2',
+                      border: `1.5px solid ${deliveryPlateMatchesTrip ? '#86EFAC' : matchingOpenTrip ? '#FDBA74' : '#FECACA'}`,
+                      borderRadius: 'var(--radius-md)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '0.75rem',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                      {deliveryPlateEvidence.imageUrl ? (
+                        <img
+                          src={deliveryPlateEvidence.imageUrl}
+                          alt="Delivery gate plate evidence"
+                          style={{ width: '68px', height: '48px', objectFit: 'contain', backgroundColor: '#0F172A', borderRadius: '6px', border: '1px solid var(--border-default)' }}
+                        />
+                      ) : (
+                        <div style={{ width: '68px', height: '48px', borderRadius: '6px', backgroundColor: '#FFEDD5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Camera size={20} color="#C2410C" />
+                        </div>
+                      )}
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <PlateDisplay plate={deliveryPlateEvidence.plate} size="sm" />
+                          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: deliveryPlateMatchesTrip ? '#166534' : '#991B1B' }}>
+                            {deliveryPlateMatchesTrip
+                              ? `Verified Match (${deliveryPlateEvidence.confidence}%)`
+                              : matchingOpenTrip
+                              ? `Mismatch vs Waybill (${deliveryPlateEvidence.confidence}%)`
+                              : `Unmatched Vehicle (${deliveryPlateEvidence.confidence}%)`}
+                          </span>
+                        </div>
+                        <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                          {deliveryPlateMatchesTrip
+                            ? `Matched with Waybill #${matchingOpenTrip?.trip_number}. Complete weighbridge net payload below.`
+                            : matchingOpenTrip
+                            ? `Scanned plate ${deliveryPlateEvidence.plate} does not match waybill truck ${expectedDeliveryPlate}.`
+                            : 'No open in-transit waybill matches this truck. Select from the open trips below or flag an exception.'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {!matchingOpenTrip && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setIsFlaggingException(true)}
+                        style={{ fontSize: '0.75rem', color: '#DC2626', borderColor: '#FCA5A5' }}
+                      >
+                        <AlertTriangle size={14} /> Flag Unlisted Truck
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div
@@ -1914,7 +2165,33 @@ export const SiteAgentTerminal: React.FC = () => {
                       Select the arriving waybill, then confirm its truck plate with OCR.
                     </span>
                   </div>
-                  <span className="badge badge-open">{deliveryOpenTrips.length} OPEN</span>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      padding: '0.2rem 0.65rem',
+                      borderRadius: 'var(--radius-full)',
+                      backgroundColor: deliveryOpenTrips.length > 0 ? '#FEF3C7' : '#F1F5F9',
+                      color: deliveryOpenTrips.length > 0 ? '#B45309' : '#64748B',
+                      border: `1px solid ${deliveryOpenTrips.length > 0 ? '#FDE68A' : '#E2E8F0'}`,
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '50%',
+                        backgroundColor: deliveryOpenTrips.length > 0 ? '#F59E0B' : '#94A3B8',
+                        flexShrink: 0,
+                      }}
+                    />
+                    {deliveryOpenTrips.length} {deliveryOpenTrips.length === 1 ? 'Trip In-Transit' : 'Trips In-Transit'}
+                  </span>
                 </div>
 
                 {deliveryOpenTrips.length === 0 ? (
@@ -1969,156 +2246,32 @@ export const SiteAgentTerminal: React.FC = () => {
 
               {matchingOpenTrip ? (
                 <>
-
-              {/* Mandatory fresh delivery-gate plate evidence */}
-              <div
-                style={{
-                  padding: '0.9rem 1rem',
-                  backgroundColor: deliveryPlateMatchesTrip ? '#F0FDF4' : '#FFF7ED',
-                  border: `1.5px solid ${deliveryPlateMatchesTrip ? '#86EFAC' : '#FDBA74'}`,
-                  borderRadius: 'var(--radius-md)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '0.85rem',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
-                  {deliveryPlateEvidence?.imageUrl ? (
-                    <img
-                      src={deliveryPlateEvidence.imageUrl}
-                      alt="Delivery gate plate evidence"
-                      style={{ width: '72px', height: '52px', objectFit: 'contain', backgroundColor: '#0F172A', borderRadius: '6px', border: '1px solid var(--border-default)' }}
-                    />
-                  ) : (
-                    <div style={{ width: '72px', height: '52px', borderRadius: '6px', backgroundColor: '#FFEDD5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Camera size={22} color="#C2410C" />
-                    </div>
-                  )}
-                  <div>
-                    <strong style={{ display: 'block', fontSize: '0.82rem', color: deliveryPlateMatchesTrip ? '#166534' : '#9A3412' }}>
-                      {deliveryPlateMatchesTrip
-                        ? `Delivery plate verified: ${deliveryPlateEvidence?.plate}`
-                        : deliveryPlateEvidence
-                        ? `Review plate: ${deliveryPlateEvidence.plate}`
-                        : 'Delivery plate photo required'}
-                    </strong>
-                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
-                      {deliveryPlateEvidence
-                        ? `${deliveryPlateEvidence.confidence}% confidence • Must match the active waybill truck`
-                        : 'Take a fresh photo of the arriving truck before completing the weighbridge fields.'}
-                    </span>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className={deliveryPlateMatchesTrip ? 'btn btn-secondary' : 'btn btn-primary'}
-                    onClick={captureDeliveryPlate}
-                    disabled={isScanning || isCameraStarting}
-                    style={{ minHeight: '42px' }}
-                  >
-                    <Video size={16} /> Website Camera
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      setDeliveryPlateEvidence(null);
-                      setHasScanned(false);
-                      openDeviceCamera('delivery');
+                  {/* Linked Inbound Waybill Card */}
+                  <div
+                    style={{
+                      padding: '0.85rem 1rem',
+                      backgroundColor: '#F8FAFC',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--border-subtle)',
                     }}
-                    disabled={isScanning || isCameraStarting}
-                    style={{ minHeight: '42px' }}
                   >
-                    <Camera size={16} /> Device Camera
-                  </button>
-                </div>
-
-                {cameraError && (
-                  <div style={{ flexBasis: '100%', width: '100%', padding: '0.65rem 0.8rem', borderRadius: 'var(--radius-md)', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B', fontSize: '0.75rem' }}>
-                    {cameraError}
-                  </div>
-                )}
-
-                {isLiveCameraActive && (
-                  <div className="camera-viewfinder-box" style={{ flexBasis: '100%', width: '100%' }}>
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="camera-video-feed"
-                      onLoadedMetadata={() => setIsCameraReady(true)}
-                    />
-                    <div className="camera-reticle-overlay">
-                      <div className="camera-scanline-laser" />
-                      <span className="camera-reticle-label">ALIGN ARRIVING TRUCK PLATE — FULL FRAME SAVED</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)' }}>
+                        MATCHED INBOUND TRIP
+                      </span>
+                      <span className="badge badge-open">IN TRANSIT</span>
                     </div>
-                    <div className="camera-live-pill">LIVE DELIVERY CAMERA</div>
-                    <div style={{ position: 'absolute', zIndex: 10, left: 10, right: 10, bottom: 10, display: 'flex', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <button type="button" className="btn btn-secondary" onClick={switchWebsiteCamera} style={{ backgroundColor: 'rgba(15, 23, 42, 0.88)', color: '#FFFFFF' }}>
-                        <SwitchCamera size={14} /> Flip
-                      </button>
-                      <button type="button" className="btn btn-primary" onClick={captureFullWebsiteFrame} disabled={!isCameraReady}>
-                        <Camera size={16} /> {isCameraReady ? 'Take Full Photo' : 'Starting...'}
-                      </button>
-                      <button type="button" className="btn btn-secondary" onClick={stopLiveCamera} style={{ backgroundColor: 'rgba(15, 23, 42, 0.88)', color: '#FFFFFF' }}>
-                        <VideoOff size={14} /> Close
-                      </button>
+                    <div style={{ fontSize: '0.925rem', fontWeight: 800, color: '#0F172A' }}>
+                      Waybill #{matchingOpenTrip.trip_number}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                      Dispatched from: <strong>{matchingOpenTrip.loading_site?.name || (matchingOpenTrip as any).loading_site_name || 'Loading Site'}</strong> • Expected: <strong>{matchingOpenTrip.loading_event?.estimated_tonnes || matchingOpenTrip.truck?.capacity_tonnes || (matchingOpenTrip as any).estimated_tonnes || 30} Tonnes</strong>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                      Driver: <strong>{matchingOpenTrip.driver?.full_name || (matchingOpenTrip as any).driver_name || 'Driver details on file'}</strong>
+                      {matchingOpenTrip.driver?.phone ? ` • ${matchingOpenTrip.driver.phone}` : ''}
                     </div>
                   </div>
-                )}
-
-                {isScanning && (
-                  <div style={{ flexBasis: '100%', width: '100%', fontSize: '0.75rem', fontWeight: 700, color: '#9A3412' }}>
-                    {ocrStatus} — {Math.round(ocrProgress * 100)}%
-                  </div>
-                )}
-              </div>
-
-              {/* Linked Inbound Waybill Card */}
-              {matchingOpenTrip ? (
-                <div
-                  style={{
-                    padding: '0.85rem 1rem',
-                    backgroundColor: '#F8FAFC',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--border-subtle)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-                    <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)' }}>
-                      MATCHED INBOUND TRIP
-                    </span>
-                    <span className="badge badge-open">IN TRANSIT</span>
-                  </div>
-                  <div style={{ fontSize: '0.925rem', fontWeight: 800, color: '#0F172A' }}>
-                    Waybill #{matchingOpenTrip?.trip_number}
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                    Dispatched from: <strong>{matchingOpenTrip?.loading_site?.name}</strong> • Expected: <strong>{matchingOpenTrip?.loading_event?.estimated_tonnes || matchingOpenTrip?.truck?.capacity_tonnes || 30} Tonnes</strong>
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                    Driver: <strong>{matchingOpenTrip.driver?.full_name || 'Driver details on file'}</strong>
-                    {matchingOpenTrip.driver?.phone ? ` • ${matchingOpenTrip.driver.phone}` : ''}
-                  </div>
-                </div>
-              ) : (
-                <div
-                  style={{
-                    padding: '0.75rem 1rem',
-                    backgroundColor: '#FEF3C7',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid #FCD34D',
-                    fontSize: '0.8rem',
-                    color: '#92400E',
-                  }}
-                >
-                  No active in-transit trip matched plate {confirmedPlate}. Please verify plate number or select from in-transit list.
-                </div>
-              )}
 
               {!isFlaggingException ? (
                 <form onSubmit={handleCompleteDelivery} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -2237,27 +2390,41 @@ export const SiteAgentTerminal: React.FC = () => {
                   )}
 
                   {/* Complete Delivery Action Button */}
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.5rem' }}>
                     <button
                       type="submit"
                       className="btn btn-success btn-lg"
-                      style={{ flex: 1 }}
+                      style={{
+                        flex: 1,
+                        minHeight: '48px',
+                        fontSize: '0.92rem',
+                        fontWeight: 700,
+                        backgroundColor: deliveryActionDisabled ? '#94A3B8' : '#059669',
+                        borderColor: deliveryActionDisabled ? '#94A3B8' : '#047857',
+                        boxShadow: deliveryActionDisabled ? 'none' : '0 4px 14px rgba(5, 150, 105, 0.3)',
+                        transition: 'all 0.2s ease',
+                        cursor: deliveryActionDisabled ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.5rem',
+                      }}
                       disabled={deliveryActionDisabled}
                       title={deliverySaved ? 'This delivery has already been closed.' : !deliveryPlateMatchesTrip ? 'Verify the arriving truck plate first' : 'Close this delivery trip'}
                     >
                       <CheckCircle2 size={18} />
-                      <span>{isDeliverySaving ? 'Closing Live Trip...' : deliverySaved ? 'Delivery Closed' : 'Save as Delivery & Close Trip'}</span>
+                      <span>{isDeliverySaving ? 'Closing Live Trip...' : deliverySaved ? 'Delivery Closed — Trip Verified' : 'Verify & Close Haulage Trip'}</span>
                     </button>
 
                     <button
                       type="button"
                       className="btn btn-secondary"
-                      style={{ minHeight: '44px', color: '#DC2626', borderColor: '#FCA5A5' }}
+                      style={{ minHeight: '48px', padding: '0 1rem', color: '#DC2626', borderColor: '#FCA5A5', fontWeight: 700, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
                       onClick={() => setIsFlaggingException(true)}
                       title="Flag discrepancy for manager triage"
                     >
                       <AlertTriangle size={16} />
-                      <span>Flag</span>
+                      <span>Flag Discrepancy</span>
                     </button>
                   </div>
                 </form>
@@ -2325,7 +2492,7 @@ export const SiteAgentTerminal: React.FC = () => {
               ) : (
                 <div style={{ padding: '1rem', backgroundColor: '#EFF6FF', border: '1px dashed #7DD3FC', borderRadius: 'var(--radius-md)', color: '#075985', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                   <Camera size={17} style={{ flexShrink: 0 }} />
-                  <span>Choose an open trip above and click <strong>Confirm Trip with OCR</strong> to scan the arriving truck and unlock the trip-closing fields.</span>
+                  <span>Scan the arriving truck with the Weighbridge Scanner above, or select an open waybill from the list to begin weighbridge payload verification.</span>
                 </div>
               )}
             </div>
@@ -2334,10 +2501,12 @@ export const SiteAgentTerminal: React.FC = () => {
       </div>
 
       {/* Recent Movements Processed by Site Agent */}
-      <div className="card">
+      <div className="field-manifest-card" style={{ padding: 0, overflow: 'hidden' }}>
         <div
           className="card-header"
           style={{
+            padding: '1rem 1.25rem',
+            borderBottom: '1px solid var(--border-subtle)',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -2346,9 +2515,9 @@ export const SiteAgentTerminal: React.FC = () => {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-            <FileText size={17} color="var(--brand-primary)" />
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>
-              Recent Field Movements Processed
+            <FileText size={18} color="var(--brand-primary)" />
+            <h3 style={{ fontSize: '0.98rem', fontWeight: 800, color: '#0F172A', margin: 0 }}>
+              Recent Dispatch Ledger
             </h3>
           </div>
 
@@ -2359,16 +2528,20 @@ export const SiteAgentTerminal: React.FC = () => {
                 type="button"
                 className="btn"
                 style={{
-                  minHeight: '30px',
+                  minHeight: '28px',
                   padding: '0.2rem 0.65rem',
-                  fontSize: '0.75rem',
-                  backgroundColor: activityFilter === f ? 'var(--brand-primary)' : 'var(--bg-subtle)',
-                  color: activityFilter === f ? '#FFFFFF' : 'var(--text-secondary)',
-                  border: activityFilter === f ? '1px solid var(--brand-primary)' : '1px solid var(--border-subtle)',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  borderRadius: 'var(--radius-full)',
+                  backgroundColor: activityFilter === f ? '#E0F2FE' : '#F8FAFC',
+                  color: activityFilter === f ? '#0369A1' : 'var(--text-secondary)',
+                  border: activityFilter === f ? '1px solid #0284C7' : '1px solid var(--border-subtle)',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
                 }}
                 onClick={() => setActivityFilter(f)}
               >
-                {f === 'all' ? 'All (Both)' : f === 'pickup' ? 'Pickups (Gate 1)' : 'Deliveries (Gate 2)'}
+                {f === 'all' ? 'All Movements' : f === 'pickup' ? 'Gate 1 (Pickup)' : 'Gate 2 (Delivery)'}
               </button>
             ))}
           </div>
@@ -2381,7 +2554,7 @@ export const SiteAgentTerminal: React.FC = () => {
               No recent movement records.
             </div>
           ) : (
-            filteredRecentTrips.map((trip) => {
+            (isLedgerExpanded ? filteredRecentTrips : filteredRecentTrips.slice(0, 2)).map((trip) => {
               const closureInvoice = tripInvoices.find((invoice) => invoice.trip_id === trip.id);
               return (
               <div
@@ -2425,6 +2598,42 @@ export const SiteAgentTerminal: React.FC = () => {
               </div>
               );
             })
+          )}
+
+          {filteredRecentTrips.length > 2 && (
+            <button
+              type="button"
+              onClick={() => setIsLedgerExpanded(!isLedgerExpanded)}
+              style={{
+                marginTop: '0.25rem',
+                padding: '0.55rem 0.85rem',
+                borderRadius: 'var(--radius-md)',
+                border: '1px dashed var(--border-default)',
+                backgroundColor: '#F8FAFC',
+                color: '#0284C7',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.4rem',
+                transition: 'all 0.15s ease',
+                width: '100%',
+              }}
+            >
+              {isLedgerExpanded ? (
+                <>
+                  <span>Show less</span>
+                  <ChevronUp size={14} />
+                </>
+              ) : (
+                <>
+                  <span>See more ({filteredRecentTrips.length - 2} more {filteredRecentTrips.length - 2 === 1 ? 'trip' : 'trips'})</span>
+                  <ChevronDown size={14} />
+                </>
+              )}
+            </button>
           )}
         </div>
       </div>
@@ -2547,24 +2756,6 @@ export const SiteAgentTerminal: React.FC = () => {
                   </div>
 
                   <div className="form-group" style={{ margin: 0 }}>
-                    <label className="form-label" style={{ fontSize: '0.75rem' }}>Truck Body / Model *</label>
-                    <select
-                      className="form-select"
-                      value={newTruckType}
-                      onChange={(e) => setNewTruckType(e.target.value)}
-                      style={{ fontSize: '0.8125rem' }}
-                    >
-                      {TRUCK_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid-3" style={{ gap: '0.75rem', marginTop: '0.65rem' }}>
-                  <div className="form-group" style={{ margin: 0 }}>
                     <label className="form-label" style={{ fontSize: '0.75rem' }}>Rated Payload (Tonnes) *</label>
                     <input
                       type="number"
@@ -2577,7 +2768,9 @@ export const SiteAgentTerminal: React.FC = () => {
                       onChange={(e) => setNewTruckCapacity(Number(e.target.value))}
                     />
                   </div>
+                </div>
 
+                <div className="grid-2" style={{ gap: '0.75rem', marginTop: '0.65rem' }}>
                   <div className="form-group" style={{ margin: 0 }}>
                     <label className="form-label" style={{ fontSize: '0.75rem' }}>Haulier / Fleet Owner *</label>
                     <input
