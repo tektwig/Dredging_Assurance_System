@@ -6,6 +6,8 @@ import { OffloadingPortal } from './features/offloading/OffloadingPortal';
 import { OperationsDashboard } from './features/operations/dashboard/OperationsDashboard';
 import { OperationsTripDetail } from './features/operations/trips/OperationsTripDetail';
 import { OperationsTripsRegister } from './features/operations/trips/OperationsTripsRegister';
+import { OperationsDriverDetail, OperationsTruckDetail } from './features/operations/trucksDrivers/OperationsAssetDetail';
+import { OperationsDriversList, OperationsTrucksList } from './features/operations/trucksDrivers/OperationsAssetsList';
 import { AuthenticatedLayout } from './layouts/AuthenticatedLayout';
 import { configurationError } from './lib/supabase';
 import { AccessDeniedPage } from './pages/AccessDeniedPage';
@@ -43,7 +45,12 @@ export default function App() {
           <Route index element={<OperationsDashboard />} />
           <Route path="trips" element={<OperationsTripsRegister />} />
           <Route path="trips/:tripId" element={<OperationsTripDetail />} />
-          {OPERATIONS_NAVIGATION.slice(2).map(item => <Route key={item.route} path={item.route}
+          <Route path="trucks-drivers" element={<Navigate to="trucks" replace />} />
+          <Route path="trucks-drivers/trucks" element={<OperationsTrucksList />} />
+          <Route path="trucks-drivers/trucks/:truckId" element={<OperationsTruckDetail />} />
+          <Route path="trucks-drivers/drivers" element={<OperationsDriversList />} />
+          <Route path="trucks-drivers/drivers/:driverId" element={<OperationsDriverDetail />} />
+          {OPERATIONS_NAVIGATION.slice(3).map(item => <Route key={item.route} path={item.route}
             element={<PortalPage role="operations_manager" title={item.title} />} />)}
           <Route path="*" element={<Navigate to={PORTALS.operations_manager.path} replace />} />
         </Route>

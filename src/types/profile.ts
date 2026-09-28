@@ -50,6 +50,28 @@ export interface Database {
     };
     Views: { [_ in never]: never };
     Functions: {
+      get_operations_trucks: { Args: { p_page?: number; p_page_size?: number; p_search?: string | null;
+        p_active?: boolean | null; p_regular_driver_id?: string | null }; Returns: unknown };
+      get_operations_drivers: { Args: { p_page?: number; p_page_size?: number; p_search?: string | null;
+        p_active?: boolean | null }; Returns: unknown };
+      get_operations_truck_detail: { Args: { p_truck_id: string }; Returns: unknown };
+      get_operations_driver_detail: { Args: { p_driver_id: string }; Returns: unknown };
+      get_operations_asset_trips: { Args: { p_kind: string; p_asset_id: string; p_page?: number;
+        p_page_size?: number }; Returns: unknown };
+      update_operations_truck_master: { Args: { p_truck_id: string; p_expected_updated_at: string;
+        p_truck_type: string | null; p_capacity: string | null; p_owner_name: string | null;
+        p_owner_contact: string | null; p_reason: string }; Returns: unknown };
+      correct_operations_truck_plate: { Args: { p_truck_id: string; p_expected_updated_at: string;
+        p_plate: string; p_reason: string }; Returns: unknown };
+      set_operations_truck_regular_driver: { Args: { p_truck_id: string; p_driver_id: string;
+        p_expected_updated_at: string; p_reason: string }; Returns: unknown };
+      set_operations_truck_active: { Args: { p_truck_id: string; p_active: boolean;
+        p_expected_updated_at: string; p_reason: string }; Returns: unknown };
+      update_operations_driver_master: { Args: { p_driver_id: string; p_expected_updated_at: string;
+        p_name: string; p_phone: string; p_email: string | null; p_license_number: string | null;
+        p_reason: string }; Returns: unknown };
+      set_operations_driver_active: { Args: { p_driver_id: string; p_active: boolean;
+        p_expected_updated_at: string; p_reason: string }; Returns: unknown };
       get_operations_trips: { Args: {
         p_page?: number; p_page_size?: number; p_search?: string | null; p_status?: 'open' | 'closed' | 'cancelled' | null;
         p_date_from?: string | null; p_date_to?: string | null; p_truck_filter?: string | null;
