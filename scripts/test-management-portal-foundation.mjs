@@ -97,9 +97,19 @@ for (const path of operationsPaths) {
     assert(output.includes('Exception register filters'));
     assert(output.includes('Loading results'));
     assert(!output.includes('This module is a Phase 1 placeholder'));
+  } else if (path === '/operations/reports') {
+    assert(output.includes('Report categories'));
+    assert(output.includes('Loading results'));
+    assert(!output.includes('This module is a Phase 1 placeholder'));
   } else assert(output.includes('This module is a Phase 1 placeholder'));
   assert(output.includes('Operations navigation'));
   assert(!renderApp(path, 'system_administrator').includes('This module is a Phase 1 placeholder'));
+  if (path === '/operations/reports') {
+    for (const role of APP_ROLES.filter(role => role !== 'operations_manager')) {
+      assert(!renderApp(path, role).includes('Report categories'));
+    }
+    assert(!renderApp(path, 'operations_manager', 'inactive').includes('Report categories'));
+  }
 }
 const tripDetail = renderApp(operationsTripDetailPath, 'operations_manager');
 assert(tripDetail.includes('Loading results'));

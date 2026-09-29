@@ -1,0 +1,17 @@
+.operations-reports-page { display: grid; gap: 1.25rem; }
+.operations-reports-page > header h1 { margin: 0; }
+.report-tabs { display: flex; flex-wrap: wrap; gap: .5rem; border-bottom: 1px solid var(--border, #d6dce2); }
+.report-tabs button { min-height: 2.75rem; padding: .55rem .9rem; border: 0; border-bottom: 3px solid transparent; background: transparent; color: inherit; cursor: pointer; }
+.report-tabs button[aria-selected="true"] { border-bottom-color: var(--accent, #167c72); font-weight: 700; }
+.operations-report-filters { display: flex; flex-wrap: wrap; align-items: end; gap: .8rem; padding: 1rem; }
+.operations-report-filters label { display: grid; gap: .3rem; min-width: 10rem; }
+.operations-report-filters input, .operations-report-filters select { min-height: 2.5rem; max-width: 100%; }
+.report-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; margin-bottom: 1rem; }
+.report-summary .card { display: grid; gap: .4rem; padding: .9rem; text-transform: capitalize; }
+.report-summary strong { font-size: 1.35rem; }
+.report-export-actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.report-export-actions [role="alert"] { flex-basis: 100%; margin: 0; }
+.operations-reports-page .table-scroll { overflow-x: auto; }
+.operations-reports-page table { width: 100%; border-collapse: collapse; }
+.operations-reports-page th, .operations-reports-page td { padding: .65rem; border-bottom: 1px solid var(--border, #d6dce2); text-align: left; white-space: nowrap; }
+@media (max-width: 40rem) { .operations-report-filters label { min-width: min(100%, 13rem); flex: 1 1 100%; } }

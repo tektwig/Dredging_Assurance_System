@@ -50,6 +50,9 @@ export interface Database {
     };
     Views: { [_ in never]: never };
     Functions: {
+      get_operations_report: { Args: { p_kind: string; p_filters?: Record<string, string | boolean>;
+        p_page?: number; p_page_size?: number }; Returns: unknown };
+      export_operations_report: { Args: { p_kind: string; p_filters: Record<string, string | boolean>; p_format: 'csv' | 'xlsx' }; Returns: unknown };
       get_operations_exceptions: { Args: { p_page?: number; p_page_size?: number; p_search?: string | null;
         p_status?: 'open' | 'in_review' | 'resolved' | null; p_type?: string | null;
         p_date_from?: string | null; p_date_to?: string | null; p_trip_id?: string | null;

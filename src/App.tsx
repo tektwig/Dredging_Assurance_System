@@ -6,6 +6,7 @@ import { OffloadingPortal } from './features/offloading/OffloadingPortal';
 import { OperationsDashboard } from './features/operations/dashboard/OperationsDashboard';
 import { OperationsExceptionDetail } from './features/operations/exceptions/OperationsExceptionDetail';
 import { OperationsExceptionsRegister } from './features/operations/exceptions/OperationsExceptionsRegister';
+import { OperationsReports } from './features/operations/reports/OperationsReports';
 import { OperationsTripDetail } from './features/operations/trips/OperationsTripDetail';
 import { OperationsTripsRegister } from './features/operations/trips/OperationsTripsRegister';
 import { OperationsDriverDetail, OperationsTruckDetail } from './features/operations/trucksDrivers/OperationsAssetDetail';
@@ -58,7 +59,8 @@ export default function App() {
           <Route path="waybills-payouts/:invoiceId" element={<OperationsWaybillDetail />} />
           <Route path="exceptions" element={<OperationsExceptionsRegister />} />
           <Route path="exceptions/:exceptionId" element={<OperationsExceptionDetail />} />
-          {OPERATIONS_NAVIGATION.slice(5).map(item => <Route key={item.route} path={item.route}
+          <Route path="reports" element={<OperationsReports />} />
+          {OPERATIONS_NAVIGATION.slice(6).map(item => <Route key={item.route} path={item.route}
             element={<PortalPage role="operations_manager" title={item.title} />} />)}
           <Route path="*" element={<Navigate to={PORTALS.operations_manager.path} replace />} />
         </Route>
