@@ -85,7 +85,9 @@ begin
   update public.trips
   set status = 'closed',
       offloading_site_id = p_offloading_site_id,
-      quantity_tonnes = p_quantity_tonnes
+      quantity_tonnes = p_quantity_tonnes,
+      closed_at = clock_timestamp(),
+      closed_by = auth.uid()
   where id = p_trip_id
   returning * into v_trip;
 

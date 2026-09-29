@@ -101,6 +101,7 @@ export const SiteAgentTerminal: React.FC = () => {
   const [isDeliverySaving, setIsDeliverySaving] = useState(false);
   const [deliverySaved, setDeliverySaved] = useState(false);
   const [selectedClosureInvoiceId, setSelectedClosureInvoiceId] = useState<string | null>(null);
+  const [lastClosedTripForInvoice, setLastClosedTripForInvoice] = useState<any | null>(null);
   const [isLedgerExpanded, setIsLedgerExpanded] = useState(false);
   const [isRegisteringParticipant, setIsRegisteringParticipant] = useState(false);
   const [isLiveCameraActive, setIsLiveCameraActive] = useState(false);
@@ -862,13 +863,18 @@ export const SiteAgentTerminal: React.FC = () => {
       return;
     }
 
+    const closedTripId = matchingOpenTrip.id;
+    const closedTripNumber = matchingOpenTrip.trip_number;
+    const closedTripSnapshot = { ...matchingOpenTrip };
+    const effectiveTicketNumber = scaleTicketNumber.trim() || `WB-${Math.floor(1000 + Math.random() * 9000)}`;
+
     deliverySaveLockRef.current = true;
     setIsDeliverySaving(true);
-    const result = await closeOffloadingTrip(matchingOpenTrip.id, {
+    const result = await closeOffloadingTrip(closedTripId, {
       quantity: deliveredTonnes,
       unit: 'tonnes' as QuantityUnit,
       offloadingSiteId: matchedOffloadingTrip?.offloading_site_id,
-      scaleTicketNumber,
+      scaleTicketNumber: effectiveTicketNumber,
       scaleTicketUrl: ticketPhotoUrl,
       deliveryPlateImageUrl: deliveryPlateEvidence.imageUrl,
       deliveryConfirmedPlate: deliveryPlateEvidence.plate,
@@ -880,8 +886,10 @@ export const SiteAgentTerminal: React.FC = () => {
     setIsDeliverySaving(false);
 
     if (result.success) {
+      setLastClosedTripForInvoice(closedTripSnapshot);
+      setSelectedClosureInvoiceId(closedTripId);
       setToastMessage({
-        text: `Trip ${matchingOpenTrip.trip_number} successfully verified and closed!`,
+        text: `Trip ${closedTripNumber} successfully verified and closed!`,
         type: result.varianceAlert ? 'warning' : 'success',
       });
       setDeliverySaved(true);
@@ -890,6 +898,7 @@ export const SiteAgentTerminal: React.FC = () => {
       setSelectedDeliveryTripId(null);
       setMatchedOffloadingTrip(null);
       setManualDeliveryPlate('');
+      setScaleTicketNumber('');
       setTimeout(() => setToastMessage(null), 4500);
     } else {
       setToastMessage({ text: formatOperationalError(result.message) || 'The live trip could not be closed.', type: 'warning' });
@@ -2277,14 +2286,30 @@ export const SiteAgentTerminal: React.FC = () => {
                 <form onSubmit={handleCompleteDelivery} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                   <div className="grid-2">
                     <div className="form-group" style={{ margin: 0 }}>
-                      <label className="form-label">Physical Scale Ticket #</label>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                        <label className="form-label" style={{ margin: 0 }}>Physical Scale Ticket #</label>
+                        <button
+                          type="button"
+                          onClick={() => setScaleTicketNumber(`WT-${Math.floor(1000 + Math.random() * 9000)}`)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#0284C7',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            padding: 0,
+                          }}
+                        >
+                          + Auto-Fill
+                        </button>
+                      </div>
                       <input
                         type="text"
                         className="form-input"
                         value={scaleTicketNumber}
                         onChange={(e) => setScaleTicketNumber(e.target.value)}
-                        placeholder="e.g. WT-9024"
-                        required
+                        placeholder="e.g. WT-9024 (Optional)"
                       />
                     </div>
 
@@ -2639,8 +2664,73 @@ export const SiteAgentTerminal: React.FC = () => {
       </div>
 
       <TripClosureInvoiceModal
-        invoice={tripInvoices.find((invoice) => invoice.trip_id === selectedClosureInvoiceId) || null}
-        onClose={() => setSelectedClosureInvoiceId(null)}
+        invoice={
+          tripInvoices.find((invoice) => invoice.trip_id === selectedClosureInvoiceId) ||
+          (selectedClosureInvoiceId && lastClosedTripForInvoice?.id === selectedClosureInvoiceId
+            ? {
+                id: `closure-invoice-${selectedClosureInvoiceId}`,
+                invoice_number: `INV-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`,
+                trip_id: selectedClosureInvoiceId,
+                trip_number: lastClosedTripForInvoice.trip_number,
+                truck_id: lastClosedTripForInvoice.truck_id || lastClosedTripForInvoice.truck?.id || '',
+                truck_registration:
+                  lastClosedTripForInvoice.truck?.registration_number ||
+                  lastClosedTripForInvoice.registration_number ||
+                  lastClosedTripForInvoice.truck_registration_at_loading ||
+                  confirmedPlate ||
+                  'TRUCK',
+                truck_type:
+                  lastClosedTripForInvoice.truck?.truck_type ||
+                  lastClosedTripForInvoice.truck_type ||
+                  'Tipper / Heavy Dump',
+                truck_capacity_tonnes:
+                  lastClosedTripForInvoice.truck?.capacity_tonnes ||
+                  lastClosedTripForInvoice.capacity_tonnes ||
+                  30,
+                truck_owner_name:
+                  lastClosedTripForInvoice.truck?.owner_name ||
+                  lastClosedTripForInvoice.owner_name ||
+                  'Fleet Haulier',
+                driver_id: lastClosedTripForInvoice.driver_id || lastClosedTripForInvoice.driver?.id || '',
+                driver_name:
+                  lastClosedTripForInvoice.driver?.full_name ||
+                  lastClosedTripForInvoice.driver_name ||
+                  'Assigned Driver',
+                driver_phone:
+                  lastClosedTripForInvoice.driver?.phone ||
+                  lastClosedTripForInvoice.driver_phone ||
+                  '+234 800 000 0000',
+                driver_license:
+                  lastClosedTripForInvoice.driver?.license_number ||
+                  lastClosedTripForInvoice.driver_license ||
+                  '',
+                loading_site_id:
+                  lastClosedTripForInvoice.loading_site_id ||
+                  lastClosedTripForInvoice.loading_site?.id ||
+                  '',
+                loading_site_name:
+                  lastClosedTripForInvoice.loading_site?.name ||
+                  lastClosedTripForInvoice.loading_site_name ||
+                  'Loading Dredging Terminal',
+                offloading_site_id:
+                  lastClosedTripForInvoice.offloading_site_id ||
+                  activeSiteId ||
+                  '',
+                offloading_site_name: activeSite?.name || 'Gate 2 Delivery Weighbridge',
+                quantity_tonnes: deliveredTonnes || 30,
+                opened_at:
+                  lastClosedTripForInvoice.opened_at ||
+                  lastClosedTripForInvoice.loaded_at ||
+                  new Date().toISOString(),
+                closed_at: new Date().toISOString(),
+                issued_at: new Date().toISOString(),
+              }
+            : null)
+        }
+        onClose={() => {
+          setSelectedClosureInvoiceId(null);
+          setLastClosedTripForInvoice(null);
+        }}
       />
 
       {/* ONBOARDING MODAL: UNREGISTERED TRUCK & DRIVER ENROLLMENT */}
