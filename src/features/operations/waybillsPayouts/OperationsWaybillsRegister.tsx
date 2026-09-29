@@ -22,8 +22,7 @@ export function OperationsWaybillsRegisterView({ state, filters, page, onFilters
 }) {
   const update = (key: keyof WaybillFilters, value: string) => onFiltersChange({ ...filters, [key]: value });
   return <div className="operations-waybills-page">
-    <header><p className="eyebrow">Closed trip lifecycle</p><h1>Waybills &amp; Payouts</h1>
-      <p className="muted">Server-side register. Date filters use Africa/Lagos closed-at days.</p></header>
+    <header><p className="eyebrow">Closed trip lifecycle</p><h1>Waybills &amp; Payouts</h1></header>
     <form className="card waybill-filters" aria-label="Waybill filters" onSubmit={event => event.preventDefault()}>
       <label>Search Waybill, trip, plate or driver<input type="search" value={filters.search}
         onChange={event => update('search', event.currentTarget.value)} /></label>
