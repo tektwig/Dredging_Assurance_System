@@ -65,6 +65,8 @@ export const SiteAgentTerminal: React.FC = () => {
     trips,
     tripInvoices,
     openTrips,
+    closedTrips,
+    exceptionTrips,
     createLoadingTrip,
     closeOffloadingTrip,
     raiseTripException,
@@ -1015,6 +1017,45 @@ export const SiteAgentTerminal: React.FC = () => {
           <span>{toastMessage.text}</span>
         </div>
       )}
+
+      {/* Shift Overview Metrics (Sixtus Industrial Tiles) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
+        <div style={{ background: '#FFFFFF', border: '1px solid #DCE4E9', borderRadius: '0.65rem', padding: '0.75rem 1rem' }}>
+          <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#60717E', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            In-Transit Fleet
+          </span>
+          <strong style={{ display: 'block', fontSize: '1.45rem', color: '#0284C7', fontVariantNumeric: 'tabular-nums', marginTop: '0.2rem' }}>
+            {openTrips.length}
+          </strong>
+        </div>
+
+        <div style={{ background: '#FFFFFF', border: '1px solid #DCE4E9', borderRadius: '0.65rem', padding: '0.75rem 1rem' }}>
+          <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#60717E', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Delivered Today
+          </span>
+          <strong style={{ display: 'block', fontSize: '1.45rem', color: '#059669', fontVariantNumeric: 'tabular-nums', marginTop: '0.2rem' }}>
+            {closedTrips.length}
+          </strong>
+        </div>
+
+        <div style={{ background: '#FFFFFF', border: '1px solid #DCE4E9', borderRadius: '0.65rem', padding: '0.75rem 1rem' }}>
+          <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#60717E', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Active Exceptions
+          </span>
+          <strong style={{ display: 'block', fontSize: '1.45rem', color: exceptionTrips.length > 0 ? '#DC2626' : '#60717E', fontVariantNumeric: 'tabular-nums', marginTop: '0.2rem' }}>
+            {exceptionTrips.length}
+          </strong>
+        </div>
+
+        <div style={{ background: '#FFFFFF', border: '1px solid #DCE4E9', borderRadius: '0.65rem', padding: '0.75rem 1rem' }}>
+          <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#60717E', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Gate Mode
+          </span>
+          <strong style={{ display: 'block', fontSize: '1.05rem', color: '#172B3A', marginTop: '0.45rem', textTransform: 'capitalize' }}>
+            {movementType === 'pickup' ? 'Gate 1 (Pickup)' : 'Gate 2 (Delivery)'}
+          </strong>
+        </div>
+      </div>
 
       {/* Native device-camera input. Mobile browsers open the operating-system camera. */}
       <input

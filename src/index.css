@@ -1629,12 +1629,87 @@ p {
   box-shadow: 0 1px 2px rgba(2, 132, 199, 0.12);
 }
 
+/* Clean Industrial Design Tokens (Field Terminal & Cards) */
 .field-manifest-card {
-  padding: 1.25rem;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  padding: 1.35rem 1.5rem;
+  border: 1px solid #DCE4E9;
+  border-top: 4px solid #16706E;
+  border-radius: 0.85rem;
   background-color: #FFFFFF;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 4px 20px rgba(18, 59, 67, 0.04);
+}
+
+.camera-viewfinder-box {
+  background: #F7FBFA;
+  border: 1.5px solid #CBDDE0;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  position: relative;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.6rem 1.15rem;
+  min-height: 2.75rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  font-family: inherit;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.btn-primary {
+  background: #125B59;
+  color: #FFFFFF;
+  border-color: #125B59;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #0E4948;
+  border-color: #0E4948;
+}
+
+.btn-secondary {
+  background: #FFFFFF;
+  border-color: #C7D1D8;
+  color: #243D4B;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #F3F7F8;
+  border-color: #B2BEC3;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.form-input, .form-select {
+  width: 100%;
+  border: 1px solid #C7D1D8;
+  border-radius: 0.5rem;
+  background: #FBFCFD;
+  min-height: 2.85rem;
+  padding: 0.65rem 0.95rem;
+  color: #172B3A;
+  font-size: 0.88rem;
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.form-input:focus, .form-select:focus {
+  outline: none;
+  border-color: #16706E;
+  box-shadow: 0 0 0 3px rgba(22, 112, 110, 0.15);
+  background: #FFFFFF;
 }
 
 /* ==========================================================================
