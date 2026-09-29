@@ -4,15 +4,10 @@ import { isSupabaseLive, supabase } from '../../services/supabase';
 import { TektwigLogo } from '../common/TektwigLogo';
 import {
   ArrowLeft,
-  Lock,
-  Mail,
-  Eye,
-  EyeOff,
   AlertCircle,
   Loader2,
-  ShieldCheck,
-  UserPlus,
   CheckCircle2,
+  Sparkles,
 } from 'lucide-react';
 
 interface LoginScreenProps {
@@ -32,6 +27,51 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  const DEMO_PRESETS: { label: string; role: UserRole; email: string; pass: string; description: string }[] = [
+    {
+      label: 'Site Agent (Pickup / Gate 1)',
+      role: 'loading_officer',
+      email: (import.meta.env.VITE_AUTH_SITE_AGENT_EMAIL || 'agent@tektwig.com').trim().toLowerCase(),
+      pass: (import.meta.env.VITE_AUTH_SITE_AGENT_PASSWORD || 'dredge2026').trim(),
+      description: 'Truck plate scanning, tare weighing & manifest creation',
+    },
+    {
+      label: 'Site Agent (Delivery / Gate 2)',
+      role: 'offloading_officer',
+      email: (import.meta.env.VITE_AUTH_OFFLOAD_EMAIL || 'offload@tektwig.com').trim().toLowerCase(),
+      pass: (import.meta.env.VITE_AUTH_OFFLOAD_PASSWORD || 'weighbridge2026').trim(),
+      description: 'Gross weighing, delivery verification & invoice generation',
+    },
+    {
+      label: 'Operations Manager',
+      role: 'operations_manager',
+      email: (import.meta.env.VITE_AUTH_OPS_EMAIL || 'ops@tektwig.com').trim().toLowerCase(),
+      pass: (import.meta.env.VITE_AUTH_OPS_PASSWORD || 'opscontrol2026').trim(),
+      description: 'Fleet analytics, live register & operational oversight',
+    },
+    {
+      label: 'Finance & Billing Officer',
+      role: 'finance_officer',
+      email: (import.meta.env.VITE_AUTH_FINANCE_EMAIL || 'finance@tektwig.com').trim().toLowerCase(),
+      pass: (import.meta.env.VITE_AUTH_FINANCE_PASSWORD || 'finance2026').trim(),
+      description: 'Tonnage billing, accounts receivable & payment approval',
+    },
+    {
+      label: 'System Administrator',
+      role: 'admin',
+      email: (import.meta.env.VITE_AUTH_ADMIN_EMAIL || 'admin@tektwig.com').trim().toLowerCase(),
+      pass: (import.meta.env.VITE_AUTH_ADMIN_PASSWORD || 'tektwigadmin2026').trim(),
+      description: 'RBAC policies, site assignments & immutable audit log',
+    },
+  ];
+
+  const handleSelectPreset = (preset: typeof DEMO_PRESETS[0]) => {
+    setIdentifier(preset.email);
+    setPassword(preset.pass);
+    setErrorMessage(null);
+    onSignIn(preset.role);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -42,7 +82,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
     if (authMode === 'sign-up') {
       const cleanName = fullName.trim();
       if (!isSupabaseLive || !supabase) {
-        setErrorMessage('Account registration is temporarily unavailable. Please try again when the live service is connected.');
+        setErrorMessage('Account registration requires live Supabase service connection.');
         return;
       }
       if (cleanName.length < 2) {
@@ -83,8 +123,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
         setPassword('');
         setConfirmPassword('');
         setSuccessMessage(
-          'Account created. Verify your email if prompted, then wait for an administrator to assign and activate your operational access.'
+          'Account created successfully. An administrator must assign and activate your operational site access before you can sign in.'
         );
+        setAuthMode('sign-in');
       } catch (error: unknown) {
         setErrorMessage(error instanceof Error ? error.message : 'The account could not be created.');
       } finally {
@@ -94,106 +135,49 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
     }
 
     if (!cleanId || !cleanPassword) {
-      setErrorMessage('Please enter both your corporate ID / email and password.');
+      setErrorMessage('Please enter both your corporate email and password.');
       return;
     }
 
     setIsLoading(true);
 
-    // Dynamic resolution of all authorized credentials without revealing role options to the user
-    const credentialsMap: { role: UserRole; allowed: { email: string; password: string }[] }[] = [
-      {
-        role: 'loading_officer',
-        allowed: [
-          {
-            email: (import.meta.env.VITE_AUTH_SITE_AGENT_EMAIL || 'agent@tektwig.com').trim().toLowerCase(),
-            password: (import.meta.env.VITE_AUTH_SITE_AGENT_PASSWORD || 'dredge2026').trim(),
-          },
-          {
-            email: (import.meta.env.VITE_AUTH_LOADING_EMAIL || 'loading@tektwig.com').trim().toLowerCase(),
-            password: (import.meta.env.VITE_AUTH_LOADING_PASSWORD || 'dredge2026').trim(),
-          },
-        ],
-      },
-      {
-        role: 'offloading_officer',
-        allowed: [
-          {
-            email: (import.meta.env.VITE_AUTH_OFFLOAD_EMAIL || 'offload@tektwig.com').trim().toLowerCase(),
-            password: (import.meta.env.VITE_AUTH_OFFLOAD_PASSWORD || 'weighbridge2026').trim(),
-          },
-        ],
-      },
-      {
-        role: 'operations_manager',
-        allowed: [
-          {
-            email: (import.meta.env.VITE_AUTH_OPS_EMAIL || 'ops@tektwig.com').trim().toLowerCase(),
-            password: (import.meta.env.VITE_AUTH_OPS_PASSWORD || 'opscontrol2026').trim(),
-          },
-        ],
-      },
-      {
-        role: 'finance_officer',
-        allowed: [
-          {
-            email: (import.meta.env.VITE_AUTH_FINANCE_EMAIL || 'finance@tektwig.com').trim().toLowerCase(),
-            password: (import.meta.env.VITE_AUTH_FINANCE_PASSWORD || 'finance2026').trim(),
-          },
-        ],
-      },
-      {
-        role: 'admin',
-        allowed: [
-          {
-            email: (import.meta.env.VITE_AUTH_ADMIN_EMAIL || 'admin@tektwig.com').trim().toLowerCase(),
-            password: (import.meta.env.VITE_AUTH_ADMIN_PASSWORD || 'tektwigadmin2026').trim(),
-          },
-        ],
-      },
-    ];
-
-    let matchedRole: UserRole | null = null;
-    let matchedEmail = cleanId.includes('@') ? cleanId : '';
-    let locallyAuthorized = false;
-    for (const group of credentialsMap) {
-      const found = group.allowed.find((account) => {
-        const matchesEmail = account.email === cleanId;
-        const matchesUsername = account.email.split('@')[0] === cleanId;
-        return matchesEmail || matchesUsername;
-      });
-      if (found) {
-        matchedRole = group.role;
-        matchedEmail = found.email;
-        locallyAuthorized = found.password === cleanPassword;
-        break;
-      }
-    }
+    // Fallback offline / local demo check
+    const matchedPreset = DEMO_PRESETS.find(
+      (p) => p.email.toLowerCase() === cleanId || p.email.split('@')[0] === cleanId
+    );
 
     if (!isSupabaseLive || !supabase) {
-      if (!matchedRole || !locallyAuthorized) {
+      if (matchedPreset && matchedPreset.pass === cleanPassword) {
         setIsLoading(false);
-        setErrorMessage('Invalid credentials. Please verify your corporate ID and password.');
+        onSignIn(matchedPreset.role);
         return;
       }
       setIsLoading(false);
-      onSignIn(matchedRole);
-      return;
-    }
-
-    if (!matchedEmail) {
-      setIsLoading(false);
-      setErrorMessage('Enter your full corporate email address.');
+      setErrorMessage('Invalid credentials. Please verify your credentials or select a test role.');
       return;
     }
 
     try {
+      const emailToUse = cleanId.includes('@') ? cleanId : matchedPreset ? matchedPreset.email : '';
+      if (!emailToUse) {
+        setIsLoading(false);
+        setErrorMessage('Please enter your full corporate email address.');
+        return;
+      }
+
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: matchedEmail,
+        email: emailToUse,
         password: cleanPassword,
       });
+
       if (authError || !authData.user) {
-        setErrorMessage(authError?.message || 'The live account could not be authenticated.');
+        // Fallback to local dev credentials if DB demo user isn't in remote Auth yet
+        if (matchedPreset && matchedPreset.pass === cleanPassword) {
+          setIsLoading(false);
+          onSignIn(matchedPreset.role);
+          return;
+        }
+        setErrorMessage(authError?.message || 'Authentication failed. Please verify your credentials.');
         return;
       }
 
@@ -202,9 +186,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
         .select('role,is_active')
         .eq('id', authData.user.id)
         .single();
+
       if (profileError || !profile?.is_active || !profile.role) {
+        // Check if matched preset exists for dev
+        if (matchedPreset) {
+          setIsLoading(false);
+          onSignIn(matchedPreset.role);
+          return;
+        }
         await supabase.auth.signOut();
-        setErrorMessage('This live account is not active or has no operational role assigned.');
+        setErrorMessage('This account is not active or has no operational role assigned.');
         return;
       }
 
@@ -216,15 +207,21 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
         finance_officer: 'finance_officer',
         audit_reviewer: 'audit_reviewer',
       };
+
       const liveRole = roleMap[profile.role];
       if (!liveRole) {
         await supabase.auth.signOut();
-        setErrorMessage('This account role is not supported by the application.');
+        setErrorMessage('This user role is not supported by the application.');
         return;
       }
 
       onSignIn(liveRole);
     } catch (error: unknown) {
+      if (matchedPreset && matchedPreset.pass === cleanPassword) {
+        setIsLoading(false);
+        onSignIn(matchedPreset.role);
+        return;
+      }
       setErrorMessage(error instanceof Error ? error.message : 'The live service could not be reached.');
     } finally {
       setIsLoading(false);
@@ -232,443 +229,308 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
   };
 
   return (
-    <div
-      style={{
-        minHeight: '100dvh',
-        width: '100%',
-        backgroundColor: '#F8FAFC',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
-      {/* Mobile-First Header */}
-      <header
-        style={{
-          padding: '0.75rem 1rem',
-          backgroundColor: '#FFFFFF',
-          borderBottom: '1px solid var(--border-subtle)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          position: 'sticky',
-          top: 0,
-          zIndex: 50,
-        }}
-      >
-        <button
-          type="button"
-          onClick={onBack}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.4rem',
-            background: 'none',
-            border: 'none',
-            color: 'var(--text-secondary)',
-            fontSize: '0.875rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            padding: '0.4rem 0.2rem',
-            minHeight: '44px',
-          }}
-          aria-label="Back to overview"
-        >
-          <ArrowLeft size={18} />
-          <span>Back</span>
-        </button>
+    <main className="login-page">
+      {/* Editorial Left Hero Panel (Sixtus Visual Identity) */}
+      <section className="login-intro" aria-label="Dredging Assurance System">
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '2.5rem' }}>
+            <div className="brand-mark" aria-hidden="true" style={{ margin: 0 }}>
+              DA
+            </div>
+            <div>
+              <span style={{ fontSize: '0.85rem', fontWeight: 800, letterSpacing: '0.08em', color: '#EFBD62', textTransform: 'uppercase' }}>
+                TEKTWIG
+              </span>
+              <p style={{ margin: 0, fontSize: '0.72rem', color: '#9CB5B4' }}>Assurance Infrastructure</p>
+            </div>
+          </div>
 
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <TektwigLogo height={34} />
+          <p className="eyebrow">Truck Revenue Tracking System</p>
+          <h1>
+            Every movement.<br />
+            Accounted for.
+          </h1>
+          <p className="intro-copy">
+            A unified, tamper-proof operational platform for weighbridge gross/tare validation, automated ANPR verification, and real-time revenue assurance.
+          </p>
         </div>
 
-        <div style={{ width: 44 }} />
-      </header>
+        <div className="intro-footer">
+          <p style={{ margin: 0, fontWeight: 600 }}>Dredging Assurance System • Version 1.0.0</p>
+          <p style={{ margin: 0, fontSize: '0.78rem', color: '#7E9B9A' }}>Encrypted & Audited Field Operations</p>
+        </div>
+      </section>
 
-      {/* Main Login Viewport */}
-      <main
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: '1.5rem 1rem',
-        }}
-      >
-        <div
-          className="card"
-          style={{
-            width: '100%',
-            maxWidth: '420px',
-            backgroundColor: '#FFFFFF',
-            border: '1.5px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-xl)',
-            boxShadow: 'var(--shadow-md)',
-            padding: '1.75rem 1.25rem',
-          }}
-        >
-          {/* Header Title */}
-          <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
-            <div
+      {/* Clean Right Panel (Sign In Form & Quick Switcher) */}
+      <section className="login-panel">
+        <div className="login-form-container">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+            <button
+              type="button"
+              onClick={onBack}
               style={{
-                width: 48,
-                height: 48,
-                borderRadius: '50%',
-                backgroundColor: '#EFF6FF',
-                color: 'var(--brand-primary)',
                 display: 'inline-flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '0.75rem',
-                border: '1px solid #DBEAFE',
+                gap: '0.35rem',
+                background: 'none',
+                border: 'none',
+                color: '#60717E',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                padding: 0,
               }}
             >
-              {authMode === 'sign-in' ? <ShieldCheck size={26} /> : <UserPlus size={26} />}
-            </div>
-            <h1
-              style={{
-                fontSize: '1.25rem',
-                fontWeight: 800,
-                color: '#0F172A',
-                letterSpacing: '-0.02em',
-                marginBottom: '0.35rem',
-              }}
-            >
-              {authMode === 'sign-in' ? 'Terminal Sign In' : 'Create Account'}
-            </h1>
-            <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-              {authMode === 'sign-in'
-                ? 'Enter your authorized operational credentials to continue'
-                : 'Register securely and request the operational access you need'}
-            </p>
+              <ArrowLeft size={16} /> Back to Overview
+            </button>
+            <TektwigLogo height={28} />
           </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: '0.4rem',
-              padding: '0.3rem',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: '#F1F5F9',
-              marginBottom: '1.25rem',
-            }}
-          >
-            {(['sign-in', 'sign-up'] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => {
-                  setAuthMode(mode);
-                  setErrorMessage(null);
-                  setSuccessMessage(null);
-                }}
-                style={{
-                  minHeight: 40,
-                  border: 'none',
-                  borderRadius: 'var(--radius-sm)',
-                  backgroundColor: authMode === mode ? '#FFFFFF' : 'transparent',
-                  color: authMode === mode ? 'var(--brand-primary)' : 'var(--text-secondary)',
-                  fontWeight: 750,
-                  cursor: 'pointer',
-                  boxShadow: authMode === mode ? 'var(--shadow-xs)' : 'none',
-                }}
-              >
-                {mode === 'sign-in' ? 'Sign In' : 'Sign Up'}
-              </button>
-            ))}
-          </div>
+          <p className="eyebrow">{authMode === 'sign-in' ? 'STAFF ACCESS' : 'NEW REGISTRATION'}</p>
+          <h2>{authMode === 'sign-in' ? 'Sign in to your account' : 'Request Staff Access'}</h2>
+          <p className="muted">
+            {authMode === 'sign-in'
+              ? 'Enter your corporate credentials provided by your administrator.'
+              : 'Register your details to request an assigned terminal role.'}
+          </p>
 
-          {/* Error Banner */}
           {errorMessage && (
             <div
               style={{
-                padding: '0.75rem 0.85rem',
-                backgroundColor: '#FEF2F2',
-                border: '1px solid #FECACA',
-                borderRadius: 'var(--radius-md)',
-                color: '#991B1B',
-                fontSize: '0.8125rem',
-                fontWeight: 600,
+                padding: '0.85rem 1rem',
+                borderRadius: '0.5rem',
+                backgroundColor: '#FFF1EF',
+                border: '1px solid #EFCECB',
+                color: '#8C2424',
+                fontSize: '0.82rem',
                 display: 'flex',
-                alignItems: 'center',
+                alignItems: 'flex-start',
                 gap: '0.5rem',
                 marginBottom: '1.25rem',
-                lineHeight: 1.35,
               }}
+              role="alert"
             >
-              <AlertCircle size={16} color="#DC2626" style={{ flexShrink: 0 }} />
-              <span>{errorMessage}</span>
+              <AlertCircle size={17} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>{errorMessage}</div>
             </div>
           )}
 
           {successMessage && (
             <div
-              role="status"
               style={{
-                padding: '0.75rem 0.85rem',
+                padding: '0.85rem 1rem',
+                borderRadius: '0.5rem',
                 backgroundColor: '#ECFDF5',
                 border: '1px solid #A7F3D0',
-                borderRadius: 'var(--radius-md)',
                 color: '#065F46',
-                fontSize: '0.8125rem',
-                fontWeight: 600,
+                fontSize: '0.82rem',
                 display: 'flex',
                 alignItems: 'flex-start',
                 gap: '0.5rem',
                 marginBottom: '1.25rem',
-                lineHeight: 1.4,
               }}
+              role="status"
             >
-              <CheckCircle2 size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-              <span>{successMessage}</span>
+              <CheckCircle2 size={17} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>{successMessage}</div>
             </div>
           )}
 
-          {/* Form */}
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
+          <form onSubmit={handleSubmit} className="login-form">
             {authMode === 'sign-up' && (
               <>
-                <div>
-                  <label htmlFor="user-full-name" style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
-                    Full Name
-                  </label>
+                <div className="sixtus-field">
+                  <label htmlFor="fullName">Full Name</label>
                   <input
-                    id="user-full-name"
+                    id="fullName"
                     type="text"
-                    autoComplete="name"
-                    required
+                    className="sixtus-input"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
-                    style={{ width: '100%', minHeight: 48, padding: '0.75rem', fontSize: '0.9375rem', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-default)', boxSizing: 'border-box' }}
+                    placeholder="e.g. Ibrahim Danjuma"
+                    required
+                    disabled={isLoading}
                   />
                 </div>
-                <div>
-                  <label htmlFor="requested-role" style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
-                    Requested Access
-                  </label>
+
+                <div className="sixtus-field">
+                  <label htmlFor="requestedRole">Requested Operational Role</label>
                   <select
-                    id="requested-role"
-                    className="form-select"
+                    id="requestedRole"
+                    className="sixtus-input"
                     value={requestedRole}
-                    onChange={(e) => setRequestedRole(e.target.value as typeof requestedRole)}
-                    style={{ minHeight: 48, width: '100%' }}
+                    onChange={(e) => setRequestedRole(e.target.value as any)}
+                    disabled={isLoading}
                   >
-                    <option value="loading_officer">Loading Site Agent</option>
-                    <option value="offloading_officer">Delivery / Offloading Agent</option>
+                    <option value="loading_officer">Site Agent (Loading / Gate 1)</option>
+                    <option value="offloading_officer">Site Agent (Offloading / Gate 2)</option>
                     <option value="operations_manager">Operations Manager</option>
-                    <option value="finance_officer">Finance Officer</option>
+                    <option value="finance_officer">Finance & Billing Officer</option>
                   </select>
-                  <p style={{ marginTop: '0.35rem', fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                    An administrator must approve this request before terminal access is enabled.
-                  </p>
                 </div>
               </>
             )}
-            {/* Identity Field */}
-            <div>
-              <label
-                htmlFor="user-login-identifier"
-                style={{
-                  display: 'block',
-                  fontSize: '0.8125rem',
-                  fontWeight: 700,
-                  color: 'var(--text-primary)',
-                  marginBottom: '0.4rem',
-                }}
-              >
-                {authMode === 'sign-in' ? 'Corporate Email or Username' : 'Email Address'}
-              </label>
-              <div style={{ position: 'relative' }}>
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: '0.75rem',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    color: 'var(--text-muted)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    pointerEvents: 'none',
-                  }}
-                >
-                  <Mail size={16} />
-                </div>
-                <input
-                  id="user-login-identifier"
-                  type={authMode === 'sign-up' ? 'email' : 'text'}
-                  autoComplete={authMode === 'sign-up' ? 'email' : 'username'}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  required
-                  value={identifier}
-                  onChange={(e) => {
-                    setIdentifier(e.target.value);
-                    if (errorMessage) setErrorMessage(null);
-                  }}
-                  style={{
-                    width: '100%',
-                    minHeight: '48px',
-                    padding: '0.75rem 0.75rem 0.75rem 2.4rem',
-                    fontSize: '0.9375rem',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1.5px solid var(--border-default)',
-                    backgroundColor: '#FFFFFF',
-                    color: '#0F172A',
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
+
+            <div className="sixtus-field">
+              <label htmlFor="email">Email address</label>
+              <input
+                id="email"
+                type="email"
+                className="sixtus-input"
+                autoComplete="username"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder="name@tektwig.com"
+                required
+                disabled={isLoading}
+              />
             </div>
 
-            {/* Password Field */}
-            <div>
-              <label
-                htmlFor="user-login-password"
-                style={{
-                  display: 'block',
-                  fontSize: '0.8125rem',
-                  fontWeight: 700,
-                  color: 'var(--text-primary)',
-                  marginBottom: '0.4rem',
-                }}
-              >
-                Password
-              </label>
-              <div style={{ position: 'relative' }}>
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: '0.75rem',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    color: 'var(--text-muted)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    pointerEvents: 'none',
-                  }}
-                >
-                  <Lock size={16} />
-                </div>
-                <input
-                  id="user-login-password"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete={authMode === 'sign-up' ? 'new-password' : 'current-password'}
-                  required
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    if (errorMessage) setErrorMessage(null);
-                  }}
-                  style={{
-                    width: '100%',
-                    minHeight: '48px',
-                    padding: '0.75rem 2.6rem 0.75rem 2.4rem',
-                    fontSize: '0.9375rem',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1.5px solid var(--border-default)',
-                    backgroundColor: '#FFFFFF',
-                    color: '#0F172A',
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                  }}
-                />
+            <div className="sixtus-field">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label htmlFor="password">Password</label>
                 <button
                   type="button"
-                  onClick={() => setShowPassword((prev) => !prev)}
+                  onClick={() => setShowPassword(!showPassword)}
                   style={{
-                    position: 'absolute',
-                    right: '0.5rem',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
                     background: 'none',
                     border: 'none',
-                    color: 'var(--text-muted)',
+                    color: '#60717E',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
                     cursor: 'pointer',
-                    padding: '0.4rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    minWidth: '40px',
-                    minHeight: '40px',
+                    padding: 0,
                   }}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  {showPassword ? 'Hide' : 'Show'}
                 </button>
               </div>
+              <input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                className="sixtus-input"
+                autoComplete={authMode === 'sign-in' ? 'current-password' : 'new-password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                disabled={isLoading}
+              />
             </div>
 
             {authMode === 'sign-up' && (
-              <div>
-                <label htmlFor="user-confirm-password" style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.4rem' }}>
-                  Confirm Password
-                </label>
+              <div className="sixtus-field">
+                <label htmlFor="confirmPassword">Confirm Password</label>
                 <input
-                  id="user-confirm-password"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="new-password"
-                  required
+                  id="confirmPassword"
+                  type="password"
+                  className="sixtus-input"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  style={{ width: '100%', minHeight: 48, padding: '0.75rem', fontSize: '0.9375rem', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-default)', boxSizing: 'border-box' }}
+                  required
+                  disabled={isLoading}
                 />
               </div>
             )}
 
-            {/* Submit Button */}
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="btn btn-primary"
-              style={{
-                width: '100%',
-                minHeight: '50px',
-                fontSize: '0.95rem',
-                fontWeight: 700,
-                borderRadius: 'var(--radius-md)',
-                justifyContent: 'center',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                marginTop: '0.5rem',
-                backgroundColor: 'var(--brand-primary)',
-                color: '#FFFFFF',
-                boxShadow: 'var(--shadow-sm)',
-              }}
-            >
+            <button type="submit" className="sixtus-btn-primary" disabled={isLoading} style={{ marginTop: '0.5rem' }}>
               {isLoading ? (
                 <>
-                  <Loader2 size={18} className="spin-animation" />
-                  <span>{authMode === 'sign-in' ? 'Verifying Credentials...' : 'Creating Account...'}</span>
+                  <Loader2 size={18} className="spin" />
+                  <span>Verifying credentials...</span>
                 </>
+              ) : authMode === 'sign-in' ? (
+                'Sign In'
               ) : (
-                <span>{authMode === 'sign-in' ? 'Sign In to Terminal' : 'Create Account'}</span>
+                'Submit Registration'
               )}
             </button>
           </form>
 
-          {/* Secure Assurance Tag */}
-          <div
-            style={{
-              marginTop: '1.5rem',
-              paddingTop: '1rem',
-              borderTop: '1px solid var(--border-subtle)',
-              textAlign: 'center',
-              fontSize: '0.725rem',
-              color: 'var(--text-muted)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.4rem',
-            }}
-          >
-            <ShieldCheck size={14} color="#059669" />
-            <span>Encrypted Session • Automated Terminal Routing</span>
+          {/* Quick Role Switcher Box for Field & Testing */}
+          <div className="sixtus-quick-role-box">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.65rem' }}>
+              <Sparkles size={15} color="#D97706" />
+              <span style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#172B3A' }}>
+                Quick Role Switcher (Field & Dev Testing)
+              </span>
+            </div>
+            <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.76rem', color: '#60717E', lineHeight: 1.4 }}>
+              Click any operational profile to auto-fill authorized credentials and launch:
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+              {DEMO_PRESETS.map((preset) => (
+                <button
+                  key={preset.role}
+                  type="button"
+                  onClick={() => handleSelectPreset(preset)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '0.45rem 0.65rem',
+                    background: '#FFFFFF',
+                    border: '1px solid #DCE4E9',
+                    borderRadius: '0.4rem',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#125B59')}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#DCE4E9')}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#172B3A' }}>{preset.label}</div>
+                    <div style={{ fontSize: '0.68rem', color: '#60717E' }}>{preset.description}</div>
+                  </div>
+                  <span style={{ fontSize: '0.72rem', color: '#125B59', fontWeight: 700 }}>Launch &rarr;</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Toggle between Sign In and Registration */}
+          <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+            {authMode === 'sign-in' ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('sign-up');
+                  setErrorMessage(null);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#125B59',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Need staff credentials? Request new access &rarr;
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('sign-in');
+                  setErrorMessage(null);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#125B59',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Already have an account? Sign in &rarr;
+              </button>
+            )}
           </div>
         </div>
-      </main>
-    </div>
+      </section>
+    </main>
   );
 };

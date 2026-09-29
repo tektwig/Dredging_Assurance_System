@@ -1636,3 +1636,224 @@ p {
   background-color: #FFFFFF;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
+
+/* ==========================================================================
+   Editorial Split-Screen Login & Header Layout (Sixtus UI Integration)
+   ========================================================================== */
+.login-page {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  min-height: 100dvh;
+  width: 100%;
+  background: #ffffff;
+}
+
+.login-intro {
+  padding: clamp(2.5rem, 6vw, 5.5rem);
+  background: #123b43;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+}
+
+.login-intro::after {
+  content: '';
+  width: 32rem;
+  height: 32rem;
+  border: 1.5px solid rgba(255, 255, 255, 0.08);
+  border-radius: 50%;
+  position: absolute;
+  bottom: -14rem;
+  right: -8rem;
+  pointer-events: none;
+}
+
+.login-intro::before {
+  content: '';
+  width: 46rem;
+  height: 46rem;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 50%;
+  position: absolute;
+  bottom: -21rem;
+  right: -15rem;
+  pointer-events: none;
+}
+
+.brand-mark {
+  width: 3.25rem;
+  height: 3.25rem;
+  background: #efbd62;
+  color: #173940;
+  border-radius: 0.75rem;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 1.2rem;
+  margin-bottom: 2.5rem;
+  box-shadow: 0 4px 14px rgba(239, 189, 98, 0.28);
+}
+
+.login-intro .eyebrow {
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: #b3cccb;
+  margin-bottom: 1rem;
+}
+
+.login-intro h1 {
+  font-size: clamp(2.2rem, 4vw, 3.8rem);
+  line-height: 1.15;
+  color: #ffffff;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  margin-bottom: 1.25rem;
+}
+
+.intro-copy {
+  color: #c6d6d7;
+  max-width: 28rem;
+  font-size: 1.05rem;
+  line-height: 1.65;
+}
+
+.intro-footer {
+  margin-top: 3.5rem;
+  margin-bottom: 0;
+  font-size: 0.85rem;
+  color: #9cb5b4;
+  letter-spacing: 0.04em;
+}
+
+.login-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: clamp(2rem, 5vw, 4rem) clamp(1.5rem, 4vw, 3.5rem);
+  background: #ffffff;
+  overflow-y: auto;
+}
+
+.login-form-container {
+  width: min(100%, 26rem);
+}
+
+.login-panel .eyebrow {
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: #527080;
+  margin-bottom: 0.65rem;
+}
+
+.login-panel h2 {
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #172b3a;
+  margin-bottom: 0.45rem;
+}
+
+.login-panel .muted {
+  color: #60717e;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin-bottom: 1.5rem;
+}
+
+.sixtus-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1.15rem;
+}
+
+.sixtus-field label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #243d4b;
+}
+
+.sixtus-input {
+  width: 100%;
+  border: 1px solid #c7d1d8;
+  border-radius: 0.5rem;
+  background: #fbfcfd;
+  min-height: 2.9rem;
+  padding: 0.7rem 0.95rem;
+  color: #172b3a;
+  font-size: 0.92rem;
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sixtus-input:focus {
+  outline: none;
+  border-color: #16706e;
+  box-shadow: 0 0 0 3px rgba(22, 112, 110, 0.15);
+  background: #ffffff;
+}
+
+.sixtus-btn-primary {
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: #125b59;
+  color: #ffffff;
+  font-size: 0.92rem;
+  font-weight: 700;
+  padding: 0.8rem 1.25rem;
+  min-height: 2.9rem;
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  transition: background 0.15s ease;
+  width: 100%;
+}
+
+.sixtus-btn-primary:hover:not(:disabled) {
+  background: #0e4948;
+}
+
+.sixtus-btn-primary:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.sixtus-quick-role-box {
+  margin-top: 1.75rem;
+  padding: 1.1rem;
+  border: 1px dashed #c7d1d8;
+  border-radius: 0.65rem;
+  background: #f8fafc;
+}
+
+@media (max-width: 860px) {
+  .login-page {
+    grid-template-columns: 1fr;
+  }
+  .login-intro {
+    padding: 2.5rem 1.5rem;
+  }
+  .brand-mark {
+    margin-bottom: 1.5rem;
+  }
+  .login-intro h1 {
+    font-size: 2.2rem;
+  }
+  .intro-footer {
+    display: none;
+  }
+  .login-panel {
+    padding: 2.5rem 1.5rem;
+  }
+}
+
