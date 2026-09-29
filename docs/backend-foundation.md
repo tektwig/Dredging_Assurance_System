@@ -330,6 +330,25 @@ reference and permits same-reference replay without a second update. Existing
 Finance/Admin payment RPCs and permissions remain unchanged. No payout amount
 is calculated.
 
+### Operations Exceptions
+
+Migrations `20260927000800_operations_exceptions_enum.sql` and
+`20260927000900_operations_exceptions_workflow.sql` add `in_review` as a separate
+enum migration, then enforce `open` → `in_review` → `resolved`. Historical
+resolved exceptions are not rewritten. The Operations register/detail RPCs are
+bounded, role-checked projections; they omit free-text descriptions, legacy
+resolution reasons and raw audit JSON. Detail history projects only status,
+timestamp and the attached actor's display name. There is no manual-create UI.
+
+Operations transitions require the exact exception `updated_at`; rejected or
+stale attempts make no change and create no audit event. Resolution accepts only
+the approved outcome codes and never edits related operational records. The
+legacy two-argument `resolve_trip_exception` now rejects writes; active
+Administrators use its versioned three-argument overload for an already-reviewed
+exception. Neither permits a direct open-to-resolved transition or arbitrary
+reason text. Blocking exceptions remain effective while
+open or in review; Loading's blocker lookup excludes only resolved exceptions.
+
 ## Validation and local operation
 
 Use the locally installed CLI: `npx --no-install supabase ...`. No production seed

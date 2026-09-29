@@ -1,0 +1,17 @@
+.operations-exceptions-page { display: grid; gap: 1.25rem; }
+.exception-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; padding: 1rem; }
+.exception-filters label, .exception-resolve-actions label { display: grid; gap: .4rem; font-size: .8rem; font-weight: 700; }
+.exception-filters input, .exception-filters select, .exception-resolve-actions select { width: 100%; min-width: 0; min-height: 2.8rem; padding: .65rem .8rem; border: 1px solid #c7d1d8; border-radius: .5rem; background: #fbfcfd; color: #172b3a; font: inherit; }
+.exception-filters label:first-child { grid-column: span 2; }
+.exception-filters button { align-self: end; }
+.operations-exceptions-page a { color: #125b59; font-weight: 800; }
+.exception-detail-section { padding: clamp(1rem, 2.5vw, 2rem); }
+.exception-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.exception-detail-grid dt { color: #60717e; font-size: .77rem; font-weight: 700; }
+.exception-detail-grid dd { margin: .25rem 0 0; overflow-wrap: anywhere; }
+.exception-lifecycle, .exception-history { display: grid; gap: .65rem; padding-left: 1.5rem; }
+.exception-resolve-actions { display: flex; align-items: end; gap: 1rem; }
+.exception-resolve-actions label { min-width: min(100%, 22rem); }
+.exception-message { padding: 1rem; }
+@media (max-width: 900px) { .exception-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } .exception-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .exception-filters, .exception-detail-grid { grid-template-columns: 1fr; } .exception-filters label:first-child { grid-column: auto; } .exception-resolve-actions { align-items: stretch; flex-direction: column; } }

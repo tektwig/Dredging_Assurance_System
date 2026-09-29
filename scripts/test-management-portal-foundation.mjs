@@ -93,6 +93,10 @@ for (const path of operationsPaths) {
   } else if (path === '/operations/waybills-payouts') {
     assert(output.includes('Loading results'));
     assert(!output.includes('This module is a Phase 1 placeholder'));
+  } else if (path === '/operations/exceptions') {
+    assert(output.includes('Exception register filters'));
+    assert(output.includes('Loading results'));
+    assert(!output.includes('This module is a Phase 1 placeholder'));
   } else assert(output.includes('This module is a Phase 1 placeholder'));
   assert(output.includes('Operations navigation'));
   assert(!renderApp(path, 'system_administrator').includes('This module is a Phase 1 placeholder'));
@@ -102,6 +106,13 @@ assert(tripDetail.includes('Loading results'));
 assert(tripDetail.includes('href="/operations/trips"'));
 assert(tripDetail.includes('aria-current="page"'));
 assert(!tripDetail.includes('This module is a Phase 1 placeholder'));
+const exceptionDetailPath = '/operations/exceptions/00000000-0000-0000-0000-000000000001';
+const exceptionDetail = renderApp(exceptionDetailPath, 'operations_manager');
+assert(exceptionDetail.includes('Loading results'));
+assert(exceptionDetail.includes('aria-current="page"'));
+for (const role of APP_ROLES.filter(role => role !== 'operations_manager')) {
+  assert(!renderApp(exceptionDetailPath, role).includes('Loading results'));
+}
 for (const role of APP_ROLES.filter(role => role !== 'operations_manager')) {
   assert(!renderApp(operationsTripDetailPath, role).includes('Read-only lifecycle record'));
 }

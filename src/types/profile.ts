@@ -50,6 +50,14 @@ export interface Database {
     };
     Views: { [_ in never]: never };
     Functions: {
+      get_operations_exceptions: { Args: { p_page?: number; p_page_size?: number; p_search?: string | null;
+        p_status?: 'open' | 'in_review' | 'resolved' | null; p_type?: string | null;
+        p_date_from?: string | null; p_date_to?: string | null; p_trip_id?: string | null;
+        p_truck_id?: string | null }; Returns: unknown };
+      get_operations_exception_detail: { Args: { p_exception_id: string; p_history_limit?: number }; Returns: unknown };
+      start_operations_exception_review: { Args: { p_exception_id: string; p_expected_updated_at: string }; Returns: unknown };
+      resolve_operations_exception: { Args: { p_exception_id: string; p_expected_updated_at: string;
+        p_resolution_code: string }; Returns: unknown };
       get_operations_waybills: { Args: { p_page?: number; p_page_size?: number; p_search?: string | null;
         p_quick_filter?: string | null; p_date_from?: string | null; p_date_to?: string | null;
         p_pdf_status?: string | null; p_delivery_status?: string | null; p_payout_status?: string | null }; Returns: unknown };

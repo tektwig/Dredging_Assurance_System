@@ -175,7 +175,11 @@ insert into public.exceptions(
 );
 set local role authenticated;
 select set_config('request.jwt.claim.sub','a8110000-0000-0000-0000-000000000001',true);
-select public.resolve_trip_exception('a8180000-0000-0000-0000-000000000002','RESOLUTION-SECRET');
+select public.start_operations_exception_review('a8180000-0000-0000-0000-000000000002',
+  (select updated_at from public.exceptions where id='a8180000-0000-0000-0000-000000000002'));
+select public.resolve_operations_exception('a8180000-0000-0000-0000-000000000002',
+  (select updated_at from public.exceptions where id='a8180000-0000-0000-0000-000000000002'),
+  'issue_verified_resolved');
 reset role;
 
 create temp table operations_trip_results(key text primary key, value jsonb);

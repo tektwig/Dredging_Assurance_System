@@ -13,6 +13,9 @@ begin
   end;
   raise exception 'Expected SQLSTATE %',state;
 end $$;
+create function pg_temp.waybill_ops_anchor() returns timestamptz language sql immutable as $$
+  select timestamp with time zone '2026-09-28 09:00 Africa/Lagos'
+$$;
 
 select pg_temp.waybill_ops_assert((select count(*)=7 and bool_and(
   has_function_privilege('authenticated',p.oid,'EXECUTE')
@@ -57,9 +60,11 @@ insert into public.trucks(id,registration_number,driver_id) values
 alter table public.daily_registrations disable trigger user;
 insert into public.daily_registrations(id,truck_id,initial_driver_id,operational_date,registered_at,registered_by)
 values ('c8150000-0000-0000-0000-000000000001','c8140000-0000-0000-0000-000000000001',
-  'c8130000-0000-0000-0000-000000000001',date '2026-09-28',clock_timestamp(),'c8110000-0000-0000-0000-000000000002'),
+  'c8130000-0000-0000-0000-000000000001',(pg_temp.waybill_ops_anchor() at time zone 'Africa/Lagos')::date,
+  pg_temp.waybill_ops_anchor(),'c8110000-0000-0000-0000-000000000002'),
  ('c8150000-0000-0000-0000-000000000002','c8140000-0000-0000-0000-000000000002',
-  'c8130000-0000-0000-0000-000000000002',date '2026-09-28',clock_timestamp(),'c8110000-0000-0000-0000-000000000002');
+  'c8130000-0000-0000-0000-000000000002',(pg_temp.waybill_ops_anchor() at time zone 'Africa/Lagos')::date,
+  pg_temp.waybill_ops_anchor(),'c8110000-0000-0000-0000-000000000002');
 alter table public.daily_registrations enable trigger user;
 alter table public.trips disable trigger user;
 insert into public.trips(id,trip_number,truck_id,driver_id,daily_registration_id,loading_site_id,
@@ -68,13 +73,13 @@ insert into public.trips(id,trip_number,truck_id,driver_id,daily_registration_id
 values ('c8160000-0000-0000-0000-000000000001','WAY-TRIP-001','c8140000-0000-0000-0000-000000000001',
   'c8130000-0000-0000-0000-000000000001','c8150000-0000-0000-0000-000000000001',
   'c8120000-0000-0000-0000-000000000001','c8120000-0000-0000-0000-000000000002','closed',15,
-  timestamp with time zone '2026-09-28 09:00 Africa/Lagos','c8110000-0000-0000-0000-000000000002',
-  timestamp with time zone '2026-09-28 11:00 Africa/Lagos','c8110000-0000-0000-0000-000000000003','WAY-001','Paid Driver'),
+  pg_temp.waybill_ops_anchor(),'c8110000-0000-0000-0000-000000000002',
+  pg_temp.waybill_ops_anchor()+interval '2 hours','c8110000-0000-0000-0000-000000000003','WAY-001','Paid Driver'),
  ('c8160000-0000-0000-0000-000000000002','WAY-TRIP-002','c8140000-0000-0000-0000-000000000002',
   'c8130000-0000-0000-0000-000000000002','c8150000-0000-0000-0000-000000000002',
   'c8120000-0000-0000-0000-000000000001','c8120000-0000-0000-0000-000000000002','closed',18,
-  timestamp with time zone '2026-09-28 09:00 Africa/Lagos','c8110000-0000-0000-0000-000000000002',
-  timestamp with time zone '2026-09-28 12:00 Africa/Lagos','c8110000-0000-0000-0000-000000000003','WAY-002','Missing Bank Driver');
+  pg_temp.waybill_ops_anchor(),'c8110000-0000-0000-0000-000000000002',
+  pg_temp.waybill_ops_anchor()+interval '3 hours','c8110000-0000-0000-0000-000000000003','WAY-002','Missing Bank Driver');
 alter table public.trips enable trigger user;
 insert into public.trip_closure_invoices(id,invoice_number,trip_id,trip_number,truck_id,truck_registration,
   driver_id,driver_name,driver_email,loading_site_id,loading_site_name,offloading_site_id,
@@ -84,17 +89,17 @@ values ('c8170000-0000-0000-0000-000000000001','INV-2026-888881','c8160000-0000-
   'c8130000-0000-0000-0000-000000000001','Paid Driver','immutable-driver@example.invalid',
   'c8120000-0000-0000-0000-000000000001','Waybill Loading',
   'c8120000-0000-0000-0000-000000000002','Waybill Offloading',15,
-  timestamp with time zone '2026-09-28 09:00 Africa/Lagos',
-  timestamp with time zone '2026-09-28 11:00 Africa/Lagos',
-  timestamp with time zone '2026-09-28 11:00 Africa/Lagos'),
+  pg_temp.waybill_ops_anchor(),
+  pg_temp.waybill_ops_anchor()+interval '2 hours',
+  pg_temp.waybill_ops_anchor()+interval '2 hours'),
  ('c8170000-0000-0000-0000-000000000002','INV-2026-888882','c8160000-0000-0000-0000-000000000002',
   'WAY-TRIP-002','c8140000-0000-0000-0000-000000000002','WAY-002',
   'c8130000-0000-0000-0000-000000000002','Missing Bank Driver',null,
   'c8120000-0000-0000-0000-000000000001','Waybill Loading',
   'c8120000-0000-0000-0000-000000000002','Waybill Offloading',18,
-  timestamp with time zone '2026-09-28 09:00 Africa/Lagos',
-  timestamp with time zone '2026-09-28 12:00 Africa/Lagos',
-  timestamp with time zone '2026-09-28 12:00 Africa/Lagos');
+  pg_temp.waybill_ops_anchor(),
+  pg_temp.waybill_ops_anchor()+interval '3 hours',
+  pg_temp.waybill_ops_anchor()+interval '3 hours');
 update public.trip_closure_invoice_documents set status='ready',ready_at=clock_timestamp()
 where invoice_id='c8170000-0000-0000-0000-000000000001';
 insert into public.trip_payments(trip_id,truck_id,driver_id,driver_name,driver_phone,
@@ -121,8 +126,11 @@ select pg_temp.waybill_ops_assert((public.get_operations_waybills(1,25,'WAY001')
   and (public.get_operations_waybills(1,25,'Missing Bank')->>'total_count')::integer=1,
   'server register searches normalized snapshot plate and snapshot driver');
 select pg_temp.waybill_ops_assert((public.get_operations_waybills(1,25,'WAY-TRIP',null,
-  date '2026-09-28',date '2026-09-28')->>'total_count')::integer=2
-  and (public.get_operations_waybills(1,25,'WAY-TRIP',null,date '2026-09-27',date '2026-09-27')
+  (pg_temp.waybill_ops_anchor() at time zone 'Africa/Lagos')::date,
+  (pg_temp.waybill_ops_anchor() at time zone 'Africa/Lagos')::date)->>'total_count')::integer=2
+  and (public.get_operations_waybills(1,25,'WAY-TRIP',null,
+  (pg_temp.waybill_ops_anchor() at time zone 'Africa/Lagos')::date-1,
+  (pg_temp.waybill_ops_anchor() at time zone 'Africa/Lagos')::date-1)
   ->>'total_count')::integer=0,'closed-date range uses inclusive Lagos days');
 select pg_temp.waybill_ops_assert((public.get_operations_waybills(1,25,null,
   'payment_details_required')->>'total_count')::integer=1
