@@ -1,119 +1,110 @@
-import React, { lazy, Suspense } from 'react';
-import { AppStateProvider, useAppState } from './context/AppStateContext';
-import { AppShell } from './components/layout/AppShell';
-import { LandingPage } from './components/landing/LandingPage';
-import { SiteAgentTerminal } from './components/field/SiteAgentTerminal';
-import { OperationsDashboard } from './components/operations/OperationsDashboard';
-import { FinanceView } from './components/finance/FinanceView';
-import { AdminAuditView } from './components/admin/AdminAuditView';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { AuthProvider } from './auth/AuthProvider';
+import { StatusPage } from './components/StatusPage';
+import { LoadingPortal } from './features/loading/LoadingPortal';
+import { OffloadingPortal } from './features/offloading/OffloadingPortal';
+import { OperationsDashboard } from './features/operations/dashboard/OperationsDashboard';
+import { OperationsTripDetail } from './features/operations/trips/OperationsTripDetail';
+import { OperationsTripsRegister } from './features/operations/trips/OperationsTripsRegister';
+import { AuthenticatedLayout } from './layouts/AuthenticatedLayout';
+import { configurationError } from './lib/supabase';
+import { AccessDeniedPage } from './pages/AccessDeniedPage';
+import { LoginPage } from './pages/LoginPage';
+import { PortalPage } from './pages/PortalPage';
+import { AccountGate, HomeRedirect, LoginOnly, RequireRole, RequireSession } from './routing/RouteGuards';
+import { ADMIN_NAVIGATION, OPERATIONS_NAVIGATION, PORTALS, type PortalRole } from './routing/roleRoutes';
 
-import { ShieldAlert } from 'lucide-react';
-
-const SixtusApp = lazy(() => import('./App.sixtus'));
-
-const MainContent: React.FC = () => {
-  const { activeRole, authenticatedRole, signOut } = useAppState();
-
-  // Strict RBAC Guard: Verify that the current active role matches the authenticated role
-  const isSiteAgent =
-    (authenticatedRole === 'loading_officer' || authenticatedRole === 'offloading_officer') &&
-    (activeRole === 'loading_officer' || activeRole === 'offloading_officer');
-  const isAuthorized = authenticatedRole && (activeRole === authenticatedRole || isSiteAgent);
-
-  if (!isAuthorized) {
-    return (
-      <div
-        className="card"
-        style={{
-          maxWidth: '520px',
-          margin: '3rem auto',
-          padding: '2.5rem 2rem',
-          textAlign: 'center',
-          border: '1.5px solid #FECACA',
-          borderRadius: 'var(--radius-xl)',
-          backgroundColor: '#FEF2F2',
-        }}
-      >
-        <div
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: '50%',
-            backgroundColor: '#FEE2E2',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '0 auto 1.25rem auto',
-            border: '2px solid #FCA5A5',
-          }}
-        >
-          <ShieldAlert size={28} color="#DC2626" />
-        </div>
-        <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#991B1B', marginBottom: '0.5rem' }}>
-          Terminal Access Restricted
-        </h2>
-        <p style={{ fontSize: '0.875rem', color: '#7F1D1D', lineHeight: 1.6, marginBottom: '1.5rem' }}>
-          Your current authenticated credentials do not grant access to this terminal. Each session is strictly isolated to its authorized operational domain.
-        </p>
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={signOut}
-          style={{ width: '100%', justifyContent: 'center', minHeight: '40px' }}
-        >
-          Sign Out & Return to Portal Login
-        </button>
-      </div>
-    );
-  }
-
-  switch (activeRole) {
-    case 'loading_officer':
-    case 'offloading_officer':
-      return <SiteAgentTerminal />;
-    case 'operations_manager':
-      return <OperationsDashboard />;
-    case 'finance_officer':
-      return <FinanceView />;
-    case 'admin':
-      return <AdminAuditView />;
-    default:
-      return <SiteAgentTerminal />;
-  }
-};
-
-const RootView: React.FC = () => {
-  const { isAuthenticated, signIn } = useAppState();
-
-  if (!isAuthenticated) {
-    return <LandingPage onSignIn={signIn} />;
-  }
-
-  return (
-    <AppShell>
-      <MainContent />
-    </AppShell>
-  );
-};
+const FIELD_PORTALS = ['loading_officer', 'offloading_officer'] as const satisfies readonly PortalRole[];
 
 export default function App() {
-  const isPortalPath =
-    typeof window !== 'undefined' &&
-    (window.location.pathname.startsWith('/portal') ||
-     window.location.pathname.startsWith('/access-denied') ||
-     window.location.search.includes('view=sixtus'));
-
-  if (isPortalPath) {
+  if (configurationError) {
     return (
-      <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center' }}>Loading Portal...</div>}>
-        <SixtusApp />
-      </Suspense>
+      <StatusPage title="Application configuration required">
+        <p role="alert">{configurationError}</p>
+      </StatusPage>
     );
   }
 
   return (
-    <AppStateProvider>
-      <RootView />
-    </AppStateProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route element={<AccountGate />}>
+            <Route element={<LoginOnly />}>
+              <Route path="/login" element={<LoginPage />} />
+            </Route>
+
+            <Route element={<RequireSession />}>
+              <Route path="/access-denied" element={<AccessDeniedPage />} />
+            </Route>
+
+            {FIELD_PORTALS.map((role) => (
+              <Route key={role} element={<RequireRole role={role} />}>
+                <Route element={<AuthenticatedLayout />}>
+                  <Route
+                    path={PORTALS[role].path}
+                    element={role === 'loading_officer' ? <LoadingPortal /> : <OffloadingPortal />}
+                  />
+                </Route>
+              </Route>
+            ))}
+
+            <Route element={<RequireRole role="operations_manager" />}>
+              <Route
+                path={PORTALS.operations_manager.path}
+                element={
+                  <AuthenticatedLayout
+                    navigation={{
+                      basePath: PORTALS.operations_manager.path,
+                      label: 'Operations',
+                      items: OPERATIONS_NAVIGATION,
+                    }}
+                  />
+                }
+              >
+                <Route index element={<OperationsDashboard />} />
+                <Route path="trips" element={<OperationsTripsRegister />} />
+                <Route path="trips/:tripId" element={<OperationsTripDetail />} />
+                {OPERATIONS_NAVIGATION.slice(2).map((item) => (
+                  <Route
+                    key={item.route}
+                    path={item.route}
+                    element={<PortalPage role="operations_manager" title={item.title} />}
+                  />
+                ))}
+                <Route path="*" element={<Navigate to={PORTALS.operations_manager.path} replace />} />
+              </Route>
+            </Route>
+
+            <Route element={<RequireRole role="system_administrator" />}>
+              <Route
+                path={PORTALS.system_administrator.path}
+                element={
+                  <AuthenticatedLayout
+                    navigation={{
+                      basePath: PORTALS.system_administrator.path,
+                      label: 'Administration',
+                      items: ADMIN_NAVIGATION,
+                    }}
+                  />
+                }
+              >
+                <Route index element={<PortalPage role="system_administrator" title={ADMIN_NAVIGATION[0].title} />} />
+                {ADMIN_NAVIGATION.slice(1).map((item) => (
+                  <Route
+                    key={item.route}
+                    path={item.route}
+                    element={<PortalPage role="system_administrator" title={item.title} />}
+                  />
+                ))}
+                <Route path="*" element={<Navigate to={PORTALS.system_administrator.path} replace />} />
+              </Route>
+            </Route>
+
+            <Route path="*" element={<HomeRedirect />} />
+          </Route>
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
