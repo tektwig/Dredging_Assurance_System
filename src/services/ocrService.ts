@@ -497,7 +497,7 @@ export async function recognizeLicensePlate(
   let worker;
   try {
     worker = await createWorker('eng', 1, {
-      logger: (m) => {
+      logger: (m: any) => {
         if (m.status === 'recognizing text') {
           onProgress?.({
             status: `Analyzing plate characters (${Math.round((m.progress || 0) * 100)}%)...`,

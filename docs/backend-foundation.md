@@ -1,8 +1,10 @@
 # MVP backend foundation
 
-This document records the approved MVP implemented by the three migrations in
-`supabase/migrations`. It supersedes the original BRD/TRD for this milestone.
-The frontend is unchanged. No remote database was linked or modified.
+This document records the earlier MVP checkpoint implemented by the original
+three migrations. Its daily-driver, loading-site, Loading RPC and audit behavior
+has been superseded by [loading-backend-alignment.md](loading-backend-alignment.md)
+for the current Loading V2 contract. The historical behavior remains here for
+checkpoint review. No remote database was linked or modified.
 
 ## Model and invariants
 
@@ -94,7 +96,9 @@ credentials. Keep administrative Auth provisioning server-side.
 | `mark_trip_payment_paid(p_payment_id uuid, p_payment_reference text)` | Pending to paid only; records authenticated actor, time and required external payment reference |
 | `complete_trip_payment_details(p_payment_id uuid, p_account_name text, p_account_number text, p_bank_name text, p_reason text)` | Finance/admin only; atomically upserts current driver bank details, records later-supplied details on the selected payment, marks it pending, and audits both changes |
 | `retry_trip_notification(p_id uuid, p_reason text)` | Finance/admin can requeue failed jobs within their original delivery-attempt window; first attempt, identity and message remain unchanged; audited |
-| `claim_trip_notifications(p_finance_recipients text[], p_sender text, p_limit integer = 5)` | Worker only; leases due jobs with `FOR UPDATE SKIP LOCKED`, freezes recipients and request body |
+| `enqueue_waybill_ready_notifications(p_internal_recipients text[])` | Service-role worker only; idempotently reconciles `waybill_ready` events from ready immutable Waybill PDFs |
+| `claim_trip_notifications(p_finance_recipients text[], p_sender text, p_limit integer = 5, p_include_waybill_ready boolean = false)` | Worker only; leases due jobs with `FOR UPDATE SKIP LOCKED`, freezes recipients and request body; old callers continue to claim only `trip_closed` events |
+| `get_waybill_ready_pdf(p_notification_id uuid, p_lease_token uuid)` | Service-role worker only; returns the deterministic PDF path only when the notification lease is current and its Waybill document is ready and correctly related |
 | `finish_trip_notification(p_id uuid, p_lease_token uuid, p_sent boolean, p_provider_message_id text = null, p_error text = null)` | Worker only; acknowledges matching lease or returns false; failures retry without touching trips |
 
 Operational rejection codes include `INVALID_PLATE`, `UNKNOWN_TRUCK`,
@@ -173,6 +177,7 @@ Configure these **server-side secrets** at deployment:
 - `TRIP_NOTIFICATION_FROM`: verified sender address.
 - `TRIP_NOTIFICATION_FINANCE_EMAILS`: comma-separated trusted finance/admin recipients.
 - `TRIP_NOTIFICATION_WORKER_SECRET`: independent random secret, at least 32 characters.
+- `WAYBILL_PDF_WORKER_SECRET`: separate random secret, at least 32 characters, for the PDF worker scheduler.
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`: supplied by hosted Supabase.
 
 ### Environment files and local setup
@@ -181,7 +186,7 @@ Configure these **server-side secrets** at deployment:
 | --- | --- | --- |
 | `.env.example` | Browser-only variable names and fake examples | Safe to track |
 | `.env.local` | Developer's actual `VITE_SUPABASE_URL` and public `VITE_SUPABASE_ANON_KEY` | Ignored |
-| `supabase/functions/.env.example` | Four custom worker variable names plus commented runtime-injected variables | Safe to track; no credentials |
+| `supabase/functions/.env.example` | Five custom worker variable names plus commented runtime-injected variables | Safe to track; no credentials |
 | `supabase/functions/.env` | Developer's four actual custom worker settings | Ignored |
 
 Never overwrite another developer's environment file. The local files were
@@ -237,6 +242,25 @@ Missing provider/configuration leaves notifications queued without affecting
 trip closure. A development-only blank environment template is supplied; no
 existing environment files are replaced.
 
+### Waybill PDF processing
+
+Closing a trip creates the immutable Waybill and a separate pending
+`trip_closure_invoice_documents` row in the same database transaction. The row
+stores only document/job state and the deterministic `<year>/<invoice_number>.pdf`
+path. `process-waybill-pdfs` claims leased jobs, reads the invoice through a
+service-role-only lease-checked RPC, renders it with `pdf-lib`, uploads with
+upsert to the private `waybills` bucket and marks the document ready. PDF and
+Storage calls occur after closure commits; failures use sanitized error codes,
+bounded retries and do not modify the trip or invoice.
+
+Configure `WAYBILL_PDF_WORKER_SECRET` as an independent server-side secret of at
+least 32 characters. After separately authorized deployment, a trusted scheduler
+must POST to `/functions/v1/process-waybill-pdfs` every minute with that secret
+in `x-worker-secret`. No hosted scheduler has been provisioned. The service-role
+key remains runtime-only and is never configured in the frontend. Storage reads
+are limited to Operations Manager, Finance Officer, Audit Reviewer and System
+Administrator; field officers and anonymous users are denied.
+
 Retries use five-minute leases, up to eight attempts, bounded exponential backoff,
 and a stable provider idempotency key per outbox row. Driver and finance requests
 are separate, so a finance failure does not resend an acknowledged driver email.
@@ -249,6 +273,30 @@ expired jobs and already-sent jobs. Expired delivery reconciliation and any
 deliberately new notification require a separately designed workflow; this MVP
 does not bypass the original window. `sent` means **provider
 accepted**, not inbox delivery; bounce/delivery webhooks are not implemented.
+
+### Waybill PDF email delivery
+
+The existing `process-trip-notifications` worker also delivers a `waybill_ready`
+event after the PDF document reaches `ready`. It reconciles immutable invoice and
+ready-document rows through a service-role-only RPC on each run, safely
+backfilling already-ready Waybills and catching later completions. A unique
+`(trip_id,event_type,audience)` key prevents duplicate driver/internal events.
+The driver's address comes only from the immutable Waybill snapshot; the
+Operations/Finance copy uses optional `WAYBILL_INTERNAL_RECIPIENTS` (a
+comma-separated address list). This is separate from the unchanged `trip_closed`
+message and its required `TRIP_NOTIFICATION_FINANCE_EMAILS` configuration.
+
+For each `waybill_ready` lease, the worker validates the database
+invoice/document relationship, invoice number, and deterministic storage path
+before downloading the PDF from the private bucket using server-side
+service-role credentials. It attaches the bytes directly to Resend as
+`<invoice_number>.pdf`; no public or signed Storage URL is created. Retries reuse
+the same outbox row ID as the Resend idempotency key and the existing ready PDF.
+Download, validation, or provider failures update only notification state; they
+never regenerate or change a PDF, invoice, or closed trip. Failure details are
+sanitized, and Waybill-ready outbox metadata contains no banking fields. The
+existing notification scheduler also reconciles ready events; no separate
+notification system or scheduler is introduced.
 
 Inspect pending/failed jobs through the finance-restricted outbox. Worker responses
 include claimed/sent/deferred/unacknowledged counts and never contain bank details.
@@ -270,9 +318,12 @@ node scripts/test-edge-handler.mjs
 git diff --check
 ```
 
-With Docker/Podman available, start a fresh local Supabase instance, apply local
-migrations, run `npx --no-install supabase db lint --local`, and execute
-both files in `supabase/tests/database/` using psql with `ON_ERROR_STOP=1`.
+With Docker/Podman available, start a fresh local Supabase instance and apply local
+migrations, then run `npx --no-install supabase db lint --local`. Execute
+`mvp_foundation.sql` and the legacy `payment_readiness.sql` only at the original
+three-migration checkpoint. After the Loading V2 migration, run
+`loading_alignment.sql` and `payment_readiness.sql`; use the embedded harness
+below for the full before/after upgrade sequence.
 The SQL fixtures are development-only and roll back. Do not run them against remote
 data. A reset destroys the selected local database; use a disposable instance.
 

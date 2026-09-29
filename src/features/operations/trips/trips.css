@@ -1,0 +1,56 @@
+.operations-trips-page, .operations-trip-detail-page { display: grid; gap: 1.25rem; }
+.operations-trips-header, .trip-detail-heading { display: flex; justify-content: space-between; align-items: end; gap: 1rem; }
+.operations-trips-header h1, .trip-detail-heading h2 { margin-bottom: 0; }
+.operations-trips-header > p { max-width: 34rem; margin: 0; text-align: right; }
+.trip-filter-panel { display: grid; gap: .9rem; padding: 1rem; border: 1px solid #dce4e9; border-radius: .75rem; background: #fff; }
+.trip-filter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; }
+.trip-filter-field { display: grid; gap: .4rem; min-width: 0; }
+.trip-filter-field label, .trip-cancel-dialog label { font-size: .8rem; font-weight: 700; }
+.trip-filter-field input, .trip-filter-field select, .trip-cancel-dialog textarea { width: 100%; min-width: 0; min-height: 2.8rem; padding: .65rem .8rem; border: 1px solid #c7d1d8; border-radius: .5rem; background: #fbfcfd; color: #172b3a; font: inherit; }
+.trip-filter-field select { cursor: pointer; }
+.trip-filter-search { grid-column: span 2; }
+.trip-register-table { padding: .5rem; }
+.trip-register-table .operations-table td { min-width: 7rem; }
+.trip-register-table .operations-table td:first-child { min-width: 9rem; }
+.trip-register-table a, .trip-breadcrumb a { color: #125b59; font-weight: 800; }
+.trip-status-badge { display: inline-block; padding: .3rem .65rem; border-radius: 2rem; font-size: .75rem; font-weight: 800; text-transform: capitalize; white-space: nowrap; }
+.trip-status-open { background: #e7f3ee; color: #28674e; }
+.trip-status-closed { background: #e8f0f8; color: #26557a; }
+.trip-status-cancelled { background: #fff1ef; color: #8c2424; }
+.trip-breadcrumb { display: flex; align-items: center; gap: .55rem; color: #60717e; font-size: .85rem; }
+.operations-trip-detail-page > .operations-trips-header { align-items: center; }
+.trip-cancel-open { white-space: nowrap; }
+.trip-detail-section { padding: clamp(1rem, 2.5vw, 2rem); }
+.trip-detail-section h2 { font-size: clamp(1.3rem, 2.4vw, 1.7rem); }
+.trip-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin: 1rem 0 0; }
+.trip-detail-value { min-width: 0; }
+.trip-detail-value dt { color: #60717e; font-size: .77rem; font-weight: 700; }
+.trip-detail-value dd { margin: .25rem 0 0; overflow-wrap: anywhere; }
+.trip-lifecycle { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+.trip-lifecycle-step { min-width: 0; padding: 1rem; border: 1px solid #dce4e9; border-radius: .75rem; background: #fff; }
+.trip-lifecycle-step .eyebrow { margin-bottom: .35rem; font-size: .65rem; }
+.trip-lifecycle-step h3 { margin: 0 0 .55rem; font-size: 1rem; }
+.trip-lifecycle-step p { margin-bottom: .35rem; font-size: .83rem; overflow-wrap: anywhere; }
+.trip-lifecycle-step p:last-child { margin-bottom: 0; }
+.trip-lifecycle-complete { border-top: 3px solid #3f8065; }
+.trip-lifecycle-current { border-top: 3px solid #bd780d; }
+.trip-lifecycle-upcoming { border-top: 3px solid #c7d1d8; }
+.trip-lifecycle-cancelled { border-top: 3px solid #a43832; background: #fffafa; }
+.trip-conflict { color: #604509; background: #fff8e7; border: 1px solid #ead7a7; }
+.trip-modal-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 1rem; background: #102b3bcc; }
+.trip-cancel-dialog { width: min(100%, 34rem); display: grid; gap: .75rem; padding: 1.5rem; }
+.trip-cancel-dialog h2, .trip-cancel-dialog p { margin-bottom: 0; }
+.trip-cancel-dialog textarea { min-height: 8rem; resize: vertical; }
+.trip-cancel-dialog .actions { justify-content: flex-end; }
+@media (max-width: 900px) {
+  .trip-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trip-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .operations-trips-header, .operations-trip-detail-page > .operations-trips-header, .trip-detail-heading { align-items: flex-start; flex-direction: column; }
+  .operations-trips-header > p { text-align: left; }
+  .trip-filter-grid, .trip-detail-grid, .trip-lifecycle { grid-template-columns: 1fr; }
+  .trip-filter-search { grid-column: auto; }
+  .trip-cancel-dialog .actions { flex-direction: column-reverse; }
+  .trip-cancel-dialog .actions .button { width: 100%; }
+}

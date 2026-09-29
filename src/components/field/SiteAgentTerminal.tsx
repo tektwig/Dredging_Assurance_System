@@ -2714,7 +2714,7 @@ export const SiteAgentTerminal: React.FC = () => {
                   'Loading Dredging Terminal',
                 offloading_site_id:
                   lastClosedTripForInvoice.offloading_site_id ||
-                  activeSiteId ||
+                  activeSite?.id ||
                   '',
                 offloading_site_name: activeSite?.name || 'Gate 2 Delivery Weighbridge',
                 quantity_tonnes: deliveredTonnes || 30,

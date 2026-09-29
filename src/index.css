@@ -87,6 +87,31 @@ html, body {
   line-height: 1.5;
 }
 
+/* --- Portal & Management List Navigation Utilities --- */
+.portal-content { max-width: 75rem; margin: 0 auto; padding: clamp(1.25rem, 4vw, 4rem); }
+.portal-navigation { background: #fff; border-bottom: 1px solid #dce4e9; }
+.portal-navigation ul { display: flex; gap: .35rem; list-style: none; max-width: 75rem; margin: 0 auto; padding: .55rem clamp(1.25rem, 4vw, 4rem); overflow-x: auto; }
+.portal-navigation-link { display: inline-flex; align-items: center; min-height: 2.8rem; padding: .55rem .9rem; border-radius: .5rem; color: #344d5b; text-decoration: none; font-size: .86rem; font-weight: 700; white-space: nowrap; }
+.portal-navigation-link:hover { background: #f1f6f6; }
+.portal-navigation-link.active { background: #e7f3ee; color: #125b59; }
+.list-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: .8rem; padding: 1rem; border: 1px solid #dce4e9; border-radius: .75rem; background: #fff; }
+.list-toolbar-field { display: grid; flex: 1 1 12rem; gap: .4rem; min-width: 9rem; }
+.list-toolbar-field label { font-size: .8rem; }
+.list-toolbar select { min-height: 3.2rem; width: 100%; padding: .7rem .9rem; border: 1px solid #c7d1d8; border-radius: .5rem; background: #fbfcfd; color: #172b3a; font: inherit; }
+.list-state { padding: 1rem; border-radius: .65rem; }
+.list-state p:last-child { margin-bottom: 0; }
+.list-state-error { border: 1px solid #efcecb; background: #fff1ef; color: #8c2424; }
+.list-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; margin-top: 1rem; }
+.list-pagination p { margin: 0; color: #60717e; font-size: .85rem; }
+.list-pagination-actions { display: flex; gap: .5rem; }
+.list-pagination .button { min-height: 2.5rem; padding: .55rem .85rem; }
+@media (max-width: 760px) {
+  .portal-navigation ul { gap: .2rem; }
+  .portal-navigation-link { padding-inline: .7rem; }
+  .list-toolbar-field { flex-basis: 100%; }
+  .list-pagination { align-items: flex-start; flex-direction: column; }
+}
+
 #root {
   background-color: var(--bg-canvas);
   min-height: 100vh;

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { AppStateProvider, useAppState } from './context/AppStateContext';
 import { AppShell } from './components/layout/AppShell';
 import { LandingPage } from './components/landing/LandingPage';
@@ -8,6 +8,8 @@ import { FinanceView } from './components/finance/FinanceView';
 import { AdminAuditView } from './components/admin/AdminAuditView';
 
 import { ShieldAlert } from 'lucide-react';
+
+const SixtusApp = lazy(() => import('./App.sixtus'));
 
 const MainContent: React.FC = () => {
   const { activeRole, authenticatedRole, signOut } = useAppState();
@@ -95,6 +97,20 @@ const RootView: React.FC = () => {
 };
 
 export default function App() {
+  const isPortalPath =
+    typeof window !== 'undefined' &&
+    (window.location.pathname.startsWith('/portal') ||
+     window.location.pathname.startsWith('/access-denied') ||
+     window.location.search.includes('view=sixtus'));
+
+  if (isPortalPath) {
+    return (
+      <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center' }}>Loading Portal...</div>}>
+        <SixtusApp />
+      </Suspense>
+    );
+  }
+
   return (
     <AppStateProvider>
       <RootView />
