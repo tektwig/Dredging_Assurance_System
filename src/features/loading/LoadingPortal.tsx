@@ -16,6 +16,8 @@ import { operationalDateKey, operationalDateLabel } from './utils/operationalDat
 import { OpenTripController, type OpenTripState } from './utils/openTripController';
 import { reviewForSelection } from './utils/reviewSelection';
 import { PlateCaptureController, type PlateCaptureState } from './utils/plateCaptureController';
+import { useRealtimeTrips } from '../../hooks/useRealtimeTrips';
+import { NotificationToastContainer } from '../../components/common/NotificationToast';
 import './loading.css';
 
 export function LoadingPortal() {
@@ -228,17 +230,28 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     onCapture={onCapture} onManual={useManualPlate}
     onScanStart={() => captureController.clear()} />;
 
-  return <LoadingPortalView officerName={officerName} now={now} site={site} statistics={statistics}
-    plate={plate} lookup={lookupSnapshot} driverPanel={showDriverPanel ? driverPanel : undefined}
-    tripPanel={tripPanel} tripStage={openState.status}
-    capturePanel={capturePanel}
-    lateOpenedTrip={lateOpenedTrip} onDismissLateOpenedTrip={() => setLateOpenedTrip(null)}
-    savedRegistration={driverSnapshot?.saved ?? null} lateRegistration={lateRegistration}
-    onDismissLateRegistration={() => setLateRegistration(null)}
-    onRetryRegistrationCheck={() => { void driverController.retrySavedValidation(); }}
-    plateLocked={locked}
-    onPlateChange={onPlateChange} onLookup={onLookup}
-    onRetrySite={() => { openController.setInput(null); lookupAssignmentRef.current = null;
-      controller.editPlate(); driverController.reset(); captureController.clear(); setSiteRevision(value => value + 1); }}
-    onRetryStatistics={() => setStatisticsRevision(value => value + 1)} />;
+  const { toasts, dismissToast } = useRealtimeTrips({
+    channelName: 'loading-portal-trips-realtime',
+    onTripChange: () => setStatisticsRevision(value => value + 1),
+    showToasts: true,
+  });
+
+  return (
+    <>
+      <LoadingPortalView officerName={officerName} now={now} site={site} statistics={statistics}
+        plate={plate} lookup={lookupSnapshot} driverPanel={showDriverPanel ? driverPanel : undefined}
+        tripPanel={tripPanel} tripStage={openState.status}
+        capturePanel={capturePanel}
+        lateOpenedTrip={lateOpenedTrip} onDismissLateOpenedTrip={() => setLateOpenedTrip(null)}
+        savedRegistration={driverSnapshot?.saved ?? null} lateRegistration={lateRegistration}
+        onDismissLateRegistration={() => setLateRegistration(null)}
+        onRetryRegistrationCheck={() => { void driverController.retrySavedValidation(); }}
+        plateLocked={locked}
+        onPlateChange={onPlateChange} onLookup={onLookup}
+        onRetrySite={() => { openController.setInput(null); lookupAssignmentRef.current = null;
+          controller.editPlate(); driverController.reset(); captureController.clear(); setSiteRevision(value => value + 1); }}
+        onRetryStatistics={() => setStatisticsRevision(value => value + 1)} />
+      <NotificationToastContainer toasts={toasts} onDismiss={dismissToast} />
+    </>
+  );
 }

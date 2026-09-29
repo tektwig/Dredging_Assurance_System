@@ -13,6 +13,8 @@ import { ClosurePanel } from './components/ClosurePanel';
 import { loadOffloadingStatistics } from './services/offloadingStatistics';
 import type { OffloadingStatisticsState } from './types';
 import { operationalDateKey } from '../loading/utils/operationalDate';
+import { useRealtimeTrips } from '../../hooks/useRealtimeTrips';
+import { NotificationToastContainer } from '../../components/common/NotificationToast';
 import '../loading/loading.css';
 import './offloading.css';
 
@@ -126,25 +128,37 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
     setResetEpoch(value => value + 1);
   }
   const evidence = capture.status === 'detected' ? capture.evidence : null;
-  return <OffloadingPortalView officerName={officerName} plate={plate} lookup={lookup}
-    closure={closure} statistics={statistics} now={now}
-    onRetryStatistics={() => setStatisticsRevision(value => value + 1)}
-    closurePanel={<ClosurePanel lookup={found} state={closure} quantity={quantity}
-      onQuantity={value => { if (closureController.current.status === 'idle') setQuantity(value); }}
-      onReview={() => { closureController.setInput(review); closureController.beginReview(); }}
-      onBack={() => closureController.back()} onClose={() => { void closureController.submit(); }} />}
-    onPlateChange={changePlate} onLookup={() => {
-      if (closureController.current.status !== 'idle') return;
-      // The officer must submit the confirmed text; OCR never calls this.
-      void lookupController.submit(plateRef.current, evidence);
-    }} onReset={reset}
-    capturePanel={<PlateCapture state={capture} disabled={lookup.pending || closure.status !== 'idle'}
-      lookupActionLabel="Find Open Trip"
-      resetKey={`${actorId}:${resetEpoch}`} onCapture={captureImage}
-      onScanStart={startScan} onManual={() => {
-        if (closureController.current.status !== 'idle') return;
-        closureController.setInput(null);
-        captureController.clear(); lookupController.reset(); setQuantity('');
-        setResetEpoch(value => value + 1);
-      }} />} />;
+
+  const { toasts, dismissToast } = useRealtimeTrips({
+    channelName: 'offloading-portal-trips-realtime',
+    onTripChange: () => setStatisticsRevision(value => value + 1),
+    showToasts: true,
+  });
+
+  return (
+    <>
+      <OffloadingPortalView officerName={officerName} plate={plate} lookup={lookup}
+        closure={closure} statistics={statistics} now={now}
+        onRetryStatistics={() => setStatisticsRevision(value => value + 1)}
+        closurePanel={<ClosurePanel lookup={found} state={closure} quantity={quantity}
+          onQuantity={value => { if (closureController.current.status === 'idle') setQuantity(value); }}
+          onReview={() => { closureController.setInput(review); closureController.beginReview(); }}
+          onBack={() => closureController.back()} onClose={() => { void closureController.submit(); }} />}
+        onPlateChange={changePlate} onLookup={() => {
+          if (closureController.current.status !== 'idle') return;
+          // The officer must submit the confirmed text; OCR never calls this.
+          void lookupController.submit(plateRef.current, evidence);
+        }} onReset={reset}
+        capturePanel={<PlateCapture state={capture} disabled={lookup.pending || closure.status !== 'idle'}
+          lookupActionLabel="Find Open Trip"
+          resetKey={`${actorId}:${resetEpoch}`} onCapture={captureImage}
+          onScanStart={startScan} onManual={() => {
+            if (closureController.current.status !== 'idle') return;
+            closureController.setInput(null);
+            captureController.clear(); lookupController.reset(); setQuantity('');
+            setResetEpoch(value => value + 1);
+          }} />} />
+      <NotificationToastContainer toasts={toasts} onDismiss={dismissToast} />
+    </>
+  );
 }

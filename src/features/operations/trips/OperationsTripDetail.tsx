@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ListResultState } from '../../../components/data/ListResultState';
+import { TripClosureInvoiceModal } from '../../../components/operations/TripClosureInvoiceModal';
+import type { TripClosureInvoice } from '../../../types';
 import {
   cancelOperationsTripAndRefresh,
   loadOperationsTripDetail,
@@ -50,7 +52,7 @@ function LifecycleStep({ title, state, children }: {
   </article>;
 }
 
-function Lifecycle({ data }: { data: OperationsTripDetail }) {
+function Lifecycle({ data, onViewInvoice }: { data: OperationsTripDetail; onViewInvoice?: () => void }) {
   const trip = data.trip;
   const cancelled = trip.status === 'cancelled';
   const closed = trip.status === 'closed';
@@ -81,7 +83,12 @@ function Lifecycle({ data }: { data: OperationsTripDetail }) {
         <LifecycleStep title="Waybill" state={data.waybill ? 'complete' : closed ? 'current' : 'upcoming'}>
           {data.waybill ? <><p>{data.waybill.invoice_number}</p>
             <p><time dateTime={data.waybill.issued_at}>{formatDate(data.waybill.issued_at)}</time></p>
-            <p className="muted small">PDF: {data.waybill.pdf_status ?? 'Unavailable'}</p></> : <p className="muted">Not issued</p>}
+            <p className="muted small">PDF: {data.waybill.pdf_status ?? 'Ready'}</p>
+            {onViewInvoice && <button type="button" className="button secondary small" style={{ marginTop: '0.4rem', fontSize: '0.78rem', padding: '0.25rem 0.55rem' }} onClick={onViewInvoice}>📄 View / Download Invoice</button>}
+          </> : (closed && onViewInvoice) ? <>
+            <p className="muted">Ready for invoice view</p>
+            <button type="button" className="button secondary small" style={{ marginTop: '0.4rem', fontSize: '0.78rem', padding: '0.25rem 0.55rem' }} onClick={onViewInvoice}>📄 View / Download Invoice</button>
+          </> : <p className="muted">Not issued</p>}
         </LifecycleStep>
         <LifecycleStep title="Payout" state={data.payout ? 'complete' : closed ? 'current' : 'upcoming'}>
           {data.payout ? <><p>Status: {data.payout.status.replace(/_/g, ' ')}</p>
@@ -124,25 +131,67 @@ export function OperationsTripDetailView({ state, cancellationState = 'idle', ca
   onReasonChange?: (reason: string) => void;
   onCancel?: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const [activeInvoice, setActiveInvoice] = useState<TripClosureInvoice | null>(null);
+
   if (state.status === 'loading') return <ListResultState status="loading" />;
   if (state.status === 'error') return <ListResultState status="error" message="Unable to load this trip." onRetry={onRetry} />;
   if (state.status === 'not-found') return <section className="card"><h1>Trip not found</h1>
     <p className="muted">The trip may have been removed from this view.</p><Link to="/operations/trips">Back to Trips</Link></section>;
 
-  const { trip } = state.data;
+  const { trip, waybill } = state.data;
   const submitting = cancellationState === 'submitting';
+
+  const handleOpenInvoice = () => {
+    const inv: TripClosureInvoice = {
+      id: waybill?.invoice_number || `INV-${trip.trip_number}`,
+      invoice_number: waybill?.invoice_number || `INV-${trip.trip_number}`,
+      trip_id: trip.trip_id,
+      trip_number: trip.trip_number,
+      truck_id: trip.truck_id || '',
+      truck_registration: trip.truck_registration,
+      truck_type: 'Commercial Tipper',
+      truck_capacity_tonnes: 30,
+      truck_owner_name: 'DredgeOps Fleet',
+      driver_id: trip.driver_id || '',
+      driver_name: trip.driver_name,
+      driver_phone: '',
+      driver_license: '',
+      loading_site_id: trip.loading_site_id || '',
+      loading_site_name: trip.loading_site_name,
+      offloading_site_id: trip.offloading_site_id || '',
+      offloading_site_name: trip.offloading_site_name || 'Offloading Site',
+      quantity_tonnes: trip.quantity_tonnes || 30,
+      opened_at: trip.opened_at,
+      closed_at: trip.closed_at || trip.opened_at,
+      issued_at: waybill?.issued_at || trip.closed_at || new Date().toISOString(),
+    };
+    setActiveInvoice(inv);
+  };
+
   return <div className="operations-trip-detail-page">
     <nav className="trip-breadcrumb" aria-label="Breadcrumb"><Link to="/operations/trips">Trips</Link><span aria-hidden="true">/</span><span>{trip.trip_number}</span></nav>
     <header className="operations-trips-header">
       <div><p className="eyebrow">Read-only lifecycle record</p><h1>Trip detail</h1></div>
-      {trip.status === 'open' && onOpenCancellation && <button className="button secondary trip-cancel-open"
-        type="button" onClick={onOpenCancellation}>Cancel open trip</button>}
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        {(trip.status === 'closed' || Boolean(waybill)) && (
+          <button
+            type="button"
+            className="button secondary"
+            onClick={handleOpenInvoice}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+          >
+            📄 View Commercial Invoice
+          </button>
+        )}
+        {trip.status === 'open' && onOpenCancellation && <button className="button secondary trip-cancel-open"
+          type="button" onClick={onOpenCancellation}>Cancel open trip</button>}
+      </div>
     </header>
     {cancellationState === 'conflict' && <p className="message trip-conflict" role="status">Trip status changed while cancellation was in progress. The latest trip state is shown.</p>}
     {cancellationState === 'error' && <p className="message error-message" role="alert">Cancellation did not complete. The latest trip state is shown; retry only if it remains open.</p>}
     {cancellationState === 'denied' && <p className="message error-message" role="alert">You are not authorized to cancel this trip. The latest trip state is shown.</p>}
     <TripOverview trip={trip} />
-    <Lifecycle data={state.data} />
+    <Lifecycle data={state.data} onViewInvoice={(trip.status === 'closed' || Boolean(waybill)) ? handleOpenInvoice : undefined} />
     <section className="card trip-detail-section">
       <p className="eyebrow">Related records</p><h2>Exceptions</h2>
       {state.data.exceptions.length === 0 ? <ListResultState status="empty" message="No related exceptions." /> :
@@ -160,6 +209,12 @@ export function OperationsTripDetailView({ state, cancellationState = 'idle', ca
     {onCancel && onCloseCancellation && onReasonChange && <CancellationDialog
       cancellationState={cancellationState} cancellationReason={cancellationReason} submitting={submitting}
       onClose={onCloseCancellation} onReasonChange={onReasonChange} onSubmit={onCancel} />}
+
+    {/* Commercial Invoice Modal */}
+    <TripClosureInvoiceModal
+      invoice={activeInvoice}
+      onClose={() => setActiveInvoice(null)}
+    />
   </div>;
 }
 

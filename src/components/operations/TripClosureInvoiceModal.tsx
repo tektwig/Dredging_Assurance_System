@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { X, Printer, Download, Truck, User, MapPin, Scale, Eye, Shield, Calendar, Hash } from 'lucide-react';
+import { X, Printer, Download, Truck, User, MapPin, Scale, Eye, Shield, Calendar, Hash, Mail, Send, CheckCircle2, AlertCircle, Loader2, Share2, ExternalLink } from 'lucide-react';
 import { TripClosureInvoice } from '../../types';
 import { PlateDisplay } from '../common/PlateDisplay';
+import { sendInvoicePdfEmail, openInvoiceMailClient, shareInvoicePdf } from '../../services/emailService';
 import jsPDF from 'jspdf';
 
 interface TripClosureInvoiceModalProps {
@@ -343,6 +344,12 @@ export const downloadTripClosureInvoice = (invoice: TripClosureInvoice) => {
 
 export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = ({ invoice, onClose }) => {
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+  const defaultEmail = (import.meta.env.VITE_DISPATCH_EMAIL as string | undefined)?.trim() || 'tektwig@gmail.com';
+  const [recipientEmail, setRecipientEmail] = useState(defaultEmail);
+  const [autoEmailOnDownload, setAutoEmailOnDownload] = useState(true);
+  const [emailStatus, setEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [emailFeedback, setEmailFeedback] = useState<string | null>(null);
+  const [isServerError, setIsServerError] = useState<boolean>(false);
 
   const openPdfPreview = useCallback(() => {
     if (!invoice) return;
@@ -354,6 +361,57 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
     if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
     setPdfPreviewUrl(null);
   }, [pdfPreviewUrl]);
+
+  const handleSendEmail = useCallback(async (overrideBlob?: Blob) => {
+    if (!invoice || emailStatus === 'sending') return;
+    setEmailStatus('sending');
+    setEmailFeedback(null);
+    setIsServerError(false);
+
+    try {
+      const doc = buildInvoicePdf(invoice);
+      const blob = overrideBlob || doc.output('blob');
+      const result = await sendInvoicePdfEmail(invoice, blob, recipientEmail);
+      if (result.success) {
+        setEmailStatus('sent');
+        setEmailFeedback(result.message || `Invoice sent to ${recipientEmail}`);
+      } else {
+        setEmailStatus('error');
+        setIsServerError(Boolean(result.isServerError));
+        setEmailFeedback(result.message || 'Failed to dispatch email');
+      }
+    } catch (err) {
+      setEmailStatus('error');
+      setIsServerError(true);
+      setEmailFeedback(err instanceof Error ? err.message : 'Failed to send email');
+    }
+  }, [invoice, emailStatus, recipientEmail]);
+
+  const handleSharePdf = useCallback(async () => {
+    if (!invoice) return;
+    const doc = buildInvoicePdf(invoice);
+    const blob = doc.output('blob');
+    const shared = await shareInvoicePdf(invoice, blob);
+    if (!shared) {
+      openInvoiceMailClient(invoice, recipientEmail);
+    }
+  }, [invoice, recipientEmail]);
+
+  const handleOpenMailClient = useCallback(() => {
+    if (!invoice) return;
+    openInvoiceMailClient(invoice, recipientEmail);
+  }, [invoice, recipientEmail]);
+
+  const handleDownload = useCallback(() => {
+    if (!invoice) return;
+    const doc = buildInvoicePdf(invoice);
+    doc.save(`${invoice.invoice_number}.pdf`);
+
+    if (autoEmailOnDownload && recipientEmail.trim()) {
+      const blob = doc.output('blob');
+      void handleSendEmail(blob);
+    }
+  }, [invoice, autoEmailOnDownload, recipientEmail, handleSendEmail]);
 
   if (!invoice) return null;
 
@@ -641,6 +699,120 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
             </p>
           </div>
 
+          {/* ── EMAIL DISPATCH SECTION ── */}
+          <div style={{
+            background: 'var(--surface-sunken, #f8fafc)',
+            border: '1px solid var(--border-subtle, #e2e8f0)',
+            borderRadius: '8px',
+            padding: '0.85rem 1rem',
+            marginTop: '1rem',
+            marginBottom: '1rem',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', fontWeight: 700, color: '#172b3a' }}>
+                <Mail size={15} color="#0F766E" />
+                <span>FormSubmit Email Dispatch</span>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: '#64748b', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={autoEmailOnDownload}
+                  onChange={(e) => setAutoEmailOnDownload(e.target.checked)}
+                  style={{ accentColor: '#0F766E' }}
+                />
+                Auto-send copy on download
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                type="email"
+                value={recipientEmail}
+                onChange={(e) => { setRecipientEmail(e.target.value); setEmailStatus('idle'); setEmailFeedback(null); }}
+                placeholder="tektwig@gmail.com"
+                style={{
+                  flex: 1,
+                  minWidth: '220px',
+                  padding: '0.45rem 0.75rem',
+                  fontSize: '0.82rem',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#fff',
+                  color: '#172b3a',
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={emailStatus === 'sending' || !recipientEmail.trim()}
+                onClick={() => void handleSendEmail()}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  fontSize: '0.8rem',
+                  padding: '0.45rem 0.9rem',
+                  background: emailStatus === 'sent' ? '#ecfdf5' : undefined,
+                  borderColor: emailStatus === 'sent' ? '#059669' : undefined,
+                  color: emailStatus === 'sent' ? '#059669' : undefined,
+                  cursor: emailStatus === 'sending' ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {emailStatus === 'sending' ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" /> Sending…
+                  </>
+                ) : emailStatus === 'sent' ? (
+                  <>
+                    <CheckCircle2 size={14} color="#059669" /> Sent!
+                  </>
+                ) : (
+                  <>
+                    <Send size={14} /> Send to Email
+                  </>
+                )}
+              </button>
+            </div>
+
+            {emailFeedback && (
+              <div style={{
+                marginTop: '0.6rem',
+                padding: isServerError ? '0.65rem 0.75rem' : undefined,
+                background: isServerError ? '#fef2f2' : undefined,
+                border: isServerError ? '1px solid #fecaca' : undefined,
+                borderRadius: isServerError ? '6px' : undefined,
+                fontSize: '0.75rem',
+                color: emailStatus === 'sent' ? '#059669' : '#b91c1c',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.35rem', marginBottom: isServerError ? '0.45rem' : 0 }}>
+                  {emailStatus === 'sent' ? <CheckCircle2 size={14} style={{ marginTop: '1px', flexShrink: 0 }} /> : <AlertCircle size={14} style={{ marginTop: '1px', flexShrink: 0 }} />}
+                  <span style={{ fontWeight: isServerError ? 600 : 400, lineHeight: 1.4 }}>{emailFeedback}</span>
+                </div>
+
+                {isServerError && (
+                  <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.45rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={handleOpenMailClient}
+                      style={{ fontSize: '0.72rem', padding: '0.3rem 0.6rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', background: '#fff', borderColor: '#fca5a5', color: '#991b1b' }}
+                    >
+                      <ExternalLink size={12} /> Open in Mail App (Pre-filled)
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => void handleSharePdf()}
+                      style={{ fontSize: '0.72rem', padding: '0.3rem 0.6rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', background: '#fff', borderColor: '#fca5a5', color: '#991b1b' }}
+                    >
+                      <Share2 size={12} /> Share PDF File Directly
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Action Buttons */}
           <div className="closure-invoice-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem', paddingTop: '0.25rem', borderTop: '1px solid var(--border-subtle)' }}>
             <button
@@ -654,7 +826,7 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => downloadTripClosureInvoice(invoice)}
+              onClick={handleDownload}
               style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
             >
               <Download size={15} /> Download PDF
@@ -711,7 +883,41 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <button
                 type="button"
-                onClick={(e) => { e.stopPropagation(); downloadTripClosureInvoice(invoice); }}
+                onClick={(e) => { e.stopPropagation(); void handleSendEmail(); }}
+                disabled={emailStatus === 'sending'}
+                style={{
+                  background: emailStatus === 'sent' ? 'rgba(5, 150, 105, 0.3)' : 'rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: '6px',
+                  padding: '0.35rem 0.7rem',
+                  color: '#fff',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.3rem',
+                  transition: 'background 0.15s',
+                }}
+                title={`Email to ${recipientEmail}`}
+              >
+                {emailStatus === 'sending' ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" /> Sending…
+                  </>
+                ) : emailStatus === 'sent' ? (
+                  <>
+                    <CheckCircle2 size={13} color="#34D399" /> Sent!
+                  </>
+                ) : (
+                  <>
+                    <Mail size={13} /> Email PDF
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); handleDownload(); }}
                 style={{
                   background: 'rgba(255,255,255,0.1)',
                   border: '1px solid rgba(255,255,255,0.2)',

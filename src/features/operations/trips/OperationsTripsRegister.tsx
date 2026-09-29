@@ -9,6 +9,8 @@ import {
   type OperationsTripsPage,
   type OperationsTripStatus,
 } from '../services/operationsTrips';
+import { useRealtimeTrips } from '../../../hooks/useRealtimeTrips';
+import { NotificationToastContainer } from '../../../components/common/NotificationToast';
 import './trips.css';
 
 export type OperationsTripsLoadState =
@@ -137,6 +139,12 @@ export function OperationsTripsRegister() {
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<OperationsTripsLoadState>({ status: 'loading' });
 
+  const { toasts, dismissToast } = useRealtimeTrips({
+    channelName: 'operations-trips-register-realtime',
+    onTripChange: () => setRevision(value => value + 1),
+    showToasts: true,
+  });
+
   useEffect(() => {
     let current = true;
     const timer = setTimeout(() => {
@@ -161,6 +169,11 @@ export function OperationsTripsRegister() {
     setPage(1);
   };
 
-  return <OperationsTripsRegisterView state={state} filters={filters} page={page}
-    onFiltersChange={changeFilters} onPageChange={setPage} onRetry={() => setRevision(value => value + 1)} />;
+  return (
+    <>
+      <OperationsTripsRegisterView state={state} filters={filters} page={page}
+        onFiltersChange={changeFilters} onPageChange={setPage} onRetry={() => setRevision(value => value + 1)} />
+      <NotificationToastContainer toasts={toasts} onDismiss={dismissToast} />
+    </>
+  );
 }

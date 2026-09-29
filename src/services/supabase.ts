@@ -1,27 +1,7 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { supabase as baseClient } from '../lib/supabase';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-// Public browser configuration for this project's hosted Supabase instance.
-// Environment variables still override these values for local development.
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://pidxlopbxlapfmakmtjt.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_s8NvM6ZPe-N6VdR4tQC7Vg_syJ-Ckb9';
+export const isSupabaseLive = !!baseClient;
+export const supabase = baseClient as unknown as SupabaseClient<any>;
 
-let client: SupabaseClient | null = null;
-let isConfigured = false;
 
-try {
-  if (supabaseUrl && supabaseAnonKey && supabaseAnonKey !== 'dummy_anon_key') {
-    client = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        storage: typeof window !== 'undefined' ? window.sessionStorage : undefined,
-        persistSession: true,
-        autoRefreshToken: true,
-      },
-    });
-    isConfigured = true;
-  }
-} catch (err) {
-  console.warn('Supabase client failed to initialize, using local simulation mode:', err);
-}
-
-export const supabase = client;
-export const isSupabaseLive = isConfigured;

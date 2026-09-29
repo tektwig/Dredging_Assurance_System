@@ -13,7 +13,7 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { imageBase64, filename } = await req.json();
+    const { imageBase64, filename, token } = await req.json();
 
     if (!imageBase64 && !filename) {
       return new Response(
@@ -24,7 +24,7 @@ serve(async (req: Request) => {
 
     // Prefer a purpose-built ALPR model. Unlike generic OCR, this detects the plate
     // bounding box before decoding its characters and supports Nigeria (`ng`).
-    const plateRecognizerToken = Deno.env.get("PLATE_RECOGNIZER_API_TOKEN");
+    const plateRecognizerToken = Deno.env.get("PLATE_RECOGNIZER_API_TOKEN") || token;
     if (plateRecognizerToken && imageBase64) {
       try {
         const base64Payload = imageBase64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");

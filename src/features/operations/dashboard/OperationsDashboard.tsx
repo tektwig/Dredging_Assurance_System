@@ -8,6 +8,8 @@ import {
   type OperationsDashboardActivity,
   type OperationsDashboardData,
 } from '../services/operationsDashboard';
+import { useRealtimeTrips } from '../../../hooks/useRealtimeTrips';
+import { NotificationToastContainer } from '../../../components/common/NotificationToast';
 import './dashboard.css';
 
 export type OperationsDashboardLoadState =
@@ -151,6 +153,12 @@ export function OperationsDashboard() {
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<OperationsDashboardLoadState>({ status: 'loading' });
 
+  const { toasts, dismissToast } = useRealtimeTrips({
+    channelName: 'operations-dashboard-trips-realtime',
+    onTripChange: () => setRevision(value => value + 1),
+    showToasts: true,
+  });
+
   useEffect(() => {
     let current = true;
     setState({ status: 'loading' });
@@ -162,5 +170,10 @@ export function OperationsDashboard() {
     return () => { current = false; };
   }, [revision]);
 
-  return <OperationsDashboardView state={state} onRetry={() => setRevision(value => value + 1)} />;
+  return (
+    <>
+      <OperationsDashboardView state={state} onRetry={() => setRevision(value => value + 1)} />
+      <NotificationToastContainer toasts={toasts} onDismiss={dismissToast} />
+    </>
+  );
 }

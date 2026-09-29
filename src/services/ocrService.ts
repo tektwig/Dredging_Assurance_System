@@ -76,28 +76,118 @@ async function recognizeWithCloudANPR(
   imageSource: File | Blob | string,
   registeredTrucks: Truck[]
 ): Promise<PlateRecognitionResult | null> {
-  if (!isSupabaseLive || !supabase || (typeof navigator !== 'undefined' && !navigator.onLine)) return null;
-
   const imageBase64 = await imageSourceToDataUrl(imageSource);
   if (!imageBase64) return null;
 
-  const { data, error } = await supabase.functions.invoke<CloudANPRResult>('ocr-extract', {
-    body: { imageBase64, filename: imageSource instanceof File ? imageSource.name : 'plate.jpg' },
-  });
-  if (error || !data?.success || !data.extractedPlate) return null;
+  const clientToken = (import.meta.env.VITE_PLATE_RECOGNIZER_TOKEN as string | undefined)?.trim();
 
-  const extraction = extractNigerianPlateFromText(data.extractedPlate, registeredTrucks);
-  if (extraction.matchType === 'FALLBACK') return null;
+  // Option A: Direct Plate Recognizer call if client token is present in .env
+  if (clientToken && typeof navigator !== 'undefined' && navigator.onLine) {
+    try {
+      console.log('[OCR] Invoking Plate Recognizer with VITE_PLATE_RECOGNIZER_TOKEN...');
+      const cleanBase64 = imageBase64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '');
+      const binary = Uint8Array.from(atob(cleanBase64), (c) => c.charCodeAt(0));
+      const formData = new FormData();
+      formData.append('upload', new Blob([binary], { type: 'image/jpeg' }), 'plate.jpg');
+      formData.append('regions', 'ng');
 
-  return {
-    rawText: data.rawText || data.extractedPlate,
-    candidatePlate: extraction.candidatePlate,
-    normalizedPlate: extraction.normalizedPlate,
-    confidence: Math.min(99, Math.max(0, Math.round(data.confidence || extraction.confidence))),
-    isRecognizedMasterPlate: !!extraction.matchedTruck,
-    matchType: extraction.matchType,
-    matchedTruck: extraction.matchedTruck,
-  };
+      const response = await fetch('https://api.platerecognizer.com/v1/plate-reader/', {
+        method: 'POST',
+        headers: { Authorization: `Token ${clientToken}` },
+        body: formData,
+      });
+
+      if (response.ok) {
+        const alprData = await response.json();
+        const result = alprData?.results?.[0];
+        if (result?.plate) {
+          const rawPlate = String(result.plate).toUpperCase().trim();
+          console.log('[OCR] Plate Recognizer direct response:', rawPlate, result);
+
+          const extraction = extractNigerianPlateFromText(rawPlate, registeredTrucks);
+          const cleanPlate = rawPlate.replace(/[^A-Z0-9]/g, '');
+
+          // Standard Nigerian plate formatting: AAA-123-AA
+          let candidate = rawPlate;
+          if (cleanPlate.length >= 7 && cleanPlate.length <= 9) {
+            const prefix = cleanPlate.slice(0, 3);
+            const suffix = cleanPlate.slice(-2);
+            const middle = cleanPlate.slice(3, -2);
+            if (/^[A-Z]{3}$/.test(prefix) && /^\d{2,4}$/.test(middle) && /^[A-Z]{2}$/.test(suffix)) {
+              candidate = `${prefix}-${middle}-${suffix}`;
+            }
+          }
+
+          const finalCandidate = extraction.matchType !== 'FALLBACK' ? extraction.candidatePlate : candidate;
+          const finalNormalized = extraction.matchType !== 'FALLBACK' ? extraction.normalizedPlate : cleanPlate;
+
+          return {
+            rawText: rawPlate,
+            candidatePlate: finalCandidate,
+            normalizedPlate: finalNormalized,
+            confidence: Math.min(99, Math.max(75, Math.round(Number(result.score || 0.95) * 100))),
+            isRecognizedMasterPlate: !!extraction.matchedTruck,
+            matchType: extraction.matchType !== 'FALLBACK' ? extraction.matchType : 'SYNTACTIC_VALID',
+            matchedTruck: extraction.matchedTruck,
+          };
+        }
+      }
+    } catch (clientErr) {
+      console.warn('[OCR] Direct Plate Recognizer call error:', clientErr);
+    }
+  }
+
+  // Option B: Supabase Edge Function 'ocr-extract'
+  if (!isSupabaseLive || !supabase || (typeof navigator !== 'undefined' && !navigator.onLine)) return null;
+
+  try {
+    console.log('[OCR] Calling Supabase Edge Function: ocr-extract...');
+    const { data, error } = await supabase.functions.invoke<CloudANPRResult>('ocr-extract', {
+      body: {
+        imageBase64,
+        filename: imageSource instanceof File ? imageSource.name : 'plate.jpg',
+        token: clientToken || undefined,
+      },
+    });
+
+    if (error) {
+      console.warn('[OCR] Supabase Edge Function ocr-extract unavailable:', error.message);
+      return null;
+    }
+
+    if (!data?.success || !data.extractedPlate) {
+      console.warn('[OCR] ocr-extract reported no plate:', data);
+      return null;
+    }
+
+    const rawPlate = String(data.extractedPlate).toUpperCase().trim();
+    console.log('[OCR] ocr-extract success:', rawPlate);
+    const extraction = extractNigerianPlateFromText(rawPlate, registeredTrucks);
+    const cleanPlate = rawPlate.replace(/[^A-Z0-9]/g, '');
+
+    let candidate = rawPlate;
+    if (cleanPlate.length >= 7 && cleanPlate.length <= 9) {
+      const prefix = cleanPlate.slice(0, 3);
+      const suffix = cleanPlate.slice(-2);
+      const middle = cleanPlate.slice(3, -2);
+      if (/^[A-Z]{3}$/.test(prefix) && /^\d{2,4}$/.test(middle) && /^[A-Z]{2}$/.test(suffix)) {
+        candidate = `${prefix}-${middle}-${suffix}`;
+      }
+    }
+
+    return {
+      rawText: data.rawText || rawPlate,
+      candidatePlate: extraction.matchType !== 'FALLBACK' ? extraction.candidatePlate : candidate,
+      normalizedPlate: extraction.matchType !== 'FALLBACK' ? extraction.normalizedPlate : cleanPlate,
+      confidence: Math.min(99, Math.max(70, Math.round(data.confidence || 90))),
+      isRecognizedMasterPlate: !!extraction.matchedTruck,
+      matchType: extraction.matchType !== 'FALLBACK' ? extraction.matchType : 'SYNTACTIC_VALID',
+      matchedTruck: extraction.matchedTruck,
+    };
+  } catch (err) {
+    console.warn('[OCR] Cloud ANPR invocation error:', err);
+    return null;
+  }
 }
 
 /**
@@ -225,17 +315,16 @@ export async function preprocessImageForOCR(imageSource: File | Blob | string): 
         const maxDim = 1600;
         const sourceWidth = img.naturalWidth || img.width;
         const sourceHeight = img.naturalHeight || img.height;
-        const isPortraitVehiclePhoto = sourceHeight > sourceWidth * 1.12;
+        const isExtremePortrait = sourceHeight > sourceWidth * 1.6;
 
-        // Phone uploads commonly include the whole front of the vehicle. In portrait
-        // captures the registration characters occupy the lower-centre band; removing
-        // the badge, grille and plate slogans prevents sparse-text OCR from winning.
-        const crop = isPortraitVehiclePhoto
+        // Only apply vehicle band crop if the photo is an extreme full-height portrait capture.
+        // For standard or close-up captures, preserve the full image to avoid cutting out the plate.
+        const crop = isExtremePortrait
           ? {
-              x: Math.round(sourceWidth * 0.03),
-              y: Math.round(sourceHeight * 0.60),
-              width: Math.round(sourceWidth * 0.94),
-              height: Math.round(sourceHeight * 0.18),
+              x: Math.round(sourceWidth * 0.05),
+              y: Math.round(sourceHeight * 0.50),
+              width: Math.round(sourceWidth * 0.90),
+              height: Math.round(sourceHeight * 0.35),
             }
           : { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
 
@@ -252,8 +341,6 @@ export async function preprocessImageForOCR(imageSource: File | Blob | string): 
             height = maxDim;
           }
         } else if (height < 320) {
-          // Plate bands are short even in good phone photos. Upscale glyph height
-          // before thresholding so Tesseract retains character strokes.
           const scale = Math.min(2.5, maxDim / width);
           width = Math.round(width * scale);
           height = Math.round(height * scale);
@@ -273,22 +360,22 @@ export async function preprocessImageForOCR(imageSource: File | Blob | string): 
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, crop.x, crop.y, crop.width, crop.height, 0, 0, width, height);
 
-        // Pixel-level contrast boost & grayscale conversion
+        // Dynamic contrast stretch & grayscale conversion (preserves anti-aliased glyph strokes for Tesseract)
         const imageData = ctx.getImageData(0, 0, width, height);
         const data = imageData.data;
 
+        let minLuma = 255;
+        let maxLuma = 0;
         for (let i = 0; i < data.length; i += 4) {
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
+          const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+          if (gray < minLuma) minLuma = gray;
+          if (gray > maxLuma) maxLuma = gray;
+        }
 
-          // Luminance
-          const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-
-          // A binary plate-focused threshold separates blue/black glyphs from the
-          // white/green reflective Nigerian plate, including wet daytime captures.
-          const enhanced = gray > 130 ? 255 : 0;
-
+        const lumaRange = Math.max(20, maxLuma - minLuma);
+        for (let i = 0; i < data.length; i += 4) {
+          const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          const enhanced = Math.min(255, Math.max(0, Math.round(((gray - minLuma) / lumaRange) * 255)));
           data[i] = enhanced;
           data[i + 1] = enhanced;
           data[i + 2] = enhanced;
@@ -510,7 +597,7 @@ export async function recognizeLicensePlate(
     // Whitelist uppercase letters, digits, dashes and spaces to prevent punctuation noise
     await worker.setParameters({
       tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -',
-      tessedit_pageseg_mode: PSM.SINGLE_LINE,
+      tessedit_pageseg_mode: PSM.AUTO,
       user_defined_dpi: '300',
     });
 
