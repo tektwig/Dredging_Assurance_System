@@ -90,6 +90,9 @@ for (const path of operationsPaths) {
     assert(!output.includes('This module is a Phase 1 placeholder'));
   } else if (path === '/operations/trucks-drivers') {
     assert(!output.includes('This module is a Phase 1 placeholder'));
+  } else if (path === '/operations/waybills-payouts') {
+    assert(output.includes('Loading results'));
+    assert(!output.includes('This module is a Phase 1 placeholder'));
   } else assert(output.includes('This module is a Phase 1 placeholder'));
   assert(output.includes('Operations navigation'));
   assert(!renderApp(path, 'system_administrator').includes('This module is a Phase 1 placeholder'));
@@ -110,6 +113,12 @@ for (const path of ['/operations/trucks-drivers/trucks', '/operations/trucks-dri
   for (const role of APP_ROLES.filter(role => role !== 'operations_manager')) {
     assert(!renderApp(path, role).includes('Loading results'));
   }
+}
+const waybillDetailPath = '/operations/waybills-payouts/00000000-0000-0000-0000-000000000001';
+assert(renderApp(waybillDetailPath, 'operations_manager').includes('Loading results'));
+assert(renderApp(waybillDetailPath, 'operations_manager').includes('aria-current="page"'));
+for (const role of APP_ROLES.filter(role => role !== 'operations_manager')) {
+  assert(!renderApp(waybillDetailPath, role).includes('Loading results'));
 }
 for (const path of adminPaths) {
   const output = renderApp(path, 'system_administrator');

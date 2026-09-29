@@ -8,6 +8,8 @@ import { OperationsTripDetail } from './features/operations/trips/OperationsTrip
 import { OperationsTripsRegister } from './features/operations/trips/OperationsTripsRegister';
 import { OperationsDriverDetail, OperationsTruckDetail } from './features/operations/trucksDrivers/OperationsAssetDetail';
 import { OperationsDriversList, OperationsTrucksList } from './features/operations/trucksDrivers/OperationsAssetsList';
+import { OperationsWaybillDetail } from './features/operations/waybillsPayouts/OperationsWaybillDetail';
+import { OperationsWaybillsRegister } from './features/operations/waybillsPayouts/OperationsWaybillsRegister';
 import { AuthenticatedLayout } from './layouts/AuthenticatedLayout';
 import { configurationError } from './lib/supabase';
 import { AccessDeniedPage } from './pages/AccessDeniedPage';
@@ -50,7 +52,9 @@ export default function App() {
           <Route path="trucks-drivers/trucks/:truckId" element={<OperationsTruckDetail />} />
           <Route path="trucks-drivers/drivers" element={<OperationsDriversList />} />
           <Route path="trucks-drivers/drivers/:driverId" element={<OperationsDriverDetail />} />
-          {OPERATIONS_NAVIGATION.slice(3).map(item => <Route key={item.route} path={item.route}
+          <Route path="waybills-payouts" element={<OperationsWaybillsRegister />} />
+          <Route path="waybills-payouts/:invoiceId" element={<OperationsWaybillDetail />} />
+          {OPERATIONS_NAVIGATION.slice(4).map(item => <Route key={item.route} path={item.route}
             element={<PortalPage role="operations_manager" title={item.title} />} />)}
           <Route path="*" element={<Navigate to={PORTALS.operations_manager.path} replace />} />
         </Route>

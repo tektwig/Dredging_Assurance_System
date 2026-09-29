@@ -279,8 +279,9 @@ accepted**, not inbox delivery; bounce/delivery webhooks are not implemented.
 The existing `process-trip-notifications` worker also delivers a `waybill_ready`
 event after the PDF document reaches `ready`. It reconciles immutable invoice and
 ready-document rows through a service-role-only RPC on each run, safely
-backfilling already-ready Waybills and catching later completions. A unique
-`(trip_id,event_type,audience)` key prevents duplicate driver/internal events.
+backfilling already-ready Waybills and catching later completions. Original
+deliveries retain sequence `0`; a unique `(trip_id,event_type,audience,delivery_sequence)`
+key prevents duplicate attempts. Reconciliation only inserts sequence `0`.
 The driver's address comes only from the immutable Waybill snapshot; the
 Operations/Finance copy uses optional `WAYBILL_INTERNAL_RECIPIENTS` (a
 comma-separated address list). This is separate from the unchanged `trip_closed`
@@ -302,6 +303,32 @@ Inspect pending/failed jobs through the finance-restricted outbox. Worker respon
 include claimed/sent/deferred/unacknowledged counts and never contain bank details.
 An acknowledgement failure leaves the lease reclaimable. Provider response
 bodies and sensitive request payloads are not logged.
+
+### Operations Waybills & Payouts
+
+Migration `20260927000700_operations_waybills_payouts.sql` adds Operations-only,
+server-paginated Waybill register/detail/history RPCs. Register and history omit
+banking and recipient/provider data. Detail returns only the selected invoice
+and payout banking; closure-time invoice banking is never changed. Ready PDFs
+are downloaded by the authenticated Operations browser directly from the
+existing private bucket with its RLS-protected user session, without a public
+or signed URL.
+
+The audited resend RPC requires an existing ready PDF and original delivery,
+an approved reason code and a stable client request UUID. It appends sequence
+`1+` for either audience without changing prior deliveries. Internal recipients
+are supplied by `WAYBILL_INTERNAL_RECIPIENTS` at the worker's first claim and
+frozen for retries. A failed attempt inside the original 23-hour provider
+idempotency window may be retried using its same outbox ID. Outside that
+window, only a deliberately new, duplicate-risk-confirmed attempt is allowed.
+Dashboard email-failure alerts count only the latest attempt per audience.
+
+Operations-only payout RPCs fill bank details on one missing-details payment
+without modifying the driver master record, or mark a pending payment paid.
+Both require the exact payment `updated_at`; mark-paid also requires a bounded
+reference and permits same-reference replay without a second update. Existing
+Finance/Admin payment RPCs and permissions remain unchanged. No payout amount
+is calculated.
 
 ## Validation and local operation
 
