@@ -1,9 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '../types/profile';
 
+const DEFAULT_SUPABASE_URL = 'https://pidxlopbxlapfmakmtjt.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_s8NvM6ZPe-N6VdR4tQC7Vg_syJ-Ckb9';
+
 function readConfiguration() {
-  const url = import.meta.env.VITE_SUPABASE_URL?.trim();
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
+  const url = import.meta.env.VITE_SUPABASE_URL?.trim() || DEFAULT_SUPABASE_URL;
+  const key = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() || DEFAULT_SUPABASE_ANON_KEY;
   if (!url || !key) {
     throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY. Configure the backup frontend environment and restart Vite.');
   }
