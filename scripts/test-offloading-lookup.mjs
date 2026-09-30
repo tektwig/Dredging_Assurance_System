@@ -130,9 +130,9 @@ assert(failedScanMarkup.includes('Rescan or try again'));
 assert(failedScanMarkup.includes('Try Again'));
 assert(!failedScanMarkup.includes('Manual Entry') && !failedScanMarkup.includes('Correct plate'));
 assert(!failedScanMarkup.includes('Choose Photo') && !failedScanMarkup.includes('type="file"'));
-const view = state => renderToStaticMarkup(React.createElement(OffloadingPortalView, {
+const view = (state, closure = { status: 'idle' }) => renderToStaticMarkup(React.createElement(OffloadingPortalView, {
   officerName: 'Officer A', lookup: { state, pending: false },
-  closure: { status: 'idle' }, closurePanel: null,
+  closure, closurePanel: null,
   statistics: { status: 'loading' }, now: new Date('2026-09-27T12:00:00Z'), onRetryStatistics() {},
   capturePanel: React.createElement('span', null, 'shared scanner'),
   onLookup() {}, onReset() {},
@@ -150,9 +150,15 @@ const rendered = view({ status: 'found', assignment: found.assignment,
 assert(rendered.includes('TRP-0000000001'));
 assert(rendered.includes('John Driver'));
 assert(rendered.includes('20.25 tonnes'));
-assert(rendered.includes('Scan Next Truck'));
+assert(rendered.includes('Cancel &amp; Scan Next Truck'));
+assert(!rendered.includes('shared scanner') && !rendered.includes('Scan Plate'),
+  'found OPEN trip unmounts the scanner section before tonnage/review/closure');
 assert(!rendered.includes('account_number'));
 assert(!rendered.includes('Close Trip'));
+assert(view({ status: 'found', assignment: found.assignment, trip: found.trip,
+  capture: preparedCapture('ABC-123', evidence, 'later') }, { status: 'success', result: {} }).includes('Scan Next Truck'),
+  'scanner next-trip reset remains available after successful closure');
+assert(view({ status: 'idle' }).includes('shared scanner'), 'scanner returns after reset for the next trip');
 
 const portalSource = readFileSync(resolve('src/features/offloading/OffloadingPortal.tsx'), 'utf8');
 assert(portalSource.includes('PlateCaptureController') && portalSource.includes('createPlateOcrService'));
@@ -160,6 +166,9 @@ assert(!portalSource.includes('close_trip_v2') && !portalSource.includes('.stora
   && !portalSource.includes(".from('trips')"));
 console.log('PASS Offloading OCR lookup, NO_OPEN_TRIP, error, reset, stale result and safe rendering');
 assert(portalSource.includes('void lookupController.submit(capture.evidence.candidate, capture.evidence)'));
+assert(portalSource.includes("lookup.state.status === 'found' ? undefined : <PlateCapture"));
+assert(portalSource.includes('if (selectedTripRef.current) return'));
+assert(portalSource.includes("if (lookup.state.status === 'found') captureController.clear()"));
 assert(portalSource.includes('autoLookupEvidence.current === capture.evidence.id'));
 assert(!portalSource.includes('confirmCorrection'));
 console.log('PASS OCR auto-lookup, no plate correction/manual entry, estimate display and stale evidence fencing');

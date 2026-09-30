@@ -51,6 +51,7 @@ input:focus { border-color: #16706e; }
 .brand { font-weight: 800; margin-bottom: .1rem; }
 .app-header p { margin-bottom: 0; }
 .account-summary { display: flex; align-items: center; gap: 1.5rem; }
+.account-actions { display: grid; justify-items: stretch; gap: .5rem; }
 .user-name { font-weight: 700; overflow-wrap: anywhere; }
 .portal-content { max-width: 75rem; margin: 0 auto; padding: clamp(1.25rem, 4vw, 4rem); }
 .portal-navigation { background: #fff; border-bottom: 1px solid #dce4e9; }

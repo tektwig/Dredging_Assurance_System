@@ -11,6 +11,9 @@ verify_jwt = false
 [functions.process-waybill-pdfs]
 verify_jwt = false
 
+[functions.create-operational-user]
+verify_jwt = true
+
 [api]
 enabled = true
 # Port to use for the API URL.
