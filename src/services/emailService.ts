@@ -100,11 +100,29 @@ export async function sendInvoicePdfEmail(
       const errContext = (supaErr as any)?.context;
       const status = errContext?.status;
 
+      let providerError: string | null = null;
+      if (errContext && typeof errContext.json === 'function') {
+        try {
+          const errJson = await errContext.clone().json();
+          providerError = errJson?.error || errJson?.message || null;
+        } catch {
+          // ignore parsing error
+        }
+      }
+
       if (status === 404) {
         return {
           success: false,
           isServerError: true,
           message: 'Supabase Edge Function (send-invoice-email) is pending deployment on this project. Use "Open Mail App" or "Share PDF" below to send immediately.',
+        };
+      }
+
+      if (providerError) {
+        return {
+          success: false,
+          isServerError: true,
+          message: providerError,
         };
       }
 
