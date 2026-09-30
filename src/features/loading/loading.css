@@ -108,3 +108,30 @@
   .loading-registration-actions .button { width: 100%; }
   .loading-trip-buttons .button, .loading-trip-success > .button { width: 100%; }
 }
+.loading-registration-dialog {
+  width: min(46rem, calc(100vw - 2rem));
+  max-height: min(90dvh, 54rem);
+  overflow: auto;
+  border: 0;
+  border-radius: 1rem;
+  padding: clamp(1rem, 3vw, 2rem);
+  color: inherit;
+  background: var(--surface, #fff);
+  box-shadow: 0 1.5rem 5rem rgb(0 0 0 / 35%);
+}
+
+.loading-registration-dialog::backdrop {
+  background: rgb(15 23 42 / 62%);
+  backdrop-filter: blur(3px);
+}
+
+.loading-estimated-tonnage {
+  display: grid;
+  gap: .65rem;
+  max-width: 28rem;
+  margin-block: 1rem;
+}
+
+.loading-estimated-tonnage input {
+  min-height: 2.75rem;
+}

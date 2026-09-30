@@ -4,8 +4,15 @@ import { StatusPage } from './components/StatusPage';
 import { LoadingPortal } from './features/loading/LoadingPortal';
 import { OffloadingPortal } from './features/offloading/OffloadingPortal';
 import { OperationsDashboard } from './features/operations/dashboard/OperationsDashboard';
+import { OperationsExceptionDetail } from './features/operations/exceptions/OperationsExceptionDetail';
+import { OperationsExceptionsRegister } from './features/operations/exceptions/OperationsExceptionsRegister';
+import { OperationsReports } from './features/operations/reports/OperationsReports';
 import { OperationsTripDetail } from './features/operations/trips/OperationsTripDetail';
 import { OperationsTripsRegister } from './features/operations/trips/OperationsTripsRegister';
+import { OperationsDriverDetail, OperationsTruckDetail } from './features/operations/trucksDrivers/OperationsAssetDetail';
+import { OperationsDriversList, OperationsTrucksList } from './features/operations/trucksDrivers/OperationsAssetsList';
+import { OperationsWaybillDetail } from './features/operations/waybillsPayouts/OperationsWaybillDetail';
+import { OperationsWaybillsRegister } from './features/operations/waybillsPayouts/OperationsWaybillsRegister';
 import { AuthenticatedLayout } from './layouts/AuthenticatedLayout';
 import { configurationError } from './lib/supabase';
 import { AccessDeniedPage } from './pages/AccessDeniedPage';
@@ -65,7 +72,17 @@ export default function App() {
                 <Route index element={<OperationsDashboard />} />
                 <Route path="trips" element={<OperationsTripsRegister />} />
                 <Route path="trips/:tripId" element={<OperationsTripDetail />} />
-                {OPERATIONS_NAVIGATION.slice(2).map((item) => (
+                <Route path="trucks-drivers" element={<Navigate to="trucks" replace />} />
+                <Route path="trucks-drivers/trucks" element={<OperationsTrucksList />} />
+                <Route path="trucks-drivers/trucks/:truckId" element={<OperationsTruckDetail />} />
+                <Route path="trucks-drivers/drivers" element={<OperationsDriversList />} />
+                <Route path="trucks-drivers/drivers/:driverId" element={<OperationsDriverDetail />} />
+                <Route path="waybills-payouts" element={<OperationsWaybillsRegister />} />
+                <Route path="waybills-payouts/:invoiceId" element={<OperationsWaybillDetail />} />
+                <Route path="exceptions" element={<OperationsExceptionsRegister />} />
+                <Route path="exceptions/:exceptionId" element={<OperationsExceptionDetail />} />
+                <Route path="reports" element={<OperationsReports />} />
+                {OPERATIONS_NAVIGATION.slice(6).map((item) => (
                   <Route
                     key={item.route}
                     path={item.route}

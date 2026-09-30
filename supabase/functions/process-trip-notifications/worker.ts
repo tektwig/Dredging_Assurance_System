@@ -93,6 +93,7 @@ export async function processNotifications(config: WorkerConfig, batchLimit = 5,
     p_sender: config.sender,
     p_limit: batchLimit,
     p_include_waybill_ready: true,
+    p_waybill_internal_recipients: config.waybillInternalRecipients,
   });
   let sent = 0, deferred = 0, unacknowledged = 0;
   for (const job of jobs) {

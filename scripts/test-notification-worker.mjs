@@ -67,6 +67,7 @@ for (const scenario of ['success', 'provider_failure', 'timeout', 'ack_failure',
   assert.equal(calls.length, 4);
   assert.equal(calls[0].body.p_internal_recipients.length, 2);
   assert.equal(calls[1].body.p_include_waybill_ready, true);
+  assert.deepEqual(calls[1].body.p_waybill_internal_recipients, config.waybillInternalRecipients);
   assert.equal(calls[2].url, 'https://api.resend.com/emails');
   assert.equal(calls[2].options.headers['Idempotency-Key'], 'trip-notification/job-1');
   assert.deepEqual(calls[2].body, tripJob.email_request);
@@ -117,6 +118,25 @@ assert.equal(waybillRequests[0].body.attachments[0].filename, 'INV-2026-000001.p
 assert.deepEqual(Buffer.from(waybillRequests[0].body.attachments[0].content, 'base64'), Buffer.from(pdf));
 assert.equal(waybillRequests[0].body.attachments.length, 1);
 console.log('PASS Waybill reuses invoice, PDF, filename, and outbox idempotency key');
+
+const resendJob = { ...waybillJob, id: 'waybill-resend-1', lease_token: 'resend-lease-1' };
+const resendCalls = [];
+const resendResult = await processNotifications(config, 1, async (url, options) => {
+  resendCalls.push({ url, options, body: parseBody(options) });
+  if (url.endsWith('enqueue_waybill_ready_notifications')) return json(0);
+  if (url.endsWith('claim_trip_notifications')) return json([resendJob]);
+  if (url.endsWith('get_waybill_ready_pdf')) return json(pdfMetadata);
+  if (url.includes('/storage/v1/object/')) return new Response(pdf, { headers: { 'content-type': 'application/pdf' } });
+  if (url === 'https://api.resend.com/emails') return json({ id: 'provider-resend-1' });
+  if (url.endsWith('finish_trip_notification')) return json(true);
+  throw new Error(`Unexpected mocked request ${url}`);
+});
+assert.equal(resendResult.sent, 1);
+assert.equal(resendCalls.find(call => call.url === 'https://api.resend.com/emails').options.headers['Idempotency-Key'],
+  'trip-notification/waybill-resend-1');
+assert.equal(resendCalls.find(call => call.url.endsWith('get_waybill_ready_pdf')).body.p_notification_id, resendJob.id);
+assert(!resendCalls.some(call => call.url.includes('process-waybill-pdfs') || call.url.includes('close_trip')));
+console.log('PASS explicit resend reuses the same PDF with a distinct outbox/provider idempotency identity');
 
 for (const scenario of ['mismatched_path', 'download_failure', 'invalid_pdf']) {
   const calls = [];
@@ -216,6 +236,7 @@ assert.deepEqual(singleClaimRequest.find(call => call.url.endsWith('claim_trip_n
   p_sender: config.sender,
   p_limit: 1,
   p_include_waybill_ready: true,
+  p_waybill_internal_recipients: config.waybillInternalRecipients,
 });
 assert.deepEqual(singleClaimResult, { claimed: 0, sent: 0, deferred: 0, unacknowledged: 0, reconciliationFailed: false });
 console.log('PASS limit one reaches notification claim RPC as p_limit: 1');

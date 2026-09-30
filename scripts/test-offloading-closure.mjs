@@ -59,7 +59,8 @@ const evidence = { id: 'capture-a', imagePath: 'actor-a/capture-a.jpg', image,
   candidate: 'ABC-123', confidence: 0.9, capturedAt: '2026-09-25T08:30:00Z' };
 const trip = { id: 'trip-a', tripNumber: 'TRP-0000000006', truckId: 'truck-a',
   registrationNumber: 'ABC-123', normalizedRegistration: 'ABC123', driverId: 'driver-a',
-  driverName: 'John Driver', openedAt: '2026-09-25T08:00:00Z', loadingSiteName: 'Loading Site' };
+  driverName: 'John Driver', openedAt: '2026-09-25T08:00:00Z', loadingSiteName: 'Loading Site',
+  estimatedQuantityTonnes: 10.25 };
 const assignment = { assignmentId: 'assignment-a', siteId: 'site-a', siteName: 'Offloading Site' };
 const review = { trip, assignment, quantityTonnes: 12.5,
   capture: preparedCapture('ABC-123', evidence, 'later') };
@@ -198,6 +199,8 @@ assert(!panel({ quantity: '12.50' }).includes('disabled'));
 const reviewHtml = panel({ state: { status: 'review', review: manualReview } });
 assert(reviewHtml.includes('Confirm &amp; Close Trip'));
 assert(reviewHtml.includes('Offloading Site') && reviewHtml.includes('John Driver'));
+assert(reviewHtml.includes('Estimated Tonnage') && reviewHtml.includes('Actual Tonnage')
+  && reviewHtml.includes('Variance') && reviewHtml.includes('2.25 tonnes'));
 assert(panel({ state: { status: 'ambiguous', review: manualReview } }).includes('Retry Same Request'));
 const successHtml = panel({ state: { status: 'success', result: {
   kind: 'success', requestId: 'x', trip: { ...serverSuccess.trip, tripNumber: 'TRP-0000000006',
@@ -212,4 +215,8 @@ assert(successHtml.includes('TRP-0000000006') && successHtml.includes('ABC-123')
 assert(!successHtml.includes('account_number') && !successHtml.includes('bank_name'));
 assert(panel({ state: { status: 'business_failure', review: manualReview,
   code: 'TRIP_NOT_OPEN', tripNumber: 'TRP-0000000006' } }).includes('Contact Operations'));
+const captureFailure = panel({ state: { status: 'business_failure', review: manualReview,
+  code: 'INVALID_CAPTURE_METHOD' } });
+assert(captureFailure.includes('Start a new scan and try again'));
+assert(!captureFailure.includes('manual entry') && !captureFailure.includes('Choose Photo'));
 console.log('PASS tonnage, explicit review, frozen retry, evidence upload, closure response and reset');

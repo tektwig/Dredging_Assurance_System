@@ -1,0 +1,18 @@
+.operations-waybills-page { display: grid; gap: 1.25rem; }
+.operations-waybills-page header h1 { margin-bottom: .25rem; }
+.waybill-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; padding: 1rem; }
+.waybill-filters label, .waybill-action-form label { display: grid; gap: .35rem; font-size: .82rem; font-weight: 700; }
+.waybill-filters input, .waybill-filters select, .waybill-action-form input, .waybill-action-form select { width: 100%; min-height: 2.7rem; padding: .55rem .7rem; border: 1px solid #c7d1d8; border-radius: .5rem; background: #fff; color: #172b3a; font: inherit; }
+.waybill-section { padding: clamp(1rem, 2.5vw, 2rem); }
+.waybill-section h2 { margin-bottom: .8rem; }
+.waybill-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin: 0; }
+.waybill-detail-grid dt { color: #60717e; font-size: .77rem; font-weight: 700; }
+.waybill-detail-grid dd { margin: .25rem 0 0; overflow-wrap: anywhere; }
+.waybill-action-form { display: grid; gap: .8rem; max-width: 35rem; margin-top: 1.5rem; }
+.waybill-action-form h3, .waybill-action-form p { margin: 0; }
+.waybill-action-form .button { justify-self: start; }
+.waybill-action-form .waybill-checkbox { display: flex; align-items: flex-start; gap: .5rem; }
+.waybill-checkbox input { width: auto; min-height: auto; margin-top: .2rem; }
+.waybill-warning { color: #604509; background: #fff8e7; border: 1px solid #ead7a7; padding: .8rem; border-radius: .5rem; }
+@media (max-width: 900px) { .waybill-filters, .waybill-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .waybill-filters, .waybill-detail-grid { grid-template-columns: 1fr; } }

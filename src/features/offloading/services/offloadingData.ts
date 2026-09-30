@@ -25,7 +25,11 @@ export function parseOffloadingLookup(value: unknown): OffloadingLookupResult {
     trip.id, trip.trip_number, trip.truck_id, trip.registration_number,
     trip.normalized_registration, trip.driver_id, trip.driver_name,
     trip.opened_at, trip.loading_site_name].every(nonempty)
-    || Number.isNaN(Date.parse(trip.opened_at as string))) {
+    || Number.isNaN(Date.parse(trip.opened_at as string))
+    || !(trip.estimated_quantity_tonnes === null || (typeof trip.estimated_quantity_tonnes === 'number'
+      && Number.isFinite(trip.estimated_quantity_tonnes) && trip.estimated_quantity_tonnes > 0
+      && trip.estimated_quantity_tonnes < 100000000
+      && Math.abs(trip.estimated_quantity_tonnes * 100 - Math.round(trip.estimated_quantity_tonnes * 100)) < 0.000001))) {
     throw new Error('Invalid offloading lookup response');
   }
   return { kind: 'found', assignment: {
@@ -37,6 +41,7 @@ export function parseOffloadingLookup(value: unknown): OffloadingLookupResult {
     normalizedRegistration: trip.normalized_registration as string,
     driverId: trip.driver_id as string, driverName: trip.driver_name as string,
     openedAt: trip.opened_at as string, loadingSiteName: trip.loading_site_name as string,
+    estimatedQuantityTonnes: trip.estimated_quantity_tonnes as number | null,
   } };
 }
 

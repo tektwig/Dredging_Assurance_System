@@ -82,6 +82,9 @@ export function createPlateOcrService(
 ) {
   let disposed = false;
   return {
+    async recognize(file: File, report: (phase: PlateOcrPhase) => void = () => {}): Promise<ProcessedPlateImage> {
+      return this.process(file, report);
+    },
     async process(file: File, report: (phase: PlateOcrPhase) => void = () => {}): Promise<ProcessedPlateImage> {
       let image: Blob;
       try {

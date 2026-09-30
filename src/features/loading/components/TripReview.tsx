@@ -45,6 +45,7 @@ export function TripReview({ state, canReview, operationalDate, onReview, onBack
     return <div className="loading-trip-success" role="status">
       <h3>Trip opened</h3><p>Trip <strong>{trip.tripNumber}</strong> is open for <strong>{capture.confirmedPlate}</strong>.</p>
       <dl className="loading-details"><div><dt>Actual driver</dt><dd>{trip.driverNameAtLoading}</dd></div>
+        <div><dt>Estimated tonnage</dt><dd>{trip.estimatedQuantityTonnes.toFixed(2)} tonnes</dd></div>
         <div><dt>Opened at</dt><dd>{new Date(trip.openedAt).toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}</dd></div></dl>
       {state.review.makeRegular && <p>{defaultDriverChanged
         ? 'This driver is now the truck’s regular driver.'
@@ -54,15 +55,15 @@ export function TripReview({ state, canReview, operationalDate, onReview, onBack
   }
   const { review } = state;
   return <section className="loading-trip-review" aria-label="Review trip">
-    <h3>Review Trip</h3><p>Confirm the details before opening this trip. No tonnage is entered at Loading.</p>
+    <h3>Review Trip</h3><p>Confirm the loading estimate and trip details before opening.</p>
     <dl className="loading-details">
       <div><dt>Confirmed plate</dt><dd>{review.plate}</dd></div>
       <div><dt>Truck</dt><dd>{review.truck.registrationNumber}</dd></div>
       <div><dt>Actual driver</dt><dd>{review.actualDriver.fullName}<span>{review.actualDriver.phoneNumber}</span></dd></div>
       <div><dt>Assigned loading site</dt><dd>{review.site.siteName}</dd></div>
+      <div><dt>Estimated tonnage</dt><dd>{review.estimatedQuantityTonnes.toFixed(2)} tonnes</dd></div>
       <div><dt>Operational date · Africa/Lagos</dt><dd>{operationalDate}</dd></div>
-      <div><dt>Plate capture</dt><dd>{review.capture ? captureMethod(review) === 'OCR'
-        ? 'OCR suggestion confirmed' : 'OCR suggestion corrected' : 'Manual entry'}</dd></div>
+      <div><dt>Plate capture</dt><dd>{captureMethod(review)} scan confirmed</dd></div>
       {review.actualDriver.id !== review.regularDriverId && <div><dt>Regular driver</dt>
         <dd>{review.makeRegular ? 'Set selected driver as regular when the trip opens' : 'Leave unchanged'}</dd></div>}
     </dl>

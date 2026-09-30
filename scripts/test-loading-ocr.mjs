@@ -57,7 +57,7 @@ assert(existsSync(resolve('public/ocr-runtime/ort-wasm-simd-threaded.jsep.mjs'))
 assert(existsSync(resolve('public/ocr-runtime/ort-wasm-simd-threaded.jsep.wasm')));
 assert.equal(require(resolve('package.json')).dependencies['tesseract.js'], undefined);
 const localOcr = createPlateOcrService();
-await assert.rejects(localOcr.process(new File(['<svg/>'], 'unsafe.svg', { type: 'image/svg+xml' })));
+await assert.rejects(localOcr.recognize(new File(['<svg/>'], 'unsafe.svg', { type: 'image/svg+xml' })));
 localOcr.dispose();
 let paddleDisposed = false;
 const prepared = new Blob(['cropped-image'], { type: 'image/jpeg' });
@@ -67,7 +67,7 @@ const mockPaddle = createPlateOcrService(async () => ({
   ] }]; },
   async dispose() { paddleDisposed = true; },
 }), async () => prepared);
-assert.deepEqual(await mockPaddle.process(new File(['original'], 'plate.png', { type: 'image/png' })),
+assert.deepEqual(await mockPaddle.recognize(new File(['original'], 'plate.png', { type: 'image/png' })),
   { image: prepared, candidate: 'ABC-123', confidence: 0.88 });
 mockPaddle.dispose();
 await Promise.resolve();
@@ -79,7 +79,7 @@ let pending = [];
 let prefills = [];
 let captureState;
 let ids = 0;
-const capture = new PlateCaptureController('actor-a', () => new Promise(resolve => pending.push(resolve)),
+const capture = new PlateCaptureController('actor-a', { recognize: () => new Promise(resolve => pending.push(resolve)), dispose() {}, resume() {} },
   value => { captureState = value; }, value => prefills.push(value), () => `capture-${++ids}`,
   () => '2026-09-25T09:00:00.000Z');
 const old = capture.capture(file);
@@ -109,21 +109,20 @@ assert.equal(captureState.status, 'idle');
 const phases = [];
 const modelFailure = createPlateOcrService(async () => { throw new Error('private runtime detail'); },
   async () => jpeg);
-await assert.rejects(modelFailure.process(file, phase => phases.push(phase)), { reason: 'model_unavailable' });
+await assert.rejects(modelFailure.recognize(file, phase => phases.push(phase)), { reason: 'model_unavailable' });
 assert.deepEqual(phases, ['loading_model']);
 modelFailure.dispose();
-console.log('PASS local OCR candidate extraction, recapture race, failed OCR/manual fallback');
+console.log('PASS local OCR candidate extraction, recapture race and failed OCR retry state');
 
 const { captureMethod } = load('src/features/loading/utils/captureMethod.ts');
 const baseReview = { plate: 'ABC-123', truck: { id: 'truck-a', registrationNumber: 'ABC-123', normalizedRegistration: 'ABC123', isActive: true },
   actualDriver: { id: 'driver-a', fullName: 'Driver A', phoneNumber: '08011111111', email: null, isActive: true },
-  regularDriverId: 'driver-a', site: { assignmentId: 'site-assignment', siteId: 'site-a', siteName: 'Site A' }, makeRegular: false };
+  regularDriverId: 'driver-a', site: { assignmentId: 'site-assignment', siteId: 'site-a', siteName: 'Site A' }, makeRegular: false,
+  estimatedQuantityTonnes: 18.25 };
 const evidence = { id: 'capture-a', imagePath: 'actor-a/capture-a.jpg', image: jpeg,
   candidate: 'ABC-123', confidence: 0.83, capturedAt: '2026-09-25T09:00:00.000Z' };
-assert.equal(captureMethod(baseReview), 'MANUAL');
 assert.equal(captureMethod({ ...baseReview, capture: evidence }), 'OCR');
 assert.equal(captureMethod({ ...baseReview, plate: 'ABC 123', capture: evidence }), 'OCR');
-assert.equal(captureMethod({ ...baseReview, plate: 'ABC-124', capture: evidence }), 'OCR_CORRECTED');
 
 const calls = [];
 let rpcError = null;
@@ -145,20 +144,17 @@ function responseFor(request) {
     trip: { id: 'trip-a', trip_number: 'TRP-0001', status: 'open', truck_id: review.truck.id,
       driver_id: review.actualDriver.id, driver_name_at_loading: review.actualDriver.fullName,
       daily_registration_id: 'daily-a', loading_site_id: review.site.siteId,
-      loading_assignment_id: review.site.assignmentId, opened_at: '2026-09-25T09:05:00Z', opened_by: 'actor-a', quantity_tonnes: null },
+      loading_assignment_id: review.site.assignmentId, opened_at: '2026-09-25T09:05:00Z', opened_by: 'actor-a',
+      quantity_tonnes: null, estimated_quantity_tonnes: review.estimatedQuantityTonnes },
     capture: { confirmed_plate: review.plate, normalized_confirmed_plate: review.plate.replace(/[ -]/g, ''),
-      capture_method: captureMethod(review), image_recorded: !!review.capture }, default_driver_changed: false };
+      capture_method: captureMethod(review), image_recorded: true }, default_driver_changed: false };
 }
 const { openLoadingTrip } = load('src/features/loading/services/tripData.ts');
 const manual = Object.freeze({ requestId: 'manual-a', capturedAt: '2026-09-25T09:05:00.000Z', review: baseReview });
 rpcRequest = manual;
-assert.equal((await openLoadingTrip(manual)).capture.captureMethod, 'MANUAL');
+await assert.rejects(openLoadingTrip(manual), { message: 'Trip opening outcome unknown' });
 assert.equal(calls.filter(call => call.kind === 'upload').length, 0);
-assert.deepEqual(calls.at(-1).args, {
-  p_request_id: manual.requestId, p_plate: baseReview.plate, p_driver_id: 'driver-a',
-  p_expected_assignment_id: 'site-assignment', p_capture_method: 'MANUAL', p_captured_at: manual.capturedAt,
-  p_ocr_detected_plate: null, p_ocr_confidence: null, p_image_path: null, p_make_default_driver: false,
-});
+assert.equal(calls.filter(call => call.kind === 'rpc').length, 0, 'request without OCR evidence cannot reach trip-opening RPC');
 const ocrReview = { ...baseReview, capture: evidence };
 const ocr = Object.freeze({ requestId: 'ocr-a', capturedAt: evidence.capturedAt, review: ocrReview });
 rpcRequest = ocr;
@@ -169,13 +165,8 @@ assert.deepEqual(calls.at(-2).options, { contentType: 'image/jpeg', upsert: fals
 assert.equal(calls.at(-1).args.p_ocr_confidence, 0.83);
 assert.equal(calls.at(-1).args.p_image_path, evidence.imagePath);
 assert.equal(calls.at(-1).args.p_captured_at, evidence.capturedAt);
-const correctedReview = { ...baseReview, plate: 'ABC-124', capture: { ...evidence, id: 'capture-b', imagePath: 'actor-a/capture-b.jpg' } };
-const corrected = Object.freeze({ requestId: 'ocr-b', capturedAt: evidence.capturedAt, review: correctedReview });
-rpcRequest = corrected;
-assert.equal((await openLoadingTrip(corrected)).capture.captureMethod, 'OCR_CORRECTED');
-assert.equal(calls.at(-1).args.p_plate, 'ABC-124');
-assert.equal(calls.at(-1).args.p_ocr_detected_plate, 'ABC-123');
-console.log('PASS MANUAL, OCR, OCR_CORRECTED V2 payloads and authoritative success parsing');
+assert.equal(calls.at(-1).args.p_estimated_quantity_tonnes, 18.25);
+console.log('PASS OCR-only request payload, no typed-plate bypass and authoritative success parsing');
 
 // An ambiguous RPC outcome leaves the uploaded image and frozen request intact.
 const { OpenTripController } = load('src/features/loading/utils/openTripController.ts');
@@ -231,43 +222,51 @@ const { PlateCapture } = load('src/features/loading/components/PlateCapture.tsx'
 const { LoadingPortalView } = load('src/features/loading/components/LoadingPortalView.tsx');
 const { reviewForSelection } = load('src/features/loading/utils/reviewSelection.ts');
 assert.equal(reviewForSelection({ status: 'ready', site: baseReview.site },
-  { state: { status: 'idle' }, pending: false }, null, evidence), null);
+  { state: { status: 'idle' }, pending: false }, null, 18.25, evidence), null);
 const scanner = React.createElement(PlateCapture, { state: { status: 'detected', evidence }, disabled: false,
-  onCapture() {}, onManual() {}, onScanStart() {} });
+  onCapture() {}, onScanStart() {} });
 const html = renderToStaticMarkup(React.createElement(LoadingPortalView, {
   officerName: 'Officer', now: new Date('2026-09-25T09:00:00Z'),
   site: { status: 'ready', site: baseReview.site },
   statistics: { status: 'ready', statistics: { tripsOpened: 0, openTrips: 0, tripsClosed: 0, trucksProcessed: 0 } },
-  plate: evidence.candidate, lookup: { state: { status: 'idle' }, pending: false },
-  capturePanel: scanner, onPlateChange() {}, onLookup() {}, onRetrySite() {}, onRetryStatistics() {},
+  estimatedTonnage: '', truckConfirmed: false,
+  lookup: { state: { status: 'idle' }, pending: false },
+  capturePanel: scanner, onLookup() {}, onConfirmTruck() {}, onEstimatedTonnageChange() {},
+  onRetrySite() {}, onRetryStatistics() {},
 }));
-assert(html.indexOf('Plate scanner') < html.indexOf('Vehicle Plate Number'));
+assert(html.includes('Plate scanner') && !html.includes('name="plate"'));
 assert.match(html, /Scan Number Plate/);
-assert.match(html, /type="file"[^>]*hidden=""/);
-assert.match(html, /Choose Photo/);
-assert.match(html, /accept="image\/\*"/);
+assert(!html.includes('Choose Photo') && !html.includes('type="file"') && !html.includes('accept="image/'));
 assert.match(html, /Detected plate/);
-assert.match(html, /Find Truck/);
+assert.match(html, /Looking up this candidate automatically/);
+assert(!html.includes('Find Truck'));
+assert(!html.includes('Correct recognized plate') && !html.includes('Correct plate') && !html.includes('Enter plate manually'));
 const completedHtml = renderToStaticMarkup(React.createElement(LoadingPortalView, {
   officerName: 'Officer', now: new Date('2026-09-25T09:00:00Z'),
   site: { status: 'ready', site: baseReview.site }, statistics: { status: 'error' },
-  plate: evidence.candidate, lookup: { state: { status: 'idle' }, pending: false },
-  capturePanel: scanner, tripStage: 'success', onPlateChange() {}, onLookup() {},
+  estimatedTonnage: '', truckConfirmed: false,
+  lookup: { state: { status: 'idle' }, pending: false },
+  capturePanel: scanner, tripStage: 'success', onLookup() {}, onConfirmTruck() {}, onEstimatedTonnageChange() {},
   onRetrySite() {}, onRetryStatistics() {},
 }));
 assert(!completedHtml.includes('Detected plate'), 'completed workspace must not show stale scanner instructions');
 const processing = renderToStaticMarkup(React.createElement(PlateCapture, {
   state: { status: 'processing', phase: 'loading_model' }, disabled: false,
-  onCapture() {}, onManual() {}, onScanStart() {},
+  onCapture() {}, onScanStart() {},
 }));
-assert.match(processing, /Manual entry remains available/);
 assert.match(processing, /Loading on-device OCR model/);
 const ocrFailure = renderToStaticMarkup(React.createElement(PlateCapture, {
   state: { status: 'error', reason: 'model_unavailable' }, disabled: false,
-  onCapture() {}, onManual() {}, onScanStart() {},
+  onCapture() {}, onScanStart() {},
 }));
 assert.match(ocrFailure, /On-device OCR could not load/);
-console.log('PASS scanner above editable manual plate; OCR result never auto-submits lookup');
+assert.match(ocrFailure, /Try Again/);
+assert.match(ocrFailure, /retry the scan/);
+assert(!ocrFailure.includes('Enter plate manually') && !ocrFailure.includes('Correct plate'));
+assert(!ocrFailure.includes('Choose Photo') && !ocrFailure.includes('type="file"'));
+assert(readFileSync(resolve('src/features/loading/LoadingPortal.tsx'), 'utf8').includes('void controller.submit(candidate'));
+assert(!readFileSync(resolve('src/features/loading/LoadingPortal.tsx'), 'utf8').includes('confirmCorrection'));
+console.log('PASS scan-first view, automatic OCR lookup, no manual plate entry, OCR retry');
 
 const { CameraSession, classifyCameraFailure, guideSourceRect } = load('src/features/loading/utils/cameraSession.ts');
 const stopped = [];
@@ -296,7 +295,7 @@ assert.deepEqual(stopped, ['late', 'active']);
 let resolveOcrA;
 const latePrefills = [];
 let scanState;
-const scanCapture = new PlateCaptureController('actor-a', () => new Promise(resolve => { resolveOcrA = resolve; }),
+const scanCapture = new PlateCaptureController('actor-a', { recognize: () => new Promise(resolve => { resolveOcrA = resolve; }), dispose() {}, resume() {} },
   value => { scanState = value; }, value => latePrefills.push(value));
 const ocrA = scanCapture.capture(file);
 const scanB = new CameraSession(() => Promise.resolve({
@@ -315,7 +314,7 @@ scanB.stop();
 assert(readFileSync(resolve('src/features/loading/components/PlateCapture.tsx'), 'utf8')
   .includes('onScanStart();'));
 assert(readFileSync(resolve('src/features/loading/LoadingPortal.tsx'), 'utf8')
-  .includes('onScanStart={() => captureController.clear()}'));
+  .includes('void controller.submit(candidate, currentSite.site.assignmentId)'));
 assert.equal(classifyCameraFailure({ name: 'NotAllowedError' }), 'permission_denied');
 assert.equal(classifyCameraFailure({ name: 'NotFoundError' }), 'unavailable');
 assert.equal(classifyCameraFailure(new Error('start failed')), 'initialization_failed');

@@ -62,6 +62,7 @@ export type OperationsTripDetailRecord = {
   offloading_site_name: string | null;
   closed_at: string | null;
   quantity_tonnes: number | null;
+  estimated_quantity_tonnes: number | null;
   offloading_officer: OperationsTripOfficer | null;
   cancelled_at: string | null;
   cancelled_officer: OperationsTripOfficer | null;
@@ -164,13 +165,14 @@ export function parseOperationsTripDetail(value: unknown): OperationsTripDetail 
   const trip = value.trip;
   const tripKeys = ['trip_id', 'trip_number', 'status', 'truck_id', 'truck_registration', 'driver_id', 'driver_name',
     'loading_site_id', 'loading_site_name', 'opened_at', 'loading_officer', 'offloading_site_id',
-    'offloading_site_name', 'closed_at', 'quantity_tonnes', 'offloading_officer', 'cancelled_at', 'cancelled_officer'];
+    'offloading_site_name', 'closed_at', 'quantity_tonnes', 'estimated_quantity_tonnes', 'offloading_officer', 'cancelled_at', 'cancelled_officer'];
   if (!exactKeys(trip, tripKeys) || !text(trip.trip_id) || !text(trip.trip_number)
     || !tripStatuses.includes(trip.status as OperationsTripStatus) || !text(trip.truck_id)
     || !text(trip.truck_registration) || !text(trip.driver_id) || !text(trip.driver_name)
     || !text(trip.loading_site_id) || !text(trip.loading_site_name) || !timestamp(trip.opened_at)
     || !nullableText(trip.offloading_site_id) || !nullableText(trip.offloading_site_name)
     || !nullableTimestamp(trip.closed_at) || !validTonnage(trip.quantity_tonnes)
+    || !validTonnage(trip.estimated_quantity_tonnes)
     || !nullableTimestamp(trip.cancelled_at)) {
     throw new Error('Invalid Operations Trips response');
   }

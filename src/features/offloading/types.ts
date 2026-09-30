@@ -16,6 +16,7 @@ export type OpenTripSummary = {
   id: string; tripNumber: string; truckId: string; registrationNumber: string;
   normalizedRegistration: string; driverId: string; driverName: string;
   openedAt: string; loadingSiteName: string;
+  estimatedQuantityTonnes: number | null;
 };
 export type OffloadingLookupResult =
   | { kind: 'found'; assignment: OffloadingAssignment; trip: OpenTripSummary }

@@ -36,22 +36,27 @@ const review = {
   plate: 'ABC-123', truck: { id: 'truck-a', registrationNumber: 'ABC-123', normalizedRegistration: 'ABC123', isActive: true },
   actualDriver: { id: 'driver-b', fullName: 'Driver B', phoneNumber: '08012345678', email: null, isActive: true },
   regularDriverId: 'driver-a', site: { assignmentId: 'assignment-a', siteId: 'site-a', siteName: 'Loading Site' },
-  makeRegular: false,
+  makeRegular: false, estimatedQuantityTonnes: 12.5,
+  capture: { id: 'capture-a', imagePath: 'actor-a/capture-a.jpg', image: new Blob(['jpeg'], { type: 'image/jpeg' }),
+    candidate: 'ABC-123', confidence: 0.8, capturedAt: '2026-09-24T10:00:00.000Z' },
 };
 const rawSuccess = request => ({ ok: true, request_id: request.requestId,
   trip: { id: 'trip-a', trip_number: 'TRIP-001', status: 'open', truck_id: review.truck.id,
     driver_id: review.actualDriver.id, driver_name_at_loading: 'Authoritative Driver B',
     daily_registration_id: 'day-a', loading_site_id: review.site.siteId,
     loading_assignment_id: review.site.assignmentId, opened_at: '2026-09-24T10:01:00Z',
-    opened_by: 'actor-a', quantity_tonnes: null },
+    opened_by: 'actor-a', quantity_tonnes: null, estimated_quantity_tonnes: review.estimatedQuantityTonnes },
   capture: { confirmed_plate: review.plate, normalized_confirmed_plate: 'ABC123',
-    capture_method: 'MANUAL', image_recorded: false }, default_driver_changed: false });
+    capture_method: 'OCR', image_recorded: true }, default_driver_changed: false });
 
 let response;
 let rpcError = null;
 let rpcCalls = [];
 overrides.set(resolve('src/lib/supabase.ts'), { supabase: {
   from(table) { assert.fail(`Unexpected direct table access: ${table}`); },
+  storage: { from(bucket) { assert.equal(bucket, 'loading-plate-evidence'); return {
+    async upload() { return { data: {}, error: null }; },
+  }; } },
   async rpc(name, args) { assert.equal(name, 'create_loading_trip_v2'); rpcCalls.push(args);
     return { data: response, error: rpcError }; },
 } });
@@ -63,13 +68,14 @@ assert.equal(result.kind, 'success');
 assert.equal(result.trip.driverNameAtLoading, 'Authoritative Driver B');
 assert.deepEqual(rpcCalls.at(-1), {
   p_request_id: 'req-a', p_plate: 'ABC-123', p_driver_id: 'driver-b', p_expected_assignment_id: 'assignment-a',
-  p_capture_method: 'MANUAL', p_captured_at: request.capturedAt, p_ocr_detected_plate: null,
-  p_ocr_confidence: null, p_image_path: null, p_make_default_driver: false,
+  p_capture_method: 'OCR', p_captured_at: request.capturedAt, p_estimated_quantity_tonnes: 12.5, p_ocr_detected_plate: 'ABC-123',
+  p_ocr_confidence: 0.8, p_image_path: 'actor-a/capture-a.jpg', p_make_default_driver: false,
 });
 const regularChangeRequest = { ...request, requestId: 'req-b', review: { ...review, makeRegular: true } };
 response = { ...rawSuccess(regularChangeRequest), default_driver_changed: true };
 assert.equal((await openLoadingTrip(regularChangeRequest)).defaultDriverChanged, true);
 assert.equal(rpcCalls.at(-1).p_make_default_driver, true);
+assert.equal(rpcCalls.at(-1).p_estimated_quantity_tonnes, 12.5);
 response = { ok: false, code: 'OPEN_TRIP_EXISTS', details: { trip_number: 'TRIP-OPEN' } };
 assert.deepEqual(await openLoadingTrip(request), { kind: 'business_failure', code: 'OPEN_TRIP_EXISTS', tripNumber: 'TRIP-OPEN' });
 rpcError = { code: '42501', message: 'private error' };
@@ -79,7 +85,7 @@ await assert.rejects(openLoadingTrip(request), { message: 'Trip opening outcome 
 rpcError = null;
 response = { ok: true, trip: { id: 'bad' } };
 await assert.rejects(openLoadingTrip(request), { message: 'Trip opening outcome unknown' });
-console.log('PASS exact manual RPC payload, authoritative response, business and auth/error mapping');
+console.log('PASS exact OCR RPC payload, authoritative response, business and auth/error mapping');
 
 const { OpenTripController } = load('src/features/loading/utils/openTripController.ts');
 let ids = 0; let timestamps = 0; let opened = 0; let siteChanged = 0; let accessLost = 0; let stale = [];
@@ -129,10 +135,11 @@ assert.equal(controller.frozenRequest, null);
 controller.beginReview();
 await controller.submit();
 assert.notEqual(dispatched.at(-1).requestId, frozen.requestId);
-assert.notEqual(dispatched.at(-1).capturedAt, frozen.capturedAt);
+assert.equal(dispatched.at(-1).capturedAt, review.capture.capturedAt,
+  'a changed estimate/selection keeps the timestamp of the same scan evidence');
 for (const changed of [
   { plate: 'XYZ-999' }, { actualDriver: { ...review.actualDriver, id: 'driver-c' } },
-  { site: { ...review.site, assignmentId: 'assignment-b' } },
+  { site: { ...review.site, assignmentId: 'assignment-b' } }, { estimatedQuantityTonnes: 13.5 },
 ]) {
   controller.setInput(review); controller.beginReview(); await controller.submit();
   const before = controller.frozenRequest.requestId;
@@ -197,7 +204,7 @@ assert.equal(workflow.current.choice, 'regular');
 assert.equal(workflow.current.selected.driver.id, regular.id);
 const readySite = { status: 'ready', site: review.site };
 const readyLookup = { state: { status: 'known_ready', plate: review.plate, truck: review.truck, driver: regular }, pending: false };
-const regularReview = reviewForSelection(readySite, readyLookup, workflow.current);
+const regularReview = reviewForSelection(readySite, readyLookup, workflow.current, 14.75, review.capture);
 assert(regularReview, 'default selected regular driver must enable review');
 assert.equal(regularReview.actualDriver.id, regular.id);
 const reviewController = new OpenTripController(async () => { throw new Error('not submitting'); }, () => {},
@@ -211,8 +218,10 @@ const identification = React.createElement(DriverIdentification, { state: workfl
 const workspaceProps = {
   officerName: 'Officer', now: new Date('2026-09-24T10:00:00Z'), site: readySite,
   statistics: { status: 'ready', statistics: { tripsOpened: 0, openTrips: 0, tripsClosed: 0, trucksProcessed: 0 } },
-  plate: review.plate, lookup: readyLookup, driverPanel: identification,
-  onPlateChange() {}, onLookup() {}, onRetrySite() {}, onRetryStatistics() {},
+  plate: review.plate, manualEntry: false, estimatedTonnage: '14.75', truckConfirmed: true,
+  lookup: readyLookup, driverPanel: identification,
+  onPlateChange() {}, onLookup() {}, onConfirmTruck() {}, onEstimatedTonnageChange() {},
+  onRetrySite() {}, onRetryStatistics() {},
 };
 const initialWorkspace = renderToStaticMarkup(React.createElement(LoadingPortalView, {
   ...workspaceProps, tripStage: 'idle', tripPanel: React.createElement(TripReview, {
@@ -240,7 +249,9 @@ const page = renderToStaticMarkup(React.createElement(LoadingPortalView, {
   site: { status: 'ready', site: review.site }, statistics: { status: 'error' },
   plate: review.plate, lookup: { state: { status: 'known_ready', plate: review.plate,
     truck: review.truck, driver: review.actualDriver }, pending: false },
-  tripPanel: successPanel, tripStage: 'success', onPlateChange() {}, onLookup() {}, onRetrySite() {}, onRetryStatistics() {},
+  manualEntry: false, estimatedTonnage: '', truckConfirmed: false,
+  tripPanel: successPanel, tripStage: 'success', onPlateChange() {}, onLookup() {}, onConfirmTruck() {},
+  onEstimatedTonnageChange() {}, onRetrySite() {}, onRetryStatistics() {},
 }));
 assert.match(page, /Trip opened/);
 assert.match(page, /Today.*figures are unavailable/);

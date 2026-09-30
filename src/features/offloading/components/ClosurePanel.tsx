@@ -15,7 +15,7 @@ function failureMessage(code: Extract<ClosureState, { status: 'business_failure'
   if (code === 'PLATE_MISMATCH' || code === 'INVALID_PLATE') return 'The confirmed plate does not match this trip. Look up the plate again.';
   if (code === 'INVALID_QUANTITY') return 'The tonnage was rejected. Review the quantity before another attempt.';
   if (code === 'INVALID_CAPTURE_METHOD' || code === 'INVALID_CAPTURE_TIMESTAMP' || code === 'INVALID_OCR_DATA') {
-    return 'The plate capture could not be accepted. Start a new scan or use manual entry.';
+    return 'The plate capture could not be accepted. Start a new scan and try again.';
   }
   if (code === 'INVALID_IMAGE_REFERENCE' || code === 'IMAGE_NOT_FOUND' || code === 'IMAGE_ALREADY_USED') {
     return 'The plate image could not be accepted. Start a new capture or contact Operations.';
@@ -109,7 +109,12 @@ export function ClosurePanel({ lookup, state, quantity, onQuantity, onReview, on
       <div><dt>Loading site</dt><dd>{state.review.trip.loadingSiteName}</dd></div>
       <div><dt>Opened</dt><dd>{new Date(state.review.trip.openedAt).toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}</dd></div>
       <div><dt>Assigned Offloading site</dt><dd>{state.review.assignment.siteName}</dd></div>
-      <div><dt>Tonnage</dt><dd>{state.review.quantityTonnes.toFixed(2)} tonnes</dd></div>
+      {state.review.trip.estimatedQuantityTonnes !== null && <>
+        <div><dt>Estimated Tonnage</dt><dd>{state.review.trip.estimatedQuantityTonnes.toFixed(2)} tonnes</dd></div>
+        <div><dt>Actual Tonnage</dt><dd>{state.review.quantityTonnes.toFixed(2)} tonnes</dd></div>
+        <div><dt>Variance</dt><dd>{(state.review.quantityTonnes - state.review.trip.estimatedQuantityTonnes).toFixed(2)} tonnes</dd></div>
+      </>}
+      {state.review.trip.estimatedQuantityTonnes === null && <div><dt>Actual Tonnage</dt><dd>{state.review.quantityTonnes.toFixed(2)} tonnes</dd></div>}
     </dl>
     <div className="offloading-review-actions">
       <button className="button" type="button" onClick={onClose}>Confirm &amp; Close Trip</button>

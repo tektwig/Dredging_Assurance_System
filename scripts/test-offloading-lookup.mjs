@@ -43,12 +43,14 @@ const service = load('src/features/offloading/services/offloadingData.ts');
 const assignment = { ok: true, assignment_id: 'assignment-a', site_id: 'site-a', site_name: 'Offloading Site' };
 const trip = { id: 'trip-a', trip_number: 'TRP-0000000001', truck_id: 'truck-a',
   registration_number: 'ABC-123', normalized_registration: 'ABC123', driver_id: 'driver-a',
-  driver_name: 'John Driver', opened_at: '2026-09-25T08:00:00Z', loading_site_name: 'Loading Site' };
+  driver_name: 'John Driver', opened_at: '2026-09-25T08:00:00Z', loading_site_name: 'Loading Site',
+  estimated_quantity_tonnes: 20.25 };
 response = { ok: true, assignment, trip };
 const found = await service.lookupOffloadingOpenTrip('ABC-123');
 assert.deepEqual(calls, [{ name: 'lookup_offloading_open_trip', args: { p_plate: 'ABC-123' } }]);
 assert.equal(found.kind, 'found');
 assert.equal(found.trip.tripNumber, trip.trip_number);
+assert.equal(found.trip.estimatedQuantityTonnes, 20.25);
 assert.equal(found.assignment.siteName, assignment.site_name);
 assert.equal(JSON.stringify(found).includes('account_number'), false);
 response = { ok: false, code: 'NO_OPEN_TRIP', details: {} };
@@ -80,7 +82,7 @@ let snapshot;
 const requests = [];
 const controller = new OffloadingLookupController(() => new Promise(resolve => requests.push(resolve)),
   value => { snapshot = value; }, () => '2026-09-25T09:00:00Z');
-assert.equal(requests.length, 0, 'Capture alone must not look up a trip');
+assert.equal(requests.length, 0, 'Lookup controller is invoked by the OCR workflow after capture publication');
 const first = controller.submit('ABC-123', evidence);
 assert.equal(snapshot.state.status, 'looking_up');
 assert.equal(await controller.submit('ABC-123', evidence), false, 'Duplicate submit blocked');
@@ -114,19 +116,32 @@ assert.equal(snapshot.state.status, 'lookup_error');
 const { OffloadingPortalView } = load('src/features/offloading/components/OffloadingPortalView.tsx');
 const { PlateCapture } = load('src/features/loading/components/PlateCapture.tsx');
 const scanMarkup = renderToStaticMarkup(React.createElement(PlateCapture, {
-  state: { status: 'detected', evidence }, disabled: false, lookupActionLabel: 'Find Open Trip',
-  onCapture() {}, onManual() {}, onScanStart() {},
+  state: { status: 'detected', evidence }, disabled: false,
+  onCapture() {}, onScanStart() {},
 }));
-assert(scanMarkup.includes('Find Open Trip'));
-assert(scanMarkup.includes('No lookup has started'));
-const view = (state, plate = 'ABC-123') => renderToStaticMarkup(React.createElement(OffloadingPortalView, {
-  officerName: 'Officer A', plate, lookup: { state, pending: false },
+assert(scanMarkup.includes('Looking up this candidate automatically'));
+assert(!scanMarkup.includes('Correct recognized plate') && !scanMarkup.includes('Enter plate manually'));
+assert(!scanMarkup.includes('Choose Photo') && !scanMarkup.includes('type="file"') && !scanMarkup.includes('accept="image/'));
+const failedScanMarkup = renderToStaticMarkup(React.createElement(PlateCapture, {
+  state: { status: 'error', reason: 'no_plate' }, disabled: false,
+  onCapture() {}, onScanStart() {},
+}));
+assert(failedScanMarkup.includes('Rescan or try again'));
+assert(failedScanMarkup.includes('Try Again'));
+assert(!failedScanMarkup.includes('Manual Entry') && !failedScanMarkup.includes('Correct plate'));
+assert(!failedScanMarkup.includes('Choose Photo') && !failedScanMarkup.includes('type="file"'));
+const view = state => renderToStaticMarkup(React.createElement(OffloadingPortalView, {
+  officerName: 'Officer A', lookup: { state, pending: false },
   closure: { status: 'idle' }, closurePanel: null,
   statistics: { status: 'loading' }, now: new Date('2026-09-27T12:00:00Z'), onRetryStatistics() {},
   capturePanel: React.createElement('span', null, 'shared scanner'),
-  onPlateChange() {}, onLookup() {}, onReset() {},
+  onLookup() {}, onReset() {},
 }));
-assert(view({ status: 'idle' }).includes('Find Open Trip'));
+assert(view({ status: 'idle' }).includes('Scan Plate'));
+assert(!view({ status: 'idle' }).includes('name="plate"'));
+assert(!view({ status: 'idle' }).includes('Find Open Trip'));
+assert(!view({ status: 'invalid_plate', plate: 'ABC-123' }).includes('another photo'));
+assert(!view({ status: 'invalid_plate', plate: 'ABC-123' }).includes('Choose Photo'));
 assert(view({ status: 'idle' }).includes('shared scanner'));
 assert(view({ status: 'no_open_trip', plate: 'ABC-123' }).includes('Contact Operations'));
 assert(view({ status: 'lookup_error', plate: 'ABC-123' }).includes('Retry lookup'));
@@ -134,6 +149,7 @@ const rendered = view({ status: 'found', assignment: found.assignment,
   trip: found.trip, capture: preparedCapture('ABC-123', evidence, 'later') });
 assert(rendered.includes('TRP-0000000001'));
 assert(rendered.includes('John Driver'));
+assert(rendered.includes('20.25 tonnes'));
 assert(rendered.includes('Scan Next Truck'));
 assert(!rendered.includes('account_number'));
 assert(!rendered.includes('Close Trip'));
@@ -142,4 +158,8 @@ const portalSource = readFileSync(resolve('src/features/offloading/OffloadingPor
 assert(portalSource.includes('PlateCaptureController') && portalSource.includes('createPlateOcrService'));
 assert(!portalSource.includes('close_trip_v2') && !portalSource.includes('.storage.')
   && !portalSource.includes(".from('trips')"));
-console.log('PASS Offloading manual/OCR lookup, NO_OPEN_TRIP, error, reset, stale result and safe rendering');
+console.log('PASS Offloading OCR lookup, NO_OPEN_TRIP, error, reset, stale result and safe rendering');
+assert(portalSource.includes('void lookupController.submit(capture.evidence.candidate, capture.evidence)'));
+assert(portalSource.includes('autoLookupEvidence.current === capture.evidence.id'));
+assert(!portalSource.includes('confirmCorrection'));
+console.log('PASS OCR auto-lookup, no plate correction/manual entry, estimate display and stale evidence fencing');

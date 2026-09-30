@@ -130,7 +130,8 @@ export type OpenTripReview = {
   regularDriverId: string;
   site: AssignedLoadingSite;
   makeRegular: boolean;
-  capture?: PlateCaptureEvidence;
+  estimatedQuantityTonnes: number;
+  capture: PlateCaptureEvidence;
 };
 
 export type PlateCaptureEvidence = {
@@ -149,7 +150,7 @@ export type OpenTripRequest = {
 };
 
 export type OpenTripFailureCode =
-  | 'INVALID_REQUEST_ID' | 'INVALID_PLATE' | 'DRIVER_REQUIRED' | 'INVALID_DEFAULT_OPTION'
+  | 'INVALID_REQUEST_ID' | 'INVALID_PLATE' | 'DRIVER_REQUIRED' | 'INVALID_DEFAULT_OPTION' | 'INVALID_ESTIMATED_TONNAGE' | 'REQUEST_PAYLOAD_CONFLICT'
   | 'INVALID_CAPTURE_METHOD' | 'INVALID_CAPTURE_TIMESTAMP' | 'INVALID_OCR_DATA'
   | 'SITE_REVIEW_REQUIRED' | 'SITE_ASSIGNMENT_REQUIRED' | 'INVALID_SITE_ASSIGNMENT'
   | 'INACTIVE_SITE' | 'SITE_ASSIGNMENT_CHANGED' | 'UNKNOWN_TRUCK' | 'INACTIVE_TRUCK'
@@ -169,6 +170,7 @@ export type OpenedTrip = {
   openedAt: string;
   openedBy: string;
   quantityTonnes: null;
+  estimatedQuantityTonnes: number;
 };
 
 export type OpenTripSuccess = {
@@ -176,7 +178,7 @@ export type OpenTripSuccess = {
   requestId: string;
   trip: OpenedTrip;
   capture: { confirmedPlate: string; normalizedConfirmedPlate: string;
-    captureMethod: 'MANUAL' | 'OCR' | 'OCR_CORRECTED'; imageRecorded: boolean };
+    captureMethod: 'OCR'; imageRecorded: boolean };
   defaultDriverChanged: boolean;
 };
 

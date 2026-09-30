@@ -70,6 +70,15 @@ const adminPaths = ['/admin', '/admin/users', '/admin/sites', '/admin/configurat
 assert.deepEqual(OPERATIONS_NAVIGATION.map(item => item.route ? `/operations/${item.route}` : '/operations'), operationsPaths);
 assert.deepEqual(ADMIN_NAVIGATION.map(item => item.route ? `/admin/${item.route}` : '/admin'), adminPaths);
 
+const trucksDriversRoute = findElement(App(), element => element.type === router.Route && element.props.path === 'trucks-drivers');
+assert(trucksDriversRoute && trucksDriversRoute.props.element.type === router.Navigate);
+const trucksDriversTarget = router.resolvePath(trucksDriversRoute.props.element.props.to, '/operations/trucks-drivers').pathname;
+assert.equal(trucksDriversTarget, '/operations/trucks-drivers/trucks');
+assert(renderApp(trucksDriversTarget, 'operations_manager').includes('Search plate'));
+assert(renderApp(trucksDriversTarget, 'operations_manager').includes('aria-current="page"'));
+assert(!renderApp(trucksDriversTarget, 'loading_officer').includes('Search plate'));
+console.log('PASS Trucks & Drivers navigation resolves within its module and retains exact-role protection');
+
 for (const path of operationsPaths) {
   const output = renderApp(path, 'operations_manager');
   if (path === '/operations') {
@@ -79,17 +88,58 @@ for (const path of operationsPaths) {
     assert(output.includes('Trip register filters'));
     assert(output.includes('Loading results'));
     assert(!output.includes('This module is a Phase 1 placeholder'));
+  } else if (path === '/operations/trucks-drivers') {
+    assert(!output.includes('This module is a Phase 1 placeholder'));
+  } else if (path === '/operations/waybills-payouts') {
+    assert(output.includes('Loading results'));
+    assert(!output.includes('This module is a Phase 1 placeholder'));
+  } else if (path === '/operations/exceptions') {
+    assert(output.includes('Exception register filters'));
+    assert(output.includes('Loading results'));
+    assert(!output.includes('This module is a Phase 1 placeholder'));
+  } else if (path === '/operations/reports') {
+    assert(output.includes('Report categories'));
+    assert(output.includes('Loading results'));
+    assert(!output.includes('This module is a Phase 1 placeholder'));
   } else assert(output.includes('This module is a Phase 1 placeholder'));
   assert(output.includes('Operations navigation'));
   assert(!renderApp(path, 'system_administrator').includes('This module is a Phase 1 placeholder'));
+  if (path === '/operations/reports') {
+    for (const role of APP_ROLES.filter(role => role !== 'operations_manager')) {
+      assert(!renderApp(path, role).includes('Report categories'));
+    }
+    assert(!renderApp(path, 'operations_manager', 'inactive').includes('Report categories'));
+  }
 }
 const tripDetail = renderApp(operationsTripDetailPath, 'operations_manager');
 assert(tripDetail.includes('Loading results'));
 assert(tripDetail.includes('href="/operations/trips"'));
 assert(tripDetail.includes('aria-current="page"'));
 assert(!tripDetail.includes('This module is a Phase 1 placeholder'));
+const exceptionDetailPath = '/operations/exceptions/00000000-0000-0000-0000-000000000001';
+const exceptionDetail = renderApp(exceptionDetailPath, 'operations_manager');
+assert(exceptionDetail.includes('Loading results'));
+assert(exceptionDetail.includes('aria-current="page"'));
+for (const role of APP_ROLES.filter(role => role !== 'operations_manager')) {
+  assert(!renderApp(exceptionDetailPath, role).includes('Loading results'));
+}
 for (const role of APP_ROLES.filter(role => role !== 'operations_manager')) {
   assert(!renderApp(operationsTripDetailPath, role).includes('Read-only lifecycle record'));
+}
+for (const path of ['/operations/trucks-drivers/trucks', '/operations/trucks-drivers/drivers',
+  '/operations/trucks-drivers/trucks/00000000-0000-0000-0000-000000000001',
+  '/operations/trucks-drivers/drivers/00000000-0000-0000-0000-000000000001']) {
+  assert(renderApp(path, 'operations_manager').includes('Loading results'));
+  assert(renderApp(path, 'operations_manager').includes('aria-current="page"'));
+  for (const role of APP_ROLES.filter(role => role !== 'operations_manager')) {
+    assert(!renderApp(path, role).includes('Loading results'));
+  }
+}
+const waybillDetailPath = '/operations/waybills-payouts/00000000-0000-0000-0000-000000000001';
+assert(renderApp(waybillDetailPath, 'operations_manager').includes('Loading results'));
+assert(renderApp(waybillDetailPath, 'operations_manager').includes('aria-current="page"'));
+for (const role of APP_ROLES.filter(role => role !== 'operations_manager')) {
+  assert(!renderApp(waybillDetailPath, role).includes('Loading results'));
 }
 for (const path of adminPaths) {
   const output = renderApp(path, 'system_administrator');
