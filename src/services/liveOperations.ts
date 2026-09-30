@@ -295,9 +295,9 @@ const mapTripClosureInvoice = (row: JsonObject): TripClosureInvoice => ({
   truck_owner_name: row.truck_owner_name,
   driver_id: row.driver_id,
   driver_name: row.driver_name,
-  driver_phone: row.driver_phone || '+234 803 123 4567',
-  driver_email: row.driver_email || (row.driver_name ? `${String(row.driver_name).toLowerCase().replace(/[^a-z0-9]/g, '.')}@haulage.ng` : 'driver@haulage.ng'),
-  driver_license: row.driver_license,
+  driver_phone: row.driver_phone ? String(row.driver_phone) : undefined,
+  driver_email: row.driver_email ? String(row.driver_email) : undefined,
+  driver_license: row.driver_license ? String(row.driver_license) : undefined,
   loading_site_id: row.loading_site_id,
   loading_site_name: row.loading_site_name,
   offloading_site_id: row.offloading_site_id,
@@ -306,9 +306,9 @@ const mapTripClosureInvoice = (row: JsonObject): TripClosureInvoice => ({
   opened_at: row.opened_at,
   closed_at: row.closed_at,
   issued_at: row.issued_at,
-  bank_name: row.bank_name || 'Guaranty Trust Bank (GTBank)',
-  account_name: row.account_name || 'Adams Dredging & Haulage Operations Ltd',
-  account_number: row.account_number || '0192847581',
+  bank_name: row.bank_name ? String(row.bank_name) : undefined,
+  account_name: row.account_name ? String(row.account_name) : undefined,
+  account_number: row.account_number ? String(row.account_number) : undefined,
 });
 
 export async function fetchLiveSnapshot(_role: UserRole | null): Promise<LiveSnapshot> {

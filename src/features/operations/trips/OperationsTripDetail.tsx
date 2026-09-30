@@ -156,8 +156,8 @@ export function OperationsTripDetailView({ state, cancellationState = 'idle', ca
       truck_owner_name: 'DredgeOps Fleet',
       driver_id: trip.driver_id || '',
       driver_name: trip.driver_name,
-      driver_phone: '+234 803 123 4567',
-      driver_email: `${(trip.driver_name || 'driver').toLowerCase().replace(/[^a-z0-9]/g, '.')}@haulage.ng`,
+      driver_phone: (trip as any).driver_phone || (waybill as any)?.driver_phone || undefined,
+      driver_email: (trip as any).driver_email || (waybill as any)?.driver_email || undefined,
       driver_license: 'DL-7492-LG',
       loading_site_id: trip.loading_site_id || '',
       loading_site_name: trip.loading_site_name,
@@ -166,10 +166,9 @@ export function OperationsTripDetailView({ state, cancellationState = 'idle', ca
       quantity_tonnes: trip.quantity_tonnes || 30,
       opened_at: trip.opened_at,
       closed_at: trip.closed_at || trip.opened_at,
-      issued_at: waybill?.issued_at || trip.closed_at || new Date().toISOString(),
-      bank_name: 'Guaranty Trust Bank (GTBank)',
-      account_name: 'Adams Dredging & Haulage Operations Ltd',
-      account_number: '0192847581',
+      bank_name: (waybill as any)?.bank_name || (trip as any)?.bank_name || undefined,
+      account_name: (waybill as any)?.account_name || (trip as any)?.account_name || undefined,
+      account_number: (waybill as any)?.account_number || (trip as any)?.account_number || undefined,
     };
     setActiveInvoice(inv);
   };

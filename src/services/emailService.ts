@@ -14,11 +14,11 @@ export function openInvoiceMailClient(invoice: TripClosureInvoice, recipientEmai
   const subject = encodeURIComponent(
     `Commercial Invoice & Waybill: ${invoice.invoice_number} (${invoice.truck_registration})`
   );
-  const driverEmail = invoice.driver_email || `${invoice.driver_name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@haulage.ng`;
-  const driverPhone = invoice.driver_phone || '+234 803 123 4567';
-  const bankName = invoice.bank_name || 'Guaranty Trust Bank (GTBank)';
-  const accountName = invoice.account_name || 'Adams Dredging & Haulage Operations Ltd';
-  const accountNumber = invoice.account_number || '0192847581';
+  const driverEmail = invoice.driver_email || 'Not provided';
+  const driverPhone = invoice.driver_phone || 'Not provided';
+  const bankName = invoice.bank_name || 'Not provided';
+  const accountName = invoice.account_name || 'Not provided';
+  const accountNumber = invoice.account_number || 'Not provided';
 
   const bodyText =
     `Commercial Invoice & Waybill\n` +
@@ -31,13 +31,11 @@ export function openInvoiceMailClient(invoice: TripClosureInvoice, recipientEmai
     `Offloading Site:     ${invoice.offloading_site_name || 'Offloading Yard'}\n` +
     `Closed At:           ${new Date(invoice.closed_at).toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}\n` +
     `----------------------------------------\n` +
-    `DRIVER DETAILS\n` +
+    `DRIVER & PAYOUT BANK DETAILS\n` +
     `Driver Name:         ${invoice.driver_name}\n` +
     `Driver Email:        ${driverEmail}\n` +
     `Driver Phone:        ${driverPhone}\n` +
-    `----------------------------------------\n` +
-    `ELECTRONIC REMITTANCE & BANK DETAILS\n` +
-    `Beneficiary Bank:    ${bankName}\n` +
+    `Payout Bank:         ${bankName}\n` +
     `Account Name:        ${accountName}\n` +
     `Account Number:      ${accountNumber}\n` +
     `========================================\n\n` +

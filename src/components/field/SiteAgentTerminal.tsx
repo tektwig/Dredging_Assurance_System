@@ -2740,14 +2740,15 @@ export const SiteAgentTerminal: React.FC = () => {
                 driver_phone:
                   lastClosedTripForInvoice.driver?.phone ||
                   lastClosedTripForInvoice.driver_phone ||
-                  '+234 800 000 0000',
+                  undefined,
                 driver_license:
                   lastClosedTripForInvoice.driver?.license_number ||
                   lastClosedTripForInvoice.driver_license ||
                   '',
                 driver_email:
                   lastClosedTripForInvoice.driver?.email ||
-                  `${(lastClosedTripForInvoice.driver?.full_name || lastClosedTripForInvoice.driver_name || 'driver').toLowerCase().replace(/[^a-z0-9]/g, '.')}@haulage.ng`,
+                  (lastClosedTripForInvoice as any).driver_email ||
+                  undefined,
                 loading_site_id:
                   lastClosedTripForInvoice.loading_site_id ||
                   lastClosedTripForInvoice.loading_site?.id ||
@@ -2768,9 +2769,9 @@ export const SiteAgentTerminal: React.FC = () => {
                   new Date().toISOString(),
                 closed_at: new Date().toISOString(),
                 issued_at: new Date().toISOString(),
-                bank_name: 'Guaranty Trust Bank (GTBank)',
-                account_name: 'Adams Dredging & Haulage Operations Ltd',
-                account_number: '0192847581',
+                bank_name: (lastClosedTripForInvoice.driver as any)?.bank_name || (lastClosedTripForInvoice as any).bank_name || undefined,
+                account_name: (lastClosedTripForInvoice.driver as any)?.account_name || (lastClosedTripForInvoice as any).account_name || undefined,
+                account_number: (lastClosedTripForInvoice.driver as any)?.account_number || (lastClosedTripForInvoice as any).account_number || undefined,
               }
             : null)
         }
