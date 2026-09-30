@@ -1,3 +1,4 @@
+/// <reference path="../deno-types.d.ts" />
 import { PDFDocument, StandardFonts, rgb } from 'npm:pdf-lib@1.17.1';
 import type { WaybillSnapshot } from './worker.ts';
 

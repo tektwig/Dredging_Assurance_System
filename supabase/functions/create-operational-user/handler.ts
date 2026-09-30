@@ -3,7 +3,7 @@ const credentialManagerRole = 'operations_manager';
 type AllowedRole = typeof allowedRoles[number];
 type SafeUser = { id: string; full_name: string; email: string; role: string; is_active: boolean;
   site_id: string | null; site_name: string | null; site_type?: string | null; created_at?: string; updated_at?: string };
-type SetupResult = { ok: true; profile_id: string; display_name: string; role: AllowedRole;
+export type SetupResult = { ok: true; profile_id: string; display_name: string; role: AllowedRole;
   site_id: string; site_name: string } | { ok: false; code: string };
 
 export type CredentialDependencies = {
