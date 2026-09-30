@@ -34,7 +34,7 @@ export function OffloadingPortalView({ officerName, lookup, capturePanel,
   closure, closurePanel, statistics, now, onRetryStatistics, onLookup, onReset }: Props) {
   const state = lookup.state;
   const locked = closure.status !== 'idle';
-  const showCapture = closure.status === 'idle';
+  const showCapture = closure.status === 'idle' && state.status !== 'found';
   return <div className="loading-portal offloading-portal">
     <header className="loading-heading">
       <div><p className="eyebrow">Truck Revenue Tracking System</p><h1>Offloading Portal</h1>
@@ -46,9 +46,8 @@ export function OffloadingPortalView({ officerName, lookup, capturePanel,
         <strong>{operationalDateLabel(now)}</strong></div>
     </header>
     <section className="loading-work-card" aria-label="Scan plate and find open trip">
-      <div className="loading-section-heading"><h2>Scan Plate</h2>
-        <p>Scan the vehicle plate to find its open trip.</p></div>
-      {showCapture && capturePanel}
+      {showCapture && <><div className="loading-section-heading"><h2>Scan Plate</h2>
+        <p>Scan the vehicle plate to find its open trip.</p></div>{capturePanel}</>}
       {state.status === 'looking_up' && <div className="loading-result" role="status">
         <h3>Finding open trip…</h3><p>Checking the confirmed plate.</p></div>}
       {state.status === 'invalid_plate' && <div className="loading-result loading-result-warning" role="alert">
@@ -83,7 +82,7 @@ export function OffloadingPortalView({ officerName, lookup, capturePanel,
       {(state.status !== 'idle' || closure.status !== 'idle')
         && closure.status !== 'submitting' && closure.status !== 'ambiguous'
         && <button className="button secondary offloading-next" type="button"
-        onClick={onReset}>Scan Next Truck</button>}
+        onClick={onReset}>{closure.status === 'success' ? 'Scan Next Truck' : 'Cancel & Scan Next Truck'}</button>}
     </section>
     <section className="loading-stat-section" aria-label="Today's Offloading activity">
       <div className="loading-section-heading"><h2>Today’s activity</h2>

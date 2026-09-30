@@ -38,13 +38,19 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
   const [resetEpoch, setResetEpoch] = useState(0);
   const plateRef = useRef(plate);
   const autoLookupEvidence = useRef<string | null>(null);
+  const selectedTripRef = useRef(false);
+  selectedTripRef.current = lookup.state.status === 'found';
   plateRef.current = plate;
-  const lookupController = useMemo(() => new OffloadingLookupController(lookupOffloadingOpenTrip, setLookup), []);
+  const lookupController = useMemo(() => new OffloadingLookupController(lookupOffloadingOpenTrip, snapshot => {
+    selectedTripRef.current = snapshot.state.status === 'found';
+    setLookup(snapshot);
+  }), []);
   const closureController = useMemo(() => new ClosureController(closeOffloadingTrip, setClosure, retry,
     undefined, () => setStatisticsRevision(value => value + 1)), [retry]);
   const ocrService = useMemo(() => createPlateOcrService(), []);
   const captureController = useMemo(() => new PlateCaptureController(actorId,
     ocrService, setCapture, candidate => {
+      if (selectedTripRef.current) return;
       lookupController.reset();
       plateRef.current = candidate;
       setPlate(candidate);
@@ -89,7 +95,12 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
   }, [capture, closureController, lookupController]);
 
   useEffect(() => {
+    if (lookup.state.status === 'found') captureController.clear();
+  }, [lookup.state.status, captureController]);
+
+  useEffect(() => {
     if (closure.status !== 'site_changed') return;
+    selectedTripRef.current = false;
     lookupController.reset();
     captureController.clear();
     plateRef.current = '';
@@ -98,7 +109,7 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
   }, [closure.status, lookupController, captureController]);
 
   function captureImage(file: File) {
-    if (lookupController.current.pending || closureController.current.status !== 'idle') return;
+    if (selectedTripRef.current || lookupController.current.pending || closureController.current.status !== 'idle') return;
     closureController.setInput(null);
     lookupController.reset();
     plateRef.current = '';
@@ -108,7 +119,7 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
     void captureController.capture(file);
   }
   function startScan() {
-    if (closureController.current.status !== 'idle') return;
+    if (selectedTripRef.current || closureController.current.status !== 'idle') return;
     closureController.setInput(null);
     captureController.clear();
     lookupController.reset();
@@ -119,6 +130,7 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
   }
   function reset() {
     if (!closureController.reset()) return;
+    selectedTripRef.current = false;
     captureController.clear();
     lookupController.reset();
     plateRef.current = '';
@@ -128,7 +140,6 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
     setResetEpoch(value => value + 1);
   }
   const evidence = capture.status === 'detected' ? capture.evidence : null;
-
   const { toasts, dismissToast } = useRealtimeTrips({
     channelName: 'offloading-portal-trips-realtime',
     onTripChange: () => setStatisticsRevision(value => value + 1),
@@ -148,7 +159,7 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
           if (closureController.current.status !== 'idle') return;
           void lookupController.submit(plateRef.current, evidence);
         }} onReset={reset}
-        capturePanel={<PlateCapture state={capture} disabled={lookup.pending || closure.status !== 'idle'}
+        capturePanel={lookup.state.status === 'found' ? undefined : <PlateCapture state={capture} disabled={lookup.pending || closure.status !== 'idle'}
           resetKey={`${actorId}:${resetEpoch}`} onCapture={captureImage}
           onScanStart={startScan} />} />
       <NotificationToastContainer toasts={toasts} onDismiss={dismissToast} />

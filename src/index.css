@@ -6,7 +6,6 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
-
 * {
   box-sizing: border-box;
 }
@@ -284,6 +283,12 @@ input:focus {
   gap: 1.5rem;
 }
 
+.account-actions {
+  display: grid;
+  justify-items: stretch;
+  gap: .5rem;
+}
+
 .user-name {
   font-weight: 700;
   overflow-wrap: anywhere;
@@ -415,7 +420,6 @@ input:focus {
   font-size: .75rem;
   font-weight: 700;
 }
-
 @media (max-width: 760px) {
   .login-page {
     grid-template-columns: 1fr;

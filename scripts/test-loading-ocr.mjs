@@ -231,7 +231,7 @@ const html = renderToStaticMarkup(React.createElement(LoadingPortalView, {
   statistics: { status: 'ready', statistics: { tripsOpened: 0, openTrips: 0, tripsClosed: 0, trucksProcessed: 0 } },
   estimatedTonnage: '', truckConfirmed: false,
   lookup: { state: { status: 'idle' }, pending: false },
-  capturePanel: scanner, onLookup() {}, onConfirmTruck() {}, onEstimatedTonnageChange() {},
+  capturePanel: scanner, onLookup() {}, onConfirmTruck() {}, onCancelTruckWorkflow() {}, onEstimatedTonnageChange() {},
   onRetrySite() {}, onRetryStatistics() {},
 }));
 assert(html.includes('Plate scanner') && !html.includes('name="plate"'));
@@ -246,10 +246,22 @@ const completedHtml = renderToStaticMarkup(React.createElement(LoadingPortalView
   site: { status: 'ready', site: baseReview.site }, statistics: { status: 'error' },
   estimatedTonnage: '', truckConfirmed: false,
   lookup: { state: { status: 'idle' }, pending: false },
-  capturePanel: scanner, tripStage: 'success', onLookup() {}, onConfirmTruck() {}, onEstimatedTonnageChange() {},
+  capturePanel: scanner, tripStage: 'success', onLookup() {}, onConfirmTruck() {}, onCancelTruckWorkflow() {}, onEstimatedTonnageChange() {},
   onRetrySite() {}, onRetryStatistics() {},
 }));
 assert(!completedHtml.includes('Detected plate'), 'completed workspace must not show stale scanner instructions');
+const selectedTruckHtml = renderToStaticMarkup(React.createElement(LoadingPortalView, {
+  officerName: 'Officer', now: new Date('2026-09-25T09:00:00Z'),
+  site: { status: 'ready', site: baseReview.site }, statistics: { status: 'error' },
+  estimatedTonnage: '', truckConfirmed: true, lookup: { state: { status: 'known_ready', plate: 'ABC-123',
+    truck: baseReview.truck, driver: { ...baseReview.actualDriver, isActive: true } }, pending: false },
+  driverPanel: React.createElement('span', null, 'Driver selection'), capturePanel: scanner,
+  onLookup() {}, onConfirmTruck() {}, onCancelTruckWorkflow() {}, onEstimatedTonnageChange() {},
+  onRetrySite() {}, onRetryStatistics() {},
+}));
+assert(!selectedTruckHtml.includes('Plate scanner') && !selectedTruckHtml.includes('Scan Plate'),
+  'confirmed truck unmounts the scanner section');
+assert(selectedTruckHtml.includes('Cancel Truck Workflow'), 'pre-open reset explicitly returns to scan workflow');
 const processing = renderToStaticMarkup(React.createElement(PlateCapture, {
   state: { status: 'processing', phase: 'loading_model' }, disabled: false,
   onCapture() {}, onScanStart() {},
@@ -315,6 +327,8 @@ assert(readFileSync(resolve('src/features/loading/components/PlateCapture.tsx'),
   .includes('onScanStart();'));
 assert(readFileSync(resolve('src/features/loading/LoadingPortal.tsx'), 'utf8')
   .includes('void controller.submit(candidate, currentSite.site.assignmentId)'));
+assert(readFileSync(resolve('src/features/loading/LoadingPortal.tsx'), 'utf8').includes('truckConfirmed ? undefined : <PlateCapture'));
+assert(readFileSync(resolve('src/features/loading/LoadingPortal.tsx'), 'utf8').includes('if (truckConfirmedRef.current) return'));
 assert.equal(classifyCameraFailure({ name: 'NotAllowedError' }), 'permission_denied');
 assert.equal(classifyCameraFailure({ name: 'NotFoundError' }), 'unavailable');
 assert.equal(classifyCameraFailure(new Error('start failed')), 'initialization_failed');

@@ -11,6 +11,7 @@ type Props = {
   statistics: StatisticsState;
   estimatedTonnage: string;
   truckConfirmed: boolean;
+  onCancelTruckWorkflow: () => void;
   lookup: LookupSnapshot;
   onLookup: () => void;
   onConfirmTruck: () => void;
@@ -145,6 +146,8 @@ export function LoadingPortalView(props: Props) {
   const canIdentifyDriver = props.lookup.state.status === 'known_ready' || props.lookup.state.status === 'inactive_driver';
   const canEnterEstimate = props.truckConfirmed && canIdentifyDriver && !!props.driverPanel;
   const validEstimate = parseTonnage(props.estimatedTonnage) !== null;
+  const showScanner = !!props.capturePanel && !props.truckConfirmed
+    && !['submitting', 'ambiguous', 'success'].includes(props.tripStage ?? '');
   return <div className="loading-portal">
     <header className="loading-heading">
       <div><p className="eyebrow">Truck Revenue Tracking System</p><h1>Loading Portal</h1>
@@ -166,9 +169,8 @@ export function LoadingPortalView(props: Props) {
         <button className="button secondary" type="button" onClick={props.onDismissLateRegistration}>Dismiss notice</button>
       </div>}
       {canProcess ? <>
-        <div className="loading-section-heading"><h2>Scan Plate</h2>
-          <p>Scan the vehicle plate to identify the truck.</p></div>
-        {(!props.tripStage || !['submitting', 'ambiguous', 'success'].includes(props.tripStage)) && props.capturePanel}
+        {showScanner && <><div className="loading-section-heading"><h2>Scan Plate</h2>
+          <p>Scan the vehicle plate to identify the truck.</p></div>{props.capturePanel}</>}
         {(!props.tripStage || props.tripStage === 'idle' || props.tripStage === 'site_changed' || props.tripStage === 'authorization')
           && <LookupResult lookup={props.lookup} onRetry={props.onLookup} driverPanel={props.driverPanel}
             saved={props.savedRegistration} onRetryRegistrationCheck={props.onRetryRegistrationCheck}
@@ -181,6 +183,8 @@ export function LoadingPortalView(props: Props) {
           {props.estimatedTonnage && !validEstimate && <p role="alert">Enter a quantity greater than 0, below 100000000, with no more than two decimal places.</p>}
         </div>}
         {props.tripPanel}
+        {props.truckConfirmed && !['submitting', 'ambiguous', 'success'].includes(props.tripStage ?? '')
+          && <button className="button secondary" type="button" onClick={props.onCancelTruckWorkflow}>Cancel Truck Workflow</button>}
       </> : <div className="loading-site-block" role={props.site.status === 'loading' ? 'status' : 'alert'}>
         <h2>{props.site.status === 'loading' ? 'Checking loading site' : 'Loading site unavailable'}</h2>
         <p>{siteUnavailableMessage(props.site)}</p>

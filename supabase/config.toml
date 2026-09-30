@@ -14,6 +14,9 @@ verify_jwt = false
 [functions.send-invoice-email]
 verify_jwt = false
 
+[functions.create-operational-user]
+verify_jwt = true
+
 [api]
 enabled = true
 # Port to use for the API URL.

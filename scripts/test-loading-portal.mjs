@@ -198,8 +198,9 @@ const viewProps = {
   statistics: { status: 'ready', statistics: { tripsOpened: 3, openTrips: 2, tripsClosed: 2, trucksProcessed: 2 } },
   estimatedTonnage: '', truckConfirmed: false,
   lookup: { state: { status: 'idle' }, pending: false },
+  capturePanel: React.createElement('span', null, 'Mounted Scanner'),
   onLookup: () => { submitted += 1; },
-  onConfirmTruck() {}, onEstimatedTonnageChange() {},
+  onConfirmTruck() {}, onCancelTruckWorkflow() {}, onEstimatedTonnageChange() {},
   onRetrySite() {}, onRetryStatistics() {},
 };
 const render = changes => renderToStaticMarkup(React.createElement(LoadingPortalView, { ...viewProps, ...changes }));
@@ -233,8 +234,11 @@ assert(!html.includes('NEVER_DISPLAY') && !html.includes('bank_name') && !html.i
 const driverMarkup = render({ lookup: state({ status: 'known_ready', plate: 'ABC-123', truck: {
   id: 'truck-1', registrationNumber: 'ABC-123', normalizedRegistration: 'ABC123', isActive: true,
 }, driver: { id: 'driver-1', fullName: 'John Doe', phoneNumber: '08012345678', email: null, isActive: true } }),
-  truckConfirmed: true, driverPanel: React.createElement('span', null, 'Driver selection controls') });
+  truckConfirmed: true, capturePanel: React.createElement('span', null, 'Mounted Scanner'),
+  driverPanel: React.createElement('span', null, 'Driver selection controls') });
 assert(driverMarkup.indexOf('Driver selection controls') < driverMarkup.indexOf('aria-label="Today’s Loading activity"'));
+assert(!driverMarkup.includes('Mounted Scanner') && !driverMarkup.includes('Scan Plate'), 'confirmed Loading truck unmounts scanner section');
+assert(driverMarkup.includes('Cancel Truck Workflow'), 'safe cancellation resets the active Loading workflow');
 const reviewMarkup = render({ savedRegistration: { status: 'review_required', reason: 'identity_mismatch', receipt: { plate: 'ABC-123' } } });
 assert(reviewMarkup.includes('Registration saved') && reviewMarkup.includes('review required'));
 assert(reviewMarkup.indexOf('review required') < reviewMarkup.indexOf('aria-label="Today’s Loading activity"'));

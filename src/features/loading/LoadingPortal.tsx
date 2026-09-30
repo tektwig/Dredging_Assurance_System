@@ -37,6 +37,8 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
   const [now, setNow] = useState(() => new Date());
   const [plate, setPlate] = useState('');
   const [truckConfirmed, setTruckConfirmed] = useState(false);
+  const truckConfirmedRef = useRef(truckConfirmed);
+  truckConfirmedRef.current = truckConfirmed;
   const [estimatedTonnage, setEstimatedTonnage] = useState('');
   const [lookupSnapshot, setLookupSnapshot] = useState<LookupSnapshot>({ state: { status: 'idle' }, pending: false });
   const [driverSnapshot, setDriverSnapshot] = useState<DriverWorkflowSnapshot | null>(null);
@@ -59,7 +61,7 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
       if (currentSite.status !== 'ready' || result.assignmentId !== currentSite.site.assignmentId) return false;
       lookupAssignmentRef.current = currentSite.site.assignmentId;
       const accepted = controller.acceptValidatedRegistration(plateValue, result);
-      if (accepted) setTruckConfirmed(true);
+      if (accepted) { truckConfirmedRef.current = true; setTruckConfirmed(true); }
       return accepted;
     }, setDriverSnapshot,
     undefined,
@@ -74,7 +76,8 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
   ), []);
   const ocrService = useMemo(() => createPlateOcrService(), []);
   const captureController = useMemo(() => new PlateCaptureController(actorId,
-    ocrService, setCapture, candidate => {
+    ocrService, state => { if (!truckConfirmedRef.current) setCapture(state); }, candidate => {
+      if (truckConfirmedRef.current) return;
       openController.setInput(null);
       lookupAssignmentRef.current = null;
       controller.editPlate();
@@ -131,6 +134,7 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     controller.editPlate();
     driverController.reset();
     captureController.clear();
+    truckConfirmedRef.current = false;
     setTruckConfirmed(false);
     setEstimatedTonnage('');
   }, [assignmentId, controller, driverController, captureController]);
@@ -175,7 +179,7 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
   }
 
   function onCapture(file: File) {
-    if (siteRef.current.status !== 'ready' || openState.status === 'submitting'
+    if (truckConfirmedRef.current || siteRef.current.status !== 'ready' || openState.status === 'submitting'
       || openState.status === 'ambiguous' || openState.status === 'success'
       || driverController.current.registration.status === 'submitting'
       || driverController.current.registration.status === 'refreshing') return;
@@ -210,6 +214,7 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
   function nextTruck() {
     openController.nextTruck();
     setPlate('');
+    truckConfirmedRef.current = false;
     setTruckConfirmed(false);
     setEstimatedTonnage('');
     lookupAssignmentRef.current = null;
@@ -219,6 +224,22 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     setLateRegistration(null);
     setLateOpenedTrip(null);
   }
+  function cancelTruckWorkflow() {
+    if (['submitting', 'ambiguous', 'success'].includes(openController.current.status)
+      || driverController.current.registration.status === 'submitting'
+      || driverController.current.registration.status === 'refreshing') return;
+    openController.nextTruck();
+    setPlate('');
+    truckConfirmedRef.current = false;
+    setTruckConfirmed(false);
+    setEstimatedTonnage('');
+    lookupAssignmentRef.current = null;
+    controller.editPlate();
+    driverController.reset();
+    captureController.clear();
+    truckConfirmedRef.current = false;
+    setLateRegistration(null);
+  }
   const tripPanel = <TripReview state={openState} canReview={!!openInput} operationalDate={operationalDateLabel(now)}
     onReview={() => { openController.setInput(openInput); openController.beginReview(); }}
     onBack={() => openController.backToDriver()}
@@ -227,10 +248,12 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     || openState.status === 'authorization';
   const locked = driverSnapshot?.registration.status === 'submitting' || driverSnapshot?.registration.status === 'refreshing'
     || openState.status === 'submitting' || openState.status === 'ambiguous' || openState.status === 'success';
-  const capturePanel = <PlateCapture state={capture} disabled={locked}
+  const registrationOpen = !!driverSnapshot && driverSnapshot.registration.status !== 'closed';
+  const capturePanel = truckConfirmed ? undefined : <PlateCapture state={capture} disabled={locked}
     resetKey={JSON.stringify([plate, assignmentId, openState.status])}
     onCapture={onCapture}
     onScanStart={() => {
+      truckConfirmedRef.current = false;
       captureController.clear();
       openController.setInput(null);
       lookupAssignmentRef.current = null;
@@ -240,8 +263,6 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
       setTruckConfirmed(false);
       setEstimatedTonnage('');
     }} />;
-  const registrationOpen = !!driverSnapshot && driverSnapshot.registration.status !== 'closed';
-
   const { toasts, dismissToast } = useRealtimeTrips({
     channelName: 'loading-portal-trips-realtime',
     onTripChange: () => setStatisticsRevision(value => value + 1),
@@ -252,8 +273,9 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     <>
       <LoadingPortalView officerName={officerName} now={now} site={site} statistics={statistics}
         estimatedTonnage={estimatedTonnage}
-        onEstimatedTonnageChange={setEstimatedTonnage} onConfirmTruck={() => setTruckConfirmed(true)}
-        truckConfirmed={truckConfirmed} lookup={lookupSnapshot} driverPanel={showDriverPanel && !registrationOpen ? driverPanel : undefined}
+        onEstimatedTonnageChange={setEstimatedTonnage} onConfirmTruck={() => { truckConfirmedRef.current = true; setTruckConfirmed(true); }}
+        truckConfirmed={truckConfirmed} onCancelTruckWorkflow={cancelTruckWorkflow}
+        lookup={lookupSnapshot} driverPanel={showDriverPanel && !registrationOpen ? driverPanel : undefined}
         registrationDialog={registrationOpen && driverPanel ? <RegistrationDialog open onCancel={() => driverController.cancelRegistration()}>
           {driverPanel}
         </RegistrationDialog> : undefined}
@@ -264,7 +286,7 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
         onDismissLateRegistration={() => setLateRegistration(null)}
         onRetryRegistrationCheck={() => { void driverController.retrySavedValidation(); }}
         onLookup={onLookup}
-        onRetrySite={() => { openController.setInput(null); lookupAssignmentRef.current = null;
+        onRetrySite={() => { openController.setInput(null); truckConfirmedRef.current = false; lookupAssignmentRef.current = null;
           controller.editPlate(); driverController.reset(); captureController.clear(); setSiteRevision(value => value + 1); }}
         onRetryStatistics={() => setStatisticsRevision(value => value + 1)} />
       <NotificationToastContainer toasts={toasts} onDismiss={dismissToast} />

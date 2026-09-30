@@ -53,6 +53,9 @@ overrides.set(resolve('src/features/loading/LoadingPortal.tsx'), {
 overrides.set(resolve('src/features/offloading/OffloadingPortal.tsx'), {
   OffloadingPortal: () => React.createElement('p', null, 'Offloading workflow'),
 });
+overrides.set(resolve('src/features/operations/credentials/ManageCredentialsPage.tsx'), {
+  ManageCredentialsPage: () => React.createElement('h1', null, 'Credential management page'),
+});
 
 const { default: App } = load('src/App.tsx');
 const { ADMIN_NAVIGATION, OPERATIONS_NAVIGATION, PORTALS, destinationForRole } = load('src/routing/roleRoutes.ts');
@@ -175,6 +178,15 @@ assert(activeAdmin.includes('aria-current="page"'));
 assert(activeAdmin.includes('Audit Logs'));
 assert(renderApp('/operations', 'operations_manager').includes('Loading results'));
 assert(renderApp('/admin', 'system_administrator').includes('<h1>Administration Dashboard</h1>'));
+const credentialsPage = renderApp('/operations/manage-credentials', 'operations_manager');
+assert(credentialsPage.includes('Credential management page'));
+assert(credentialsPage.indexOf('Sign Out') < credentialsPage.indexOf('Manage Credentials'));
+assert(credentialsPage.includes('href="/operations/manage-credentials"'));
+for (const role of APP_ROLES.filter(role => role !== 'operations_manager')) {
+  assert(!renderApp('/operations/manage-credentials', role).includes('Credential management page'));
+  assert(!renderApp('/operations/trips', role).includes('href="/operations/manage-credentials"'));
+}
+assert(!renderApp('/operations/manage-credentials', 'operations_manager', 'inactive').includes('Credential management page'));
 console.log('PASS role-specific navigation, active route indication and module placeholders');
 
 const { ListToolbar } = load('src/components/data/ListToolbar.tsx');

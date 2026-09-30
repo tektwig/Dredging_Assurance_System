@@ -4,6 +4,7 @@ import { StatusPage } from './components/StatusPage';
 import { LoadingPortal } from './features/loading/LoadingPortal';
 import { OffloadingPortal } from './features/offloading/OffloadingPortal';
 import { OperationsDashboard } from './features/operations/dashboard/OperationsDashboard';
+import { ManageCredentialsPage } from './features/operations/credentials/ManageCredentialsPage';
 import { OperationsExceptionDetail } from './features/operations/exceptions/OperationsExceptionDetail';
 import { OperationsExceptionsRegister } from './features/operations/exceptions/OperationsExceptionsRegister';
 import { OperationsReports } from './features/operations/reports/OperationsReports';
@@ -61,6 +62,10 @@ export default function App() {
                 path={PORTALS.operations_manager.path}
                 element={
                   <AuthenticatedLayout
+                    accountAction={{
+                      label: 'Manage Credentials',
+                      to: '/operations/manage-credentials',
+                    }}
                     navigation={{
                       basePath: PORTALS.operations_manager.path,
                       label: 'Operations',
@@ -70,6 +75,8 @@ export default function App() {
                 }
               >
                 <Route index element={<OperationsDashboard />} />
+                <Route path="manage-credentials" element={<ManageCredentialsPage />} />
+                <Route path="create-credentials" element={<Navigate to="/operations/manage-credentials" replace />} />
                 <Route path="trips" element={<OperationsTripsRegister />} />
                 <Route path="trips/:tripId" element={<OperationsTripDetail />} />
                 <Route path="trucks-drivers" element={<Navigate to="trucks" replace />} />
