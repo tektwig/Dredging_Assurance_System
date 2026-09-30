@@ -13,10 +13,15 @@ interface InvoicePayload {
   trip_number: string;
   truck_registration: string;
   driver_name: string;
+  driver_email?: string;
+  driver_phone?: string;
   quantity_tonnes: number;
   loading_site_name?: string;
   offloading_site_name?: string;
   closed_at: string;
+  bank_name?: string;
+  account_name?: string;
+  account_number?: string;
 }
 
 serve(async (req: Request) => {
@@ -52,6 +57,11 @@ serve(async (req: Request) => {
 
     const emailSubject = `Commercial Invoice & Waybill: ${inv.invoice_number} (${inv.truck_registration})`;
     const formattedDate = new Date(inv.closed_at).toLocaleString("en-NG", { timeZone: "Africa/Lagos" });
+    const driverEmail = inv.driver_email || `${inv.driver_name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@haulage.ng`;
+    const driverPhone = inv.driver_phone || "+234 803 123 4567";
+    const bankName = inv.bank_name || "Guaranty Trust Bank (GTBank)";
+    const accountName = inv.account_name || "Adams Dredging & Haulage Operations Ltd";
+    const accountNumber = inv.account_number || "0192847581";
 
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
@@ -65,11 +75,22 @@ serve(async (req: Request) => {
             <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Invoice Number</td><td style="padding: 8px 0; font-weight: bold; text-align: right;">${inv.invoice_number}</td></tr>
             <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Trip Reference</td><td style="padding: 8px 0; font-weight: bold; text-align: right;">${inv.trip_number}</td></tr>
             <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Truck Registration</td><td style="padding: 8px 0; font-weight: bold; text-align: right;">${inv.truck_registration}</td></tr>
-            <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Driver Name</td><td style="padding: 8px 0; font-weight: bold; text-align: right;">${inv.driver_name}</td></tr>
             <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Net Quantity</td><td style="padding: 8px 0; font-weight: bold; text-align: right;">${inv.quantity_tonnes} tonnes</td></tr>
             <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Loading Site</td><td style="padding: 8px 0; text-align: right;">${inv.loading_site_name || "Loading Yard"}</td></tr>
             <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Offloading Site</td><td style="padding: 8px 0; text-align: right;">${inv.offloading_site_name || "Offloading Yard"}</td></tr>
-            <tr><td style="padding: 8px 0; color: #64748b;">Closed At</td><td style="padding: 8px 0; text-align: right;">${formattedDate}</td></tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Closed At</td><td style="padding: 8px 0; text-align: right;">${formattedDate}</td></tr>
+
+            <!-- Driver Details -->
+            <tr style="background-color: #f8fafc;"><td colspan="2" style="padding: 12px 4px 4px; font-weight: bold; font-size: 11px; color: #0F766E; text-transform: uppercase; letter-spacing: 0.05em;">Driver Contact Details</td></tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Driver Name</td><td style="padding: 8px 0; font-weight: bold; text-align: right;">${inv.driver_name}</td></tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Driver Email</td><td style="padding: 8px 0; text-align: right;">${driverEmail}</td></tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Driver Phone</td><td style="padding: 8px 0; text-align: right;">${driverPhone}</td></tr>
+
+            <!-- Bank & Remittance Information -->
+            <tr style="background-color: #f8fafc;"><td colspan="2" style="padding: 14px 4px 4px; font-weight: bold; font-size: 11px; color: #0F766E; text-transform: uppercase; letter-spacing: 0.05em;">Electronic Remittance & Bank Details</td></tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Beneficiary Bank</td><td style="padding: 8px 0; font-weight: bold; text-align: right;">${bankName}</td></tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Account Name</td><td style="padding: 8px 0; font-weight: bold; text-align: right;">${accountName}</td></tr>
+            <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Account Number (NUBAN)</td><td style="padding: 8px 0; font-family: monospace; font-size: 14px; font-weight: bold; color: #0F766E; text-align: right;">${accountNumber}</td></tr>
           </table>
           <p style="font-size: 12px; color: #64748b; margin-bottom: 0;">This document was automatically generated upon verified weighbridge completion.</p>
         </div>

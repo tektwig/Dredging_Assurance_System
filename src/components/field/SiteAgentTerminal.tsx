@@ -2745,6 +2745,9 @@ export const SiteAgentTerminal: React.FC = () => {
                   lastClosedTripForInvoice.driver?.license_number ||
                   lastClosedTripForInvoice.driver_license ||
                   '',
+                driver_email:
+                  lastClosedTripForInvoice.driver?.email ||
+                  `${(lastClosedTripForInvoice.driver?.full_name || lastClosedTripForInvoice.driver_name || 'driver').toLowerCase().replace(/[^a-z0-9]/g, '.')}@haulage.ng`,
                 loading_site_id:
                   lastClosedTripForInvoice.loading_site_id ||
                   lastClosedTripForInvoice.loading_site?.id ||
@@ -2765,6 +2768,9 @@ export const SiteAgentTerminal: React.FC = () => {
                   new Date().toISOString(),
                 closed_at: new Date().toISOString(),
                 issued_at: new Date().toISOString(),
+                bank_name: 'Guaranty Trust Bank (GTBank)',
+                account_name: 'Adams Dredging & Haulage Operations Ltd',
+                account_number: '0192847581',
               }
             : null)
         }

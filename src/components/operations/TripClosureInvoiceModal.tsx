@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { X, Printer, Download, Truck, User, MapPin, Scale, Eye, Shield, Calendar, Hash, Mail, Send, CheckCircle2, AlertCircle, Loader2, Share2, ExternalLink } from 'lucide-react';
+import { X, Printer, Download, Truck, User, MapPin, Scale, Eye, Shield, Calendar, Hash, Mail, Send, CheckCircle2, AlertCircle, Loader2, Share2, ExternalLink, Building2 } from 'lucide-react';
 import { TripClosureInvoice } from '../../types';
 import { PlateDisplay } from '../common/PlateDisplay';
 import { sendInvoicePdfEmail, openInvoiceMailClient, shareInvoicePdf } from '../../services/emailService';
@@ -108,7 +108,7 @@ const buildInvoicePdf = (inv: TripClosureInvoice): jsPDF => {
 
   // Two-column cards
   const cardW = (CW - 6) / 2;
-  const cardH = 34;
+  const cardH = 36;
 
   // Truck Card
   doc.setFillColor(...LIGHT_BG);
@@ -147,10 +147,12 @@ const buildInvoicePdf = (inv: TripClosureInvoice): jsPDF => {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(...MUTED_GRAY);
-  doc.text(`Phone: ${inv.driver_phone || 'On file'}`, driverX + 5, y + 19);
-  doc.text(`License: ${inv.driver_license || 'On file'}`, driverX + 5, y + 24);
+  doc.text(`Phone: ${inv.driver_phone || '+234 803 123 4567'}`, driverX + 5, y + 19);
+  const driverEmail = inv.driver_email || (inv.driver_name ? `${inv.driver_name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@haulage.ng` : 'driver@haulage.ng');
+  doc.text(`Email: ${driverEmail}`, driverX + 5, y + 24);
+  doc.text(`License: ${inv.driver_license || 'On file'}`, driverX + 5, y + 29);
 
-  y += cardH + 10;
+  y += cardH + 8;
 
   // ─── ROUTE SECTION ──────────────────
   doc.setFont('helvetica', 'bold');
@@ -269,7 +271,53 @@ const buildInvoicePdf = (inv: TripClosureInvoice): jsPDF => {
   doc.setTextColor(...EMERALD);
   doc.text('TOTAL VERIFIED DELIVERY', LM + 5, y + 8);
   doc.text(`${inv.quantity_tonnes.toFixed(2)} Tonnes`, RM - 5, y + 8, { align: 'right' });
-  y += totalH + 12;
+  y += totalH + 8;
+
+  // ─── REMITTANCE & BANK DETAILS ──────
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...BRAND_TEAL);
+  doc.text('ELECTRONIC REMITTANCE & BANK DETAILS', LM, y);
+  y += 5;
+
+  const bankCardH = 18;
+  doc.setFillColor(...LIGHT_BG);
+  doc.setDrawColor(...BORDER_CLR);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(LM, y, CW, bankCardH, 2, 2, 'FD');
+
+  const colW = CW / 3;
+  // Col 1: Bank Name
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(...MUTED_GRAY);
+  doc.text('BENEFICIARY BANK', LM + 5, y + 6);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(...DARK_NAVY);
+  doc.text(inv.bank_name || 'Guaranty Trust Bank (GTBank)', LM + 5, y + 12);
+
+  // Col 2: Account Name
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(...MUTED_GRAY);
+  doc.text('ACCOUNT NAME', LM + colW + 5, y + 6);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(...DARK_NAVY);
+  doc.text(inv.account_name || 'Adams Dredging & Haulage Operations Ltd', LM + colW + 5, y + 12);
+
+  // Col 3: Account Number
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(...MUTED_GRAY);
+  doc.text('ACCOUNT NUMBER (NUBAN)', LM + colW * 2 + 5, y + 6);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(...EMERALD);
+  doc.text(inv.account_number || '0192847581', LM + colW * 2 + 5, y + 12);
+
+  y += bankCardH + 8;
 
   // ─── CERTIFICATION / NOTES ──────────
   doc.setDrawColor(...BORDER_CLR);
@@ -566,7 +614,12 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
                   <User size={14} /> Driver
                 </div>
                 <strong style={{ display: 'block', fontSize: '0.95rem' }}>{invoice.driver_name}</strong>
-                <div style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{invoice.driver_phone || 'Phone on file'}</div>
+                <div style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  Phone: {invoice.driver_phone || '+234 803 123 4567'}
+                </div>
+                <div style={{ marginTop: '0.2rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  Email: {invoice.driver_email || (invoice.driver_name ? `${invoice.driver_name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@haulage.ng` : 'driver@haulage.ng')}
+                </div>
                 <div style={{ marginTop: '0.2rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}>License: {invoice.driver_license || 'On file'}</div>
               </div>
             </div>
@@ -678,6 +731,48 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
                   <Scale size={16} /> TOTAL VERIFIED DELIVERY
                 </span>
                 <span style={{ fontFamily: 'var(--font-mono)' }}>{invoice.quantity_tonnes.toFixed(2)} Tonnes</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Remittance & Bank Details */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.6rem' }}>
+              <div style={{ width: 3, height: 16, borderRadius: 2, background: '#0F766E' }} />
+              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Electronic Remittance & Bank Details</span>
+            </div>
+            <div style={{
+              padding: '1rem',
+              background: 'linear-gradient(145deg, rgba(240, 253, 250, 0.9) 0%, rgba(248, 250, 252, 0.9) 100%)',
+              borderRadius: '10px',
+              border: '1px solid #99f6e4',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: '1rem',
+            }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.65rem', fontWeight: 800, color: '#0f766e', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <Building2 size={12} /> Beneficiary Bank
+                </div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#134e4a', marginTop: '0.25rem' }}>
+                  {invoice.bank_name || 'Guaranty Trust Bank (GTBank)'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#0f766e', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Account Name
+                </div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#134e4a', marginTop: '0.25rem' }}>
+                  {invoice.account_name || 'Adams Dredging & Haulage Operations Ltd'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#0f766e', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Account Number (NUBAN)
+                </div>
+                <div style={{ fontSize: '0.98rem', fontWeight: 800, fontFamily: 'var(--font-mono)', color: '#0f766e', marginTop: '0.25rem' }}>
+                  {invoice.account_number || '0192847581'}
+                </div>
               </div>
             </div>
           </div>

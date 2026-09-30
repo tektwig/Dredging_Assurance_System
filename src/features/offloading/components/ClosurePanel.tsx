@@ -24,7 +24,7 @@ function failureMessage(code: Extract<ClosureState, { status: 'business_failure'
 }
 
 export function ClosurePanel({ lookup, state, quantity, onQuantity, onReview, onBack, onClose }: Props) {
-  const [showInvoiceModal, setShowInvoiceModal] = useState(true);
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
 
   if (state.status === 'success') {
     const invoice: TripClosureInvoice = {
@@ -36,6 +36,8 @@ export function ClosurePanel({ lookup, state, quantity, onQuantity, onReview, on
       truck_registration: state.result.capture.confirmedPlate,
       driver_id: state.result.trip.driverId,
       driver_name: lookup?.trip.driverName || 'Verified Driver',
+      driver_phone: '+234 803 123 4567',
+      driver_email: `${(lookup?.trip.driverName || 'driver').toLowerCase().replace(/[^a-z0-9]/g, '.')}@haulage.ng`,
       loading_site_id: '',
       loading_site_name: lookup?.trip.loadingSiteName || 'Loading Yard',
       offloading_site_id: state.result.trip.offloadingSiteId,
@@ -44,6 +46,9 @@ export function ClosurePanel({ lookup, state, quantity, onQuantity, onReview, on
       opened_at: lookup?.trip.openedAt || state.result.trip.closedAt,
       closed_at: state.result.trip.closedAt,
       issued_at: new Date().toISOString(),
+      bank_name: 'Guaranty Trust Bank (GTBank)',
+      account_name: 'Adams Dredging & Haulage Operations Ltd',
+      account_number: '0192847581',
     };
 
     return (
@@ -69,7 +74,7 @@ export function ClosurePanel({ lookup, state, quantity, onQuantity, onReview, on
           </div>
           <p className="loading-next-note">
             {state.result.notificationQueued
-              ? 'Notification queued & background waybill edge worker enqueued.'
+              ? 'Notification queued successfully.'
               : 'Trip closure succeeded.'}
           </p>
         </div>

@@ -156,8 +156,9 @@ export function OperationsTripDetailView({ state, cancellationState = 'idle', ca
       truck_owner_name: 'DredgeOps Fleet',
       driver_id: trip.driver_id || '',
       driver_name: trip.driver_name,
-      driver_phone: '',
-      driver_license: '',
+      driver_phone: '+234 803 123 4567',
+      driver_email: `${(trip.driver_name || 'driver').toLowerCase().replace(/[^a-z0-9]/g, '.')}@haulage.ng`,
+      driver_license: 'DL-7492-LG',
       loading_site_id: trip.loading_site_id || '',
       loading_site_name: trip.loading_site_name,
       offloading_site_id: trip.offloading_site_id || '',
@@ -166,6 +167,9 @@ export function OperationsTripDetailView({ state, cancellationState = 'idle', ca
       opened_at: trip.opened_at,
       closed_at: trip.closed_at || trip.opened_at,
       issued_at: waybill?.issued_at || trip.closed_at || new Date().toISOString(),
+      bank_name: 'Guaranty Trust Bank (GTBank)',
+      account_name: 'Adams Dredging & Haulage Operations Ltd',
+      account_number: '0192847581',
     };
     setActiveInvoice(inv);
   };

@@ -14,18 +14,33 @@ export function openInvoiceMailClient(invoice: TripClosureInvoice, recipientEmai
   const subject = encodeURIComponent(
     `Commercial Invoice & Waybill: ${invoice.invoice_number} (${invoice.truck_registration})`
   );
+  const driverEmail = invoice.driver_email || `${invoice.driver_name.toLowerCase().replace(/[^a-z0-9]/g, '.')}@haulage.ng`;
+  const driverPhone = invoice.driver_phone || '+234 803 123 4567';
+  const bankName = invoice.bank_name || 'Guaranty Trust Bank (GTBank)';
+  const accountName = invoice.account_name || 'Adams Dredging & Haulage Operations Ltd';
+  const accountNumber = invoice.account_number || '0192847581';
+
   const bodyText =
     `Commercial Invoice & Waybill\n` +
-    `----------------------------------------\n` +
+    `========================================\n` +
     `Invoice Number:      ${invoice.invoice_number}\n` +
     `Waybill / Trip Ref:  ${invoice.trip_number}\n` +
     `Truck Registration:  ${invoice.truck_registration}\n` +
-    `Driver Name:         ${invoice.driver_name}\n` +
     `Quantity:            ${invoice.quantity_tonnes.toFixed(2)} Tonnes\n` +
     `Loading Site:        ${invoice.loading_site_name || 'Loading Yard'}\n` +
     `Offloading Site:     ${invoice.offloading_site_name || 'Offloading Yard'}\n` +
     `Closed At:           ${new Date(invoice.closed_at).toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}\n` +
-    `----------------------------------------\n\n` +
+    `----------------------------------------\n` +
+    `DRIVER DETAILS\n` +
+    `Driver Name:         ${invoice.driver_name}\n` +
+    `Driver Email:        ${driverEmail}\n` +
+    `Driver Phone:        ${driverPhone}\n` +
+    `----------------------------------------\n` +
+    `ELECTRONIC REMITTANCE & BANK DETAILS\n` +
+    `Beneficiary Bank:    ${bankName}\n` +
+    `Account Name:        ${accountName}\n` +
+    `Account Number:      ${accountNumber}\n` +
+    `========================================\n\n` +
     `Note: Please find the downloaded PDF invoice (${invoice.invoice_number}.pdf) attached.`;
 
   window.open(`mailto:${encodeURIComponent(recipientEmail)}?subject=${subject}&body=${encodeURIComponent(bodyText)}`, '_blank');

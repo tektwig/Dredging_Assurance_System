@@ -180,6 +180,7 @@ export interface TripClosureInvoice {
   truck_owner_name?: string;
   driver_id: string;
   driver_name: string;
+  driver_email?: string;
   driver_phone?: string;
   driver_license?: string;
   loading_site_id: string;
@@ -190,6 +191,9 @@ export interface TripClosureInvoice {
   opened_at: string;
   closed_at: string;
   issued_at: string;
+  bank_name?: string;
+  account_name?: string;
+  account_number?: string;
 }
 
 export interface ExceptionItem {
