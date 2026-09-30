@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { X, Printer, Download, Truck, User, MapPin, Scale, Eye, Shield, Calendar, Hash, Mail, Send, CheckCircle2, AlertCircle, Loader2, Share2, ExternalLink, Building2 } from 'lucide-react';
+import { X, Printer, Download, Truck, User, MapPin, Scale, Eye, Shield, Calendar, Hash, Mail, Send, CheckCircle2, AlertCircle, Loader2, Share2, ExternalLink } from 'lucide-react';
 import { TripClosureInvoice } from '../../types';
 import { PlateDisplay } from '../common/PlateDisplay';
 import { sendInvoicePdfEmail, openInvoiceMailClient, shareInvoicePdf } from '../../services/emailService';

@@ -166,6 +166,7 @@ export function OperationsTripDetailView({ state, cancellationState = 'idle', ca
       quantity_tonnes: trip.quantity_tonnes || 30,
       opened_at: trip.opened_at,
       closed_at: trip.closed_at || trip.opened_at,
+      issued_at: waybill?.issued_at || trip.closed_at || new Date().toISOString(),
       bank_name: (waybill as any)?.bank_name || (trip as any)?.bank_name || undefined,
       account_name: (waybill as any)?.account_name || (trip as any)?.account_name || undefined,
       account_number: (waybill as any)?.account_number || (trip as any)?.account_number || undefined,
