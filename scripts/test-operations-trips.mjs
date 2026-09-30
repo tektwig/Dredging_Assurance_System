@@ -19,7 +19,8 @@ function load(path) {
   if (cache.has(full)) return cache.get(full).exports;
   const module = { exports: {} };
   cache.set(full, module);
-  const output = ts.transpileModule(readFileSync(full, 'utf8'), {
+  const source = readFileSync(full, 'utf8').replaceAll('import.meta.env', '(globalThis.__testEnv || { DEV: true })');
+  const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   const localRequire = name => {

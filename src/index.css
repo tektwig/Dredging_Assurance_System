@@ -167,6 +167,80 @@ input:focus {
   border-color: #16706e;
 }
 
+.field-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.password-input-wrapper input {
+  padding-right: 2.85rem;
+}
+
+.password-toggle-btn {
+  background: transparent;
+  border: none;
+  color: #527080;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0.2rem 0.45rem;
+  border-radius: 0.35rem;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.password-toggle-btn:hover:not(:disabled) {
+  color: #125b59;
+  background-color: #f1f6f6;
+}
+
+.password-toggle-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.password-peek-icon-btn {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: #7b8d99;
+  cursor: pointer;
+  padding: 0.35rem;
+  border-radius: 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.password-peek-icon-btn:hover:not(:disabled) {
+  color: #125b59;
+  background-color: #edf3f4;
+}
+
+.password-peek-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.password-peek-icon-btn:focus-visible {
+  outline: 2px solid #125b59;
+  outline-offset: 1px;
+}
+
 .button {
   border: 1px solid transparent;
   border-radius: .5rem;

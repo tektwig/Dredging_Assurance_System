@@ -8,6 +8,8 @@ import {
   Loader2,
   CheckCircle2,
   Sparkles,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 interface LoginScreenProps {
@@ -400,21 +402,49 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSignIn, onBack }) =>
                     fontWeight: 600,
                     cursor: 'pointer',
                     padding: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
                   }}
                 >
-                  {showPassword ? 'Hide' : 'Show'}
+                  {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                  <span>{showPassword ? 'Hide' : 'Show'}</span>
                 </button>
               </div>
-              <input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                className="sixtus-input"
-                autoComplete={authMode === 'sign-in' ? 'current-password' : 'new-password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={isLoading}
-              />
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  className="sixtus-input"
+                  style={{ paddingRight: '2.5rem' }}
+                  autoComplete={authMode === 'sign-in' ? 'current-password' : 'new-password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  disabled={isLoading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                  style={{
+                    position: 'absolute',
+                    right: '0.75rem',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: '#7b8d99',
+                    cursor: 'pointer',
+                    padding: '0.2rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </div>
 
             {authMode === 'sign-up' && (
