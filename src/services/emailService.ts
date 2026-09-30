@@ -1,4 +1,5 @@
 import type { TripClosureInvoice } from '../types';
+import { supabase } from './supabase';
 
 export interface EmailDispatchResult {
   success: boolean;
@@ -52,8 +53,21 @@ export async function shareInvoicePdf(invoice: TripClosureInvoice, pdfBlob: Blob
   return false;
 }
 
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(',')[1] || '';
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 /**
- * Dispatches the Commercial Invoice PDF to the target email via FormSubmit with error resilience.
+ * Dispatches the Commercial Invoice PDF to the target email via the Supabase Edge Function pipeline.
  */
 export async function sendInvoicePdfEmail(
   invoice: TripClosureInvoice,
@@ -65,57 +79,62 @@ export async function sendInvoicePdfEmail(
     return { success: false, message: 'Please provide a valid recipient email address.' };
   }
 
-  const formData = new FormData();
-  formData.append('_subject', `Commercial Invoice & Waybill: ${invoice.invoice_number} (${invoice.truck_registration})`);
-  formData.append('_template', 'table');
-  formData.append('_captcha', 'false');
-  formData.append('Invoice Number', invoice.invoice_number);
-  formData.append('Trip Reference', invoice.trip_number);
-  formData.append('Truck Registration', invoice.truck_registration);
-  formData.append('Driver Name', invoice.driver_name);
-  formData.append('Quantity (Tonnes)', `${invoice.quantity_tonnes.toFixed(2)} tonnes`);
-  formData.append('Loading Site', invoice.loading_site_name || 'Loading Yard');
-  formData.append('Offloading Site', invoice.offloading_site_name || 'Offloading Yard');
-  formData.append('Closed At', new Date(invoice.closed_at).toLocaleString('en-NG', { timeZone: 'Africa/Lagos' }));
-
-  // Attach the generated PDF
-  const pdfFile = new File([pdfBlob], `${invoice.invoice_number}.pdf`, { type: 'application/pdf' });
-  formData.append('attachment', pdfFile, `${invoice.invoice_number}.pdf`);
-
   try {
-    const endpoint = `https://formsubmit.co/ajax/${encodeURIComponent(targetEmail)}`;
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
+    const pdfBase64 = await blobToBase64(pdfBlob);
+    const { data: supaData, error: supaErr } = await supabase.functions.invoke('send-invoice-email', {
+      body: {
+        recipientEmail: targetEmail,
+        invoice,
+        pdfBase64,
       },
-      body: formData,
     });
 
-    const data = await response.json().catch(() => null);
+    if (!supaErr && supaData && supaData.success) {
+      return {
+        success: true,
+        message: supaData.message || `Invoice PDF successfully dispatched via Supabase to ${targetEmail}`,
+      };
+    }
 
-    if (!response.ok) {
-      if (response.status === 500) {
+    if (supaErr) {
+      const errContext = (supaErr as any)?.context;
+      const status = errContext?.status;
+
+      if (status === 404) {
         return {
           success: false,
           isServerError: true,
-          message: 'FormSubmit.co returned 500 (remote server issue). Use "Open Email Client" or "Share PDF" below to send directly.',
+          message: 'Supabase Edge Function (send-invoice-email) is pending deployment on this project. Use "Open Mail App" or "Share PDF" below to send immediately.',
         };
       }
-      const errMsg = data?.message || `FormSubmit returned status ${response.status}`;
-      return { success: false, message: errMsg };
+
+      if (status === 502 || status === 503) {
+        return {
+          success: false,
+          isServerError: true,
+          message: 'Supabase email provider unavailable. Use "Open Mail App" or "Share PDF" below.',
+        };
+      }
     }
 
-    return {
-      success: true,
-      message: `Invoice PDF successfully dispatched to ${targetEmail}`,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Network error connecting to email service';
+    if (supaData && !supaData.success) {
+      return {
+        success: false,
+        message: supaData.error || 'Failed to dispatch invoice email via Supabase.',
+      };
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Error invoking Supabase email function';
     return {
       success: false,
       isServerError: true,
-      message: `${message}. Use "Open Email Client" or "Share PDF" below to send directly.`,
+      message: `${message}. Use "Open Mail App" or "Share PDF" below to send directly.`,
     };
   }
+
+  return {
+    success: false,
+    isServerError: true,
+    message: 'Supabase Edge Function is pending deployment. Use "Open Mail App" or "Share PDF" below to deliver the invoice.',
+  };
 }

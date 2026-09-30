@@ -711,7 +711,7 @@ export const TripClosureInvoiceModal: React.FC<TripClosureInvoiceModalProps> = (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', fontWeight: 700, color: '#172b3a' }}>
                 <Mail size={15} color="#0F766E" />
-                <span>FormSubmit Email Dispatch</span>
+                <span>Supabase Official Email Dispatch</span>
               </div>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: '#64748b', cursor: 'pointer' }}>
                 <input
