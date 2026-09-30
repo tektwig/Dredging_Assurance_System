@@ -35,16 +35,18 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
   const [lookup, setLookup] = useState<OffloadingLookupSnapshot>({ state: { status: 'idle' }, pending: false });
   const [resetEpoch, setResetEpoch] = useState(0);
   const plateRef = useRef(plate);
+  const autoLookupEvidence = useRef<string | null>(null);
   plateRef.current = plate;
   const lookupController = useMemo(() => new OffloadingLookupController(lookupOffloadingOpenTrip, setLookup), []);
   const closureController = useMemo(() => new ClosureController(closeOffloadingTrip, setClosure, retry,
     undefined, () => setStatisticsRevision(value => value + 1)), [retry]);
   const ocrService = useMemo(() => createPlateOcrService(), []);
   const captureController = useMemo(() => new PlateCaptureController(actorId,
-    (file, report) => ocrService.process(file, report), setCapture, candidate => {
+    ocrService, setCapture, candidate => {
       lookupController.reset();
       plateRef.current = candidate;
       setPlate(candidate);
+      setQuantity('');
     }), [actorId, lookupController, ocrService]);
 
   useEffect(() => {
@@ -78,6 +80,13 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
   }, [actorId, dateKey, statisticsRevision]);
 
   useEffect(() => {
+    if (capture.status !== 'detected' || autoLookupEvidence.current === capture.evidence.id
+      || closureController.current.status !== 'idle') return;
+    autoLookupEvidence.current = capture.evidence.id;
+    void lookupController.submit(capture.evidence.candidate, capture.evidence);
+  }, [capture, closureController, lookupController]);
+
+  useEffect(() => {
     if (closure.status !== 'site_changed') return;
     lookupController.reset();
     captureController.clear();
@@ -86,16 +95,6 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
     setQuantity('');
   }, [closure.status, lookupController, captureController]);
 
-  function changePlate(value: string) {
-    if (closureController.current.status !== 'idle') return;
-    closureController.setInput(null);
-    captureController.cancelPending();
-    plateRef.current = value;
-    setPlate(value);
-    lookupController.reset();
-    setQuantity('');
-    setResetEpoch(value => value + 1);
-  }
   function captureImage(file: File) {
     if (lookupController.current.pending || closureController.current.status !== 'idle') return;
     closureController.setInput(null);
@@ -103,6 +102,7 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
     plateRef.current = '';
     setPlate('');
     setQuantity('');
+    autoLookupEvidence.current = null;
     void captureController.capture(file);
   }
   function startScan() {
@@ -115,6 +115,7 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
     plateRef.current = '';
     setPlate('');
     setQuantity('');
+    autoLookupEvidence.current = null;
   }
   function reset() {
     if (!closureController.reset()) return;
@@ -123,28 +124,22 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
     plateRef.current = '';
     setPlate('');
     setQuantity('');
+    autoLookupEvidence.current = null;
     setResetEpoch(value => value + 1);
   }
   const evidence = capture.status === 'detected' ? capture.evidence : null;
-  return <OffloadingPortalView officerName={officerName} plate={plate} lookup={lookup}
+  return <OffloadingPortalView officerName={officerName} lookup={lookup}
     closure={closure} statistics={statistics} now={now}
     onRetryStatistics={() => setStatisticsRevision(value => value + 1)}
     closurePanel={<ClosurePanel lookup={found} state={closure} quantity={quantity}
       onQuantity={value => { if (closureController.current.status === 'idle') setQuantity(value); }}
       onReview={() => { closureController.setInput(review); closureController.beginReview(); }}
       onBack={() => closureController.back()} onClose={() => { void closureController.submit(); }} />}
-    onPlateChange={changePlate} onLookup={() => {
+    onLookup={() => {
       if (closureController.current.status !== 'idle') return;
-      // The officer must submit the confirmed text; OCR never calls this.
       void lookupController.submit(plateRef.current, evidence);
     }} onReset={reset}
     capturePanel={<PlateCapture state={capture} disabled={lookup.pending || closure.status !== 'idle'}
-      lookupActionLabel="Find Open Trip"
       resetKey={`${actorId}:${resetEpoch}`} onCapture={captureImage}
-      onScanStart={startScan} onManual={() => {
-        if (closureController.current.status !== 'idle') return;
-        closureController.setInput(null);
-        captureController.clear(); lookupController.reset(); setQuantity('');
-        setResetEpoch(value => value + 1);
-      }} />} />;
+      onScanStart={startScan} />} />;
 }

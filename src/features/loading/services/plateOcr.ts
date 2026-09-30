@@ -1,4 +1,4 @@
-import { PlateOcrError, type PlateOcrPhase, type ProcessedPlateImage } from '../utils/plateCaptureController';
+import { PlateOcrError, type PlateOcrPhase, type PlateOcrProvider, type ProcessedPlateImage } from '../utils/plateCaptureController';
 import type { PaddleOCRCreateOptions } from '@paddleocr/paddleocr-js';
 
 const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
@@ -80,7 +80,7 @@ async function loadPaddleEngine(): Promise<PaddleEngine> {
 export function createPlateOcrService(
   loadEngine: () => Promise<PaddleEngine> = loadPaddleEngine,
   prepareImage: (file: File) => Promise<Blob> = reencodePlateImage,
-) {
+): PlateOcrProvider {
   let enginePromise: Promise<PaddleEngine> | null = null;
   let disposed = false;
   const engine = async () => {
@@ -92,7 +92,7 @@ export function createPlateOcrService(
     return enginePromise;
   };
   return {
-    async process(file: File, report: (phase: PlateOcrPhase) => void = () => {}): Promise<ProcessedPlateImage> {
+    async recognize(file: File, report: (phase: PlateOcrPhase) => void = () => {}): Promise<ProcessedPlateImage> {
       let image: Blob;
       try { image = await prepareImage(file); }
       catch { throw new PlateOcrError('invalid_image'); }

@@ -107,6 +107,8 @@ function TripOverview({ trip }: { trip: OperationsTripDetailRecord }) {
       <DetailValue label="Loading officer">{officerLabel(trip.loading_officer)}</DetailValue>
       <DetailValue label="Offloading site">{trip.offloading_site_name ?? '—'}</DetailValue>
       <DetailValue label="Closed at">{formatDate(trip.closed_at)}</DetailValue>
+      <DetailValue label="Estimated tonnage">{trip.estimated_quantity_tonnes === null
+        ? '—' : `${trip.estimated_quantity_tonnes.toFixed(2)} tonnes`}</DetailValue>
       <DetailValue label="Tonnage">{trip.quantity_tonnes === null ? '—' : `${trip.quantity_tonnes.toFixed(2)} tonnes`}</DetailValue>
       <DetailValue label="Offloading officer">{officerLabel(trip.offloading_officer)}</DetailValue>
     </dl>

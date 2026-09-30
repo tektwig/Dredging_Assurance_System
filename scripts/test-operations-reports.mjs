@@ -45,7 +45,7 @@ const timestamp = '2000-01-01T00:00:00.000Z';
 const tripRow = { trip_id: 'trip-1', trip_number: 'TRP-001', truck_id: 'truck-1', truck_plate: 'RPT-001',
   driver_id: 'driver-1', driver_name: 'Driver', loading_site_id: 'site-1', loading_site: 'Loading',
   offloading_site_id: 'site-2', offloading_site: 'Offloading', opened_at: timestamp, closed_at: timestamp,
-  cancelled_at: null, tonnage_tonnes: 12.5, status: 'closed' };
+  cancelled_at: null, estimated_tonnage_tonnes: 10.25, tonnage_tonnes: 12.5, status: 'closed' };
 const page = { summary: { rows: 1, trips_opened: 0, trips_closed: 1, trips_cancelled: 0, open_trips: 0, tonnage_tonnes: 12.5 },
   items: [tripRow], total_count: 1, page: 1, page_size: 25, has_next: false };
 assert.equal(service.validateReportPage('trips', page).items.length, 1);

@@ -51,23 +51,23 @@ alter table public.daily_registrations enable trigger user;
 
 alter table public.trips disable trigger user;
 insert into public.trips(id,trip_number,truck_id,driver_id,daily_registration_id,loading_site_id,offloading_site_id,
-  status,quantity_tonnes,opened_at,opened_by,closed_at,closed_by,cancelled_at,cancelled_by,cancellation_reason,
+  status,quantity_tonnes,estimated_quantity_tonnes,opened_at,opened_by,closed_at,closed_by,cancelled_at,cancelled_by,cancellation_reason,
   truck_registration_at_loading,driver_name_at_loading)
 values
  ('f7360000-0000-0000-0000-000000000001','RPT-TRIP-CLOSED','f7340000-0000-0000-0000-000000000001',
   'f7330000-0000-0000-0000-000000000002','f7350000-0000-0000-0000-000000000001',
-  'f7320000-0000-0000-0000-000000000001','f7320000-0000-0000-0000-000000000002','closed',12.50,
+  'f7320000-0000-0000-0000-000000000001','f7320000-0000-0000-0000-000000000002','closed',12.50,10.25,
   timestamp with time zone '1999-12-31 22:59:00+00','f7310000-0000-0000-0000-000000000002',
   timestamp with time zone '1999-12-31 23:00:00+00','f7310000-0000-0000-0000-000000000003',null,null,null,'RPT-001','Actual Trip Driver'),
  ('f7360000-0000-0000-0000-000000000002','RPT-TRIP-CANCELLED','f7340000-0000-0000-0000-000000000002',
   'f7330000-0000-0000-0000-000000000002','f7350000-0000-0000-0000-000000000002',
-  'f7320000-0000-0000-0000-000000000001',null,'cancelled',null,
+  'f7320000-0000-0000-0000-000000000001',null,'cancelled',null,null,
   timestamp with time zone '2000-01-01 10:00 Africa/Lagos','f7310000-0000-0000-0000-000000000002',
   null,null,timestamp with time zone '2000-01-01 23:00 Africa/Lagos','f7310000-0000-0000-0000-000000000002','Cancel secret',
   'RPT-002','Actual Trip Driver'),
  ('f7360000-0000-0000-0000-000000000003','RPT-TRIP-OLD-OPEN','f7340000-0000-0000-0000-000000000001',
   'f7330000-0000-0000-0000-000000000002','f7350000-0000-0000-0000-000000000001',
-  'f7320000-0000-0000-0000-000000000001',null,'open',null,
+  'f7320000-0000-0000-0000-000000000001',null,'open',null,null,
   timestamp with time zone '1999-12-01 10:00 Africa/Lagos','f7310000-0000-0000-0000-000000000002',
   null,null,null,null,null,'RPT-001','Actual Trip Driver');
 alter table public.trips enable trigger user;
@@ -106,6 +106,12 @@ select public.start_operations_exception_review(current_setting('test.exception_
 select pg_temp.report_assert((public.get_operations_report('trips',
   '{"basis":"closed","date_from":"2000-01-01","date_to":"2000-01-01","truck_id":"f7340000-0000-0000-0000-000000000001"}',1,25)->>'total_count')::integer=1,
   'closed-trip report filters by the Lagos closed_at day including its midnight boundary');
+select pg_temp.report_assert((public.get_operations_report('trips',
+  '{"basis":"closed","date_from":"2000-01-01","date_to":"2000-01-01","truck_id":"f7340000-0000-0000-0000-000000000001"}',1,25)
+  #>>'{items,0,estimated_tonnage_tonnes}')='10.25'
+  and (public.get_operations_report('trips',
+  '{"basis":"closed","date_from":"2000-01-01","date_to":"2000-01-01","truck_id":"f7340000-0000-0000-0000-000000000001"}',1,25)
+  #>>'{items,0,tonnage_tonnes}')='12.50','Trips report keeps estimate distinct from actual tonnage');
 select pg_temp.report_assert((public.get_operations_report('trips',
   '{"basis":"opened","date_from":"1999-12-31","date_to":"1999-12-31","truck_id":"f7340000-0000-0000-0000-000000000001"}',1,25)->>'total_count')::integer=1,
   'opened trip cohort uses Lagos opened_at dates');

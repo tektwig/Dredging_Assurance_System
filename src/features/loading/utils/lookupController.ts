@@ -25,6 +25,7 @@ export class LoadingLookupController {
 
   editPlate() {
     this.revision += 1;
+    this.pending = false;
     this.publish({ status: 'idle' });
   }
 
@@ -71,8 +72,10 @@ export class LoadingLookupController {
         error instanceof LoadingAuthorizationError ? { status: 'access_unavailable' } : { status: 'lookup_error', plate },
       );
     } finally {
-      this.pending = false;
-      if (!this.disposed) this.publish(this.snapshot.state);
+      if (!this.disposed && revision === this.revision) {
+        this.pending = false;
+        this.publish(this.snapshot.state);
+      }
     }
     return true;
   }

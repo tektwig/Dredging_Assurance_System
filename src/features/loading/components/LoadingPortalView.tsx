@@ -1,26 +1,29 @@
 import type { ReactNode } from 'react';
 import type { LookupSnapshot } from '../utils/lookupController';
 import type { SavedRegistrationOutcome, SavedRegistrationReceipt, SiteContextState, StatisticsState } from '../types';
-import { operationalDateLabel, platePreview } from '../utils/operationalDate';
+import { operationalDateLabel } from '../utils/operationalDate';
+import { parseTonnage } from '../../offloading/utils/tonnage';
 
 type Props = {
   officerName: string;
   now: Date;
   site: SiteContextState;
   statistics: StatisticsState;
-  plate: string;
+  estimatedTonnage: string;
+  truckConfirmed: boolean;
   lookup: LookupSnapshot;
-  onPlateChange: (plate: string) => void;
   onLookup: () => void;
+  onConfirmTruck: () => void;
+  onEstimatedTonnageChange: (value: string) => void;
   onRetrySite: () => void;
   onRetryStatistics: () => void;
   driverPanel?: ReactNode;
+  registrationDialog?: ReactNode;
   capturePanel?: ReactNode;
   tripPanel?: ReactNode;
   tripStage?: string;
   lateOpenedTrip?: string | null;
   onDismissLateOpenedTrip?: () => void;
-  plateLocked?: boolean;
   savedRegistration?: SavedRegistrationOutcome | null;
   lateRegistration?: SavedRegistrationReceipt | null;
   onDismissLateRegistration?: () => void;
@@ -46,9 +49,10 @@ function Statistics({ state, retry }: { state: StatisticsState; retry: () => voi
   </div>;
 }
 
-function LookupResult({ lookup, onRetry, driverPanel, saved, onRetryRegistrationCheck }: {
+function LookupResult({ lookup, onRetry, driverPanel, saved, onRetryRegistrationCheck, confirmed, onConfirm }: {
   lookup: LookupSnapshot; onRetry: () => void; driverPanel?: ReactNode;
   saved?: SavedRegistrationOutcome | null; onRetryRegistrationCheck?: () => void;
+  confirmed: boolean; onConfirm: () => void;
 }) {
   const state = lookup.state;
   if (saved?.status === 'validating') return <div className="loading-result" role="status">
@@ -81,7 +85,7 @@ function LookupResult({ lookup, onRetry, driverPanel, saved, onRetryRegistration
   if (state.status === 'looking_up') return <div className="loading-result" role="status"><h3>Looking up truck…</h3>
     <p>Checking {state.plate} against the truck register.</p></div>;
   if (state.status === 'invalid_plate') return <div className="loading-result loading-result-warning" role="alert">
-    <h3>Check the plate number</h3><p>Enter a valid vehicle plate, then try again.</p></div>;
+    <h3>Plate not recognized</h3><p>Rescan the plate or try again.</p></div>;
   if (state.status === 'access_unavailable') return <div className="loading-result loading-result-warning" role="alert">
     <h3>Loading access unavailable</h3><p>Your account can no longer use truck lookup. Contact an administrator.</p></div>;
   if (state.status === 'site_unavailable') return <div className="loading-result loading-result-warning" role="alert">
@@ -100,7 +104,7 @@ function LookupResult({ lookup, onRetry, driverPanel, saved, onRetryRegistration
   </div>;
   if (state.status === 'inactive_driver') return <div className="loading-result loading-result-warning" role="alert">
     <h3>Regular driver inactive</h3><p>{state.driver.fullName} cannot drive this trip. Choose a different active driver.</p>
-    {driverPanel}
+    {!confirmed ? <button className="button" type="button" onClick={onConfirm}>Confirm Truck</button> : driverPanel}
   </div>;
   if (state.status === 'open_trip_exists') return <div className="loading-result loading-result-warning" role="alert">
     <h3>Open trip already exists</h3><p>{state.truck.registrationNumber} already has open trip <strong>{state.trip.tripNumber}</strong>.</p>
@@ -120,7 +124,7 @@ function LookupResult({ lookup, onRetry, driverPanel, saved, onRetryRegistration
       <div><dt>Regular driver</dt><dd>{state.driver.fullName}<span>{state.driver.phoneNumber}</span>
         {state.driver.email && <span>{state.driver.email}</span>}</dd></div>
     </dl>
-    {driverPanel}
+    {!confirmed ? <button className="button" type="button" onClick={onConfirm}>Confirm Truck</button> : driverPanel}
   </div>;
 }
 
@@ -138,7 +142,9 @@ function siteUnavailableMessage(site: SiteContextState): string {
 
 export function LoadingPortalView(props: Props) {
   const canProcess = props.site.status === 'ready';
-  const preview = platePreview(props.plate);
+  const canIdentifyDriver = props.lookup.state.status === 'known_ready' || props.lookup.state.status === 'inactive_driver';
+  const canEnterEstimate = props.truckConfirmed && canIdentifyDriver && !!props.driverPanel;
+  const validEstimate = parseTonnage(props.estimatedTonnage) !== null;
   return <div className="loading-portal">
     <header className="loading-heading">
       <div><p className="eyebrow">Truck Revenue Tracking System</p><h1>Loading Portal</h1>
@@ -148,7 +154,7 @@ export function LoadingPortalView(props: Props) {
       <div className="loading-date"><span>Operational date · Africa/Lagos</span><strong>{operationalDateLabel(props.now)}</strong></div>
     </header>
 
-    <section className="loading-work-card" aria-label="Manual truck lookup">
+    <section className="loading-work-card" aria-label="Scan plate and open trip">
       {props.lateOpenedTrip && <div className="loading-result loading-result-warning" role="alert">
         <strong>Trip {props.lateOpenedTrip} opened for a previous truck.</strong>
         <p>The response arrived after the workspace changed. Do not open that truck again. Check with Operations if needed.</p>
@@ -160,25 +166,20 @@ export function LoadingPortalView(props: Props) {
         <button className="button secondary" type="button" onClick={props.onDismissLateRegistration}>Dismiss notice</button>
       </div>}
       {canProcess ? <>
-        <div className="loading-section-heading"><h2>Process Truck</h2>
-          <p>Capture a plate image or enter the plate manually. Spaces and hyphens are accepted.</p></div>
+        <div className="loading-section-heading"><h2>Scan Plate</h2>
+          <p>Scan the vehicle plate to identify the truck.</p></div>
         {(!props.tripStage || !['submitting', 'ambiguous', 'success'].includes(props.tripStage)) && props.capturePanel}
-        <form className="loading-plate-form" onSubmit={event => { event.preventDefault(); props.onLookup(); }} aria-busy={props.lookup.pending}>
-          <label htmlFor="loading-plate">Vehicle Plate Number</label>
-          <div className="loading-entry-row">
-            <input id="loading-plate" name="plate" type="text" autoComplete="off" autoCapitalize="characters"
-              spellCheck={false} maxLength={64} placeholder="e.g. ABC-123" value={props.plate}
-              onChange={event => props.onPlateChange(event.target.value)} disabled={props.plateLocked} />
-            <button className="button" type="submit" disabled={props.plateLocked || props.lookup.pending || !props.plate.trim()}>
-              {props.lookup.pending ? 'Looking up…' : 'Find Truck'}
-            </button>
-          </div>
-          {props.plate.trim() && <p className="loading-plate-preview">Entered: <strong>{props.plate.trim()}</strong>
-            <span>Normalized preview: <strong>{preview || '—'}</strong></span></p>}
-        </form>
         {(!props.tripStage || props.tripStage === 'idle' || props.tripStage === 'site_changed' || props.tripStage === 'authorization')
           && <LookupResult lookup={props.lookup} onRetry={props.onLookup} driverPanel={props.driverPanel}
-            saved={props.savedRegistration} onRetryRegistrationCheck={props.onRetryRegistrationCheck} />}
+            saved={props.savedRegistration} onRetryRegistrationCheck={props.onRetryRegistrationCheck}
+            confirmed={props.truckConfirmed} onConfirm={props.onConfirmTruck} />}
+        {canEnterEstimate && <div className="loading-estimated-tonnage">
+          <label htmlFor="loading-estimated-tonnage">Estimated Tonnage (tonnes)</label>
+          <input id="loading-estimated-tonnage" type="text" inputMode="decimal" autoComplete="off"
+            placeholder="e.g. 12.50" value={props.estimatedTonnage}
+            onChange={event => props.onEstimatedTonnageChange(event.currentTarget.value)} />
+          {props.estimatedTonnage && !validEstimate && <p role="alert">Enter a quantity greater than 0, below 100000000, with no more than two decimal places.</p>}
+        </div>}
         {props.tripPanel}
       </> : <div className="loading-site-block" role={props.site.status === 'loading' ? 'status' : 'alert'}>
         <h2>{props.site.status === 'loading' ? 'Checking loading site' : 'Loading site unavailable'}</h2>
@@ -187,6 +188,7 @@ export function LoadingPortalView(props: Props) {
           onClick={props.onRetrySite}>Recheck assignment</button>}
       </div>}
     </section>
+    {props.registrationDialog}
 
     <section className="loading-stat-section" aria-label="Today’s Loading activity">
       <div className="loading-section-heading"><h2>Today’s activity</h2><p>Figures for your Loading work. Open Trips includes older open trips.</p></div>

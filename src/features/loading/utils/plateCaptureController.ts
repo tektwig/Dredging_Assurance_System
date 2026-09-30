@@ -14,6 +14,11 @@ export class PlateOcrError extends Error {
 }
 
 export type ProcessedPlateImage = { image: Blob; candidate: string; confidence: number | null };
+export type PlateOcrProvider = {
+  recognize: (file: File, report: (phase: PlateOcrPhase) => void) => Promise<ProcessedPlateImage>;
+  dispose: () => void;
+  resume: () => void;
+};
 
 export class PlateCaptureController {
   private state: PlateCaptureState = { status: 'idle' };
@@ -22,7 +27,7 @@ export class PlateCaptureController {
 
   constructor(
     private readonly actorId: string,
-    private readonly processImage: (file: File, report: (phase: PlateOcrPhase) => void) => Promise<ProcessedPlateImage>,
+    private readonly provider: PlateOcrProvider,
     private readonly notify: (state: PlateCaptureState) => void,
     private readonly prefill: (plate: string) => void,
     private readonly newUuid: () => string = () => crypto.randomUUID(),
@@ -36,7 +41,7 @@ export class PlateCaptureController {
     this.notify(state);
   }
   clear() { this.revision++; this.publish({ status: 'idle' }); }
-  // Editing while OCR runs must prevent a late result from replacing manual text.
+  // A newer scan attempt must prevent an older OCR result from being published.
   cancelPending() { if (this.state.status === 'processing') this.clear(); }
   async capture(file: File): Promise<void> {
     if (this.disposed) return;
@@ -45,7 +50,7 @@ export class PlateCaptureController {
     const capturedAt = this.now();
     this.publish({ status: 'processing', phase: 'preparing_image' });
     try {
-      const result = await this.processImage(file, phase => {
+      const result = await this.provider.recognize(file, phase => {
         if (!this.disposed && revision === this.revision) this.publish({ status: 'processing', phase });
       });
       if (this.disposed || revision !== this.revision) return;

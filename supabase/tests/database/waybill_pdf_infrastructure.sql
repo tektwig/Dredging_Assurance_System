@@ -78,11 +78,11 @@ select set_config('request.jwt.claim.sub','fd000000-0000-0000-0000-000000000002'
 insert into pdf_state values('opened_one',public.create_loading_trip_v2(
  'fd400000-0000-0000-0000-000000000001','PDF-101','fd200000-0000-0000-0000-000000000001',
  (select id from public.user_site_assignments where profile_id=auth.uid() and ended_at is null),
- 'MANUAL',clock_timestamp()));
+ 'MANUAL',clock_timestamp(),16.00));
 insert into pdf_state values('opened_two',public.create_loading_trip_v2(
  'fd400000-0000-0000-0000-000000000002','PDF-202','fd200000-0000-0000-0000-000000000002',
  (select id from public.user_site_assignments where profile_id=auth.uid() and ended_at is null),
- 'MANUAL',clock_timestamp()));
+ 'MANUAL',clock_timestamp(),17.00));
 select set_config('request.jwt.claim.sub','fd000000-0000-0000-0000-000000000003',true);
 insert into pdf_state values('closed_one',public.close_trip_v2(
  'fd500000-0000-0000-0000-000000000001',

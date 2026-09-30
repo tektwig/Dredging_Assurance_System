@@ -13,7 +13,7 @@ export type OpenTripState =
 
 function key(review: OpenTripReview): string {
   return JSON.stringify([review.plate, review.truck.id, review.actualDriver.id,
-    review.site.assignmentId, review.makeRegular, review.capture?.id ?? null]);
+    review.site.assignmentId, review.makeRegular, review.estimatedQuantityTonnes, review.capture.id]);
 }
 
 function snapshot(review: OpenTripReview): OpenTripReview {
@@ -21,7 +21,7 @@ function snapshot(review: OpenTripReview): OpenTripReview {
     truck: Object.freeze({ ...review.truck }),
     actualDriver: Object.freeze({ ...review.actualDriver }),
     site: Object.freeze({ ...review.site }),
-    capture: review.capture ? Object.freeze({ ...review.capture }) : undefined,
+    capture: Object.freeze({ ...review.capture }),
   });
 }
 
@@ -41,7 +41,7 @@ export class OpenTripController {
     private readonly siteChanged: () => void,
     private readonly accessLost: () => void,
     private readonly newUuid: () => string = () => crypto.randomUUID(),
-    private readonly now: () => string = () => new Date().toISOString(),
+    _now: () => string = () => new Date().toISOString(),
     private readonly staleSuccess?: (result: OpenTripSuccess) => void,
   ) {}
 
@@ -74,7 +74,7 @@ export class OpenTripController {
     if (this.pending || this.disposed || !this.candidate) return;
     if (this.state.status !== 'review' && this.state.status !== 'ambiguous') return;
     const request = this.request ?? Object.freeze({
-      requestId: this.newUuid(), capturedAt: this.candidate.capture?.capturedAt ?? this.now(), review: this.candidate,
+      requestId: this.newUuid(), capturedAt: this.candidate.capture.capturedAt, review: this.candidate,
     });
     this.request = request;
     const revision = this.revision;

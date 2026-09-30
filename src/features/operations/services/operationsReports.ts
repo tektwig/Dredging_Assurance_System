@@ -27,7 +27,8 @@ export type OperationsReportExport = {
 const reportColumns: Record<OperationsReportKind, readonly [string, string][]> = {
   trips: [['trip_number', 'Trip #'], ['truck_plate', 'Truck'], ['driver_name', 'Driver'],
     ['loading_site', 'Loading Site'], ['offloading_site', 'Offloading Site'], ['opened_at', 'Opened At'],
-    ['closed_at', 'Closed At'], ['cancelled_at', 'Cancelled At'], ['tonnage_tonnes', 'Tonnage'], ['status', 'Status']],
+    ['closed_at', 'Closed At'], ['cancelled_at', 'Cancelled At'], ['estimated_tonnage_tonnes', 'Estimated Tonnage'],
+    ['tonnage_tonnes', 'Actual Tonnage'], ['status', 'Status']],
   performance: [['label', 'Truck / Driver / Site'], ['trip_count', 'Trips'], ['closed_count', 'Closed Trips'],
     ['tonnage_tonnes', 'Tonnage']],
   waybills: [['invoice_number', 'Waybill #'], ['trip_number', 'Trip #'], ['truck_plate', 'Truck'],
@@ -58,7 +59,8 @@ function validateRows(kind: OperationsReportKind, value: unknown): value is Repo
   if (!Array.isArray(value)) return false;
   const keys: Record<OperationsReportKind, readonly string[]> = {
     trips: ['trip_id', 'trip_number', 'truck_id', 'truck_plate', 'driver_id', 'driver_name', 'loading_site_id',
-      'loading_site', 'offloading_site_id', 'offloading_site', 'opened_at', 'closed_at', 'cancelled_at', 'tonnage_tonnes', 'status'],
+      'loading_site', 'offloading_site_id', 'offloading_site', 'opened_at', 'closed_at', 'cancelled_at',
+      'estimated_tonnage_tonnes', 'tonnage_tonnes', 'status'],
     performance: ['entity_id', 'label', 'trip_count', 'closed_count', 'tonnage_tonnes'],
     waybills: ['invoice_id', 'invoice_number', 'trip_number', 'truck_plate', 'driver_name', 'tonnage_tonnes',
       'issued_at', 'pdf_status', 'driver_delivery_status', 'internal_delivery_status', 'payout_status'],

@@ -1,13 +1,13 @@
 import type { ReactNode } from 'react';
-import { operationalDateLabel, platePreview } from '../../loading/utils/operationalDate';
+import { operationalDateLabel } from '../../loading/utils/operationalDate';
 import type { OffloadingLookupSnapshot } from '../utils/offloadingLookupController';
 import type { ClosureState } from '../utils/closureController';
 import type { OffloadingStatisticsState } from '../types';
 
-type Props = { officerName: string; plate: string; lookup: OffloadingLookupSnapshot;
+type Props = { officerName: string; lookup: OffloadingLookupSnapshot;
   closure: ClosureState; closurePanel: ReactNode; capturePanel: ReactNode;
   statistics: OffloadingStatisticsState; now: Date; onRetryStatistics: () => void;
-  onPlateChange: (plate: string) => void; onLookup: () => void; onReset: () => void };
+  onLookup: () => void; onReset: () => void };
 
 export function OffloadingStatistics({ state, retry }: { state: OffloadingStatisticsState; retry: () => void }) {
   if (state.status === 'loading') return <p className="loading-note" role="status">Loading today's figures…</p>;
@@ -30,12 +30,11 @@ export function OffloadingStatistics({ state, retry }: { state: OffloadingStatis
   </div>;
 }
 
-export function OffloadingPortalView({ officerName, plate, lookup, capturePanel,
-  closure, closurePanel, statistics, now, onRetryStatistics, onPlateChange, onLookup, onReset }: Props) {
+export function OffloadingPortalView({ officerName, lookup, capturePanel,
+  closure, closurePanel, statistics, now, onRetryStatistics, onLookup, onReset }: Props) {
   const state = lookup.state;
   const locked = closure.status !== 'idle';
   const showCapture = closure.status === 'idle';
-  const showLookup = closure.status === 'idle';
   return <div className="loading-portal offloading-portal">
     <header className="loading-heading">
       <div><p className="eyebrow">Truck Revenue Tracking System</p><h1>Offloading Portal</h1>
@@ -46,31 +45,14 @@ export function OffloadingPortalView({ officerName, plate, lookup, capturePanel,
       <div className="loading-date"><span>Operational date · Africa/Lagos</span>
         <strong>{operationalDateLabel(now)}</strong></div>
     </header>
-    <section className="loading-work-card" aria-label="Find open trip">
-      <div className="loading-section-heading"><h2>Find Open Trip</h2>
-        <p>Scan or enter the vehicle plate. Confirm it before finding the trip.</p></div>
+    <section className="loading-work-card" aria-label="Scan plate and find open trip">
+      <div className="loading-section-heading"><h2>Scan Plate</h2>
+        <p>Scan the vehicle plate to find its open trip.</p></div>
       {showCapture && capturePanel}
-      {showLookup && <>
-      <form className="loading-plate-form" onSubmit={event => { event.preventDefault(); onLookup(); }}
-        aria-busy={lookup.pending}>
-        <label htmlFor="offloading-plate">Vehicle Plate Number</label>
-        <div className="loading-entry-row">
-          <input id="offloading-plate" name="plate" type="text" autoComplete="off"
-            autoCapitalize="characters" spellCheck={false} maxLength={64}
-            value={plate} onChange={event => onPlateChange(event.target.value)}
-            placeholder="e.g. ABC-123" />
-          <button type="submit" className="button" disabled={lookup.pending || !plate.trim()}>
-            {lookup.pending ? 'Finding trip…' : 'Find Open Trip'}
-          </button>
-        </div>
-        {plate.trim() && <p className="loading-plate-preview">Confirmed plate: <strong>{plate.trim()}</strong>
-          <span>Normalized preview: <strong>{platePreview(plate)}</strong></span></p>}
-      </form>
-      </>}
       {state.status === 'looking_up' && <div className="loading-result" role="status">
         <h3>Finding open trip…</h3><p>Checking the confirmed plate.</p></div>}
       {state.status === 'invalid_plate' && <div className="loading-result loading-result-warning" role="alert">
-        <h3>Check the plate number</h3><p>Correct the plate and try again.</p></div>}
+        <h3>Plate not recognized</h3><p>Rescan the plate or try again.</p></div>}
       {state.status === 'no_open_trip' && <div className="loading-result loading-result-warning" role="alert">
         <h3>No open trip</h3><p>No OPEN trip was found for {state.plate}. Contact Operations before offloading.</p>
       </div>}
@@ -93,6 +75,8 @@ export function OffloadingPortalView({ officerName, plate, lookup, capturePanel,
           <div><dt>Loading site</dt><dd>{state.trip.loadingSiteName}</dd></div>
           <div><dt>Opened</dt><dd>{new Date(state.trip.openedAt).toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}</dd></div>
           <div><dt>Offloading site</dt><dd>{state.assignment.siteName}</dd></div>
+          <div><dt>Estimated Tonnage</dt><dd>{state.trip.estimatedQuantityTonnes === null
+            ? 'Estimate not recorded for this trip' : `${state.trip.estimatedQuantityTonnes.toFixed(2)} tonnes`}</dd></div>
         </dl>
       </div>}
       {closurePanel}

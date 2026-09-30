@@ -332,8 +332,10 @@ const viewProps = {
   officerName: 'Officer', now: new Date('2026-09-24T10:00:00Z'),
   site: { status: 'ready', site: { assignmentId: 'assignment-1', siteId: 'site-1', siteName: 'Loading Yard' } },
   statistics: { status: 'ready', statistics: { tripsOpened: 0, openTrips: 0, tripsClosed: 0, trucksProcessed: 0 } },
-  plate: 'NEW-123', lookup: { state: { status: 'unknown_truck', plate: 'NEW-123' }, pending: false },
-  onPlateChange() {}, onLookup() {}, onRetrySite() {}, onRetryStatistics() {},
+  plate: 'NEW-123', manualEntry: false, estimatedTonnage: '', truckConfirmed: false,
+  lookup: { state: { status: 'unknown_truck', plate: 'NEW-123' }, pending: false },
+  onPlateChange() {}, onLookup() {}, onConfirmTruck() {}, onEstimatedTonnageChange() {},
+  onRetrySite() {}, onRetryStatistics() {},
 };
 const renderSaved = saved => renderToStaticMarkup(React.createElement(LoadingPortalView,
   { ...viewProps, savedRegistration: saved }));
@@ -480,3 +482,18 @@ assert.equal(replacementState.selected.driver.id, 'replacement-driver');
 assert.equal(replacementState.selected.makeRegular, false);
 assert.equal(replacementState.form.accountNumber, '');
 console.log('PASS saved truck with inactive regular driver can register a replacement');
+
+const { RegistrationDialog } = load('src/features/loading/components/RegistrationDialog.tsx');
+const modalMarkup = renderToStaticMarkup(React.createElement(RegistrationDialog, { open: true, onCancel() {} },
+  React.createElement('form', { id: 'loading-driver-registration' }, React.createElement('input', { autoFocus: true }))));
+assert.match(modalMarkup, /<dialog[^>]*aria-label="Register truck and driver"/);
+assert.match(modalMarkup, /loading-driver-registration/);
+const modalSource = readFileSync(resolve('src/features/loading/components/RegistrationDialog.tsx'), 'utf8');
+assert(modalSource.includes('showModal()') && modalSource.includes('querySelector<HTMLElement>(\'input, button\')?.focus()'));
+assert(modalSource.includes('onCancel={event =>') && modalSource.includes('element.close()'));
+assert(readFileSync(resolve('src/features/loading/loading.css'), 'utf8').includes('.loading-registration-dialog::backdrop'));
+const loadingSource = readFileSync(resolve('src/features/loading/LoadingPortal.tsx'), 'utf8');
+assert(loadingSource.includes('driverController.cancelRegistration()'));
+assert(loadingSource.includes('driverController.submitRegistration()'));
+assert(loadingSource.includes('RegistrationDialog open'));
+console.log('PASS native modal overlay, focus, Escape/cancel, dimmed inert background and reused registration workflow');

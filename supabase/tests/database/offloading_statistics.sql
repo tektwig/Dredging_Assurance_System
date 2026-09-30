@@ -92,7 +92,7 @@ select set_config('request.jwt.claim.sub','e0000000-0000-0000-0000-000000000002'
 insert into statistics_state values('open_one',public.create_loading_trip_v2(
  'e4000000-0000-0000-0000-000000000001','STAT-101','e2000000-0000-0000-0000-000000000001',
  (select id from public.user_site_assignments where profile_id=auth.uid() and ended_at is null),
- 'MANUAL',clock_timestamp()));
+ 'MANUAL',clock_timestamp(),10.00));
 select set_config('request.jwt.claim.sub','e0000000-0000-0000-0000-000000000003',true);
 insert into statistics_state values('closed_a',public.close_trip_v2(
  'e5000000-0000-0000-0000-000000000001',(select (v#>>'{trip,id}')::uuid from statistics_state where k='open_one'),
@@ -102,7 +102,7 @@ select set_config('request.jwt.claim.sub','e0000000-0000-0000-0000-000000000002'
 insert into statistics_state values('open_two',public.create_loading_trip_v2(
  'e4000000-0000-0000-0000-000000000002','STAT-101','e2000000-0000-0000-0000-000000000001',
  (select id from public.user_site_assignments where profile_id=auth.uid() and ended_at is null),
- 'MANUAL',clock_timestamp()));
+ 'MANUAL',clock_timestamp(),11.00));
 select set_config('request.jwt.claim.sub','e0000000-0000-0000-0000-000000000003',true);
 insert into statistics_state values('closed_b',public.close_trip_v2(
  'e5000000-0000-0000-0000-000000000002',(select (v#>>'{trip,id}')::uuid from statistics_state where k='open_two'),
@@ -112,7 +112,7 @@ select set_config('request.jwt.claim.sub','e0000000-0000-0000-0000-000000000002'
 insert into statistics_state values('open_three',public.create_loading_trip_v2(
  'e4000000-0000-0000-0000-000000000003','STAT-202','e2000000-0000-0000-0000-000000000001',
  (select id from public.user_site_assignments where profile_id=auth.uid() and ended_at is null),
- 'MANUAL',clock_timestamp()));
+ 'MANUAL',clock_timestamp(),12.00));
 select set_config('request.jwt.claim.sub','e0000000-0000-0000-0000-000000000003',true);
 insert into statistics_state values('closed_outside_day',public.close_trip_v2(
  'e5000000-0000-0000-0000-000000000003',(select (v#>>'{trip,id}')::uuid from statistics_state where k='open_three'),
@@ -122,7 +122,7 @@ select set_config('request.jwt.claim.sub','e0000000-0000-0000-0000-000000000002'
 insert into statistics_state values('open_four',public.create_loading_trip_v2(
  'e4000000-0000-0000-0000-000000000004','STAT-303','e2000000-0000-0000-0000-000000000001',
  (select id from public.user_site_assignments where profile_id=auth.uid() and ended_at is null),
- 'MANUAL',clock_timestamp()));
+ 'MANUAL',clock_timestamp(),13.00));
 select set_config('request.jwt.claim.sub','e0000000-0000-0000-0000-000000000004',true);
 insert into statistics_state values('closed_other_officer',public.close_trip_v2(
  'e5000000-0000-0000-0000-000000000004',(select (v#>>'{trip,id}')::uuid from statistics_state where k='open_four'),
@@ -132,7 +132,7 @@ select set_config('request.jwt.claim.sub','e0000000-0000-0000-0000-000000000002'
 insert into statistics_state values('open_five',public.create_loading_trip_v2(
  'e4000000-0000-0000-0000-000000000005','STAT-404','e2000000-0000-0000-0000-000000000001',
  (select id from public.user_site_assignments where profile_id=auth.uid() and ended_at is null),
- 'MANUAL',clock_timestamp()));
+ 'MANUAL',clock_timestamp(),14.00));
 select pg_temp.statistics_assert((select bool_and(v->>'ok'='true')
   from statistics_state where k like 'closed_%')
   and (select bool_and(v->>'ok'='true') from statistics_state where k like 'open_%'),

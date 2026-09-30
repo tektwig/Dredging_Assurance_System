@@ -84,11 +84,11 @@ select set_config('request.jwt.claim.sub','f9000000-0000-0000-0000-000000000002'
 insert into waybill_state values('opened_bank',public.create_loading_trip_v2(
  'f9400000-0000-0000-0000-000000000001','WB-101','f9200000-0000-0000-0000-000000000001',
  (select id from public.user_site_assignments where profile_id=auth.uid() and ended_at is null),
- 'MANUAL',clock_timestamp()));
+ 'MANUAL',clock_timestamp(),15.00));
 insert into waybill_state values('opened_missing',public.create_loading_trip_v2(
  'f9400000-0000-0000-0000-000000000002','WB-202','f9200000-0000-0000-0000-000000000002',
  (select id from public.user_site_assignments where profile_id=auth.uid() and ended_at is null),
- 'MANUAL',clock_timestamp()));
+ 'MANUAL',clock_timestamp(),14.00));
 select pg_temp.waybill_assert((select count(*)=2 from waybill_state where v->>'ok'='true'),
   'both trips opened through loading contract');
 select set_config('request.jwt.claim.sub','f9000000-0000-0000-0000-000000000003',true);
@@ -230,7 +230,7 @@ select set_config('request.jwt.claim.sub','f9000000-0000-0000-0000-000000000002'
 insert into waybill_state values('opened_blank_names',public.create_loading_trip_v2(
   'f9400000-0000-0000-0000-000000000003','WB-101','f9200000-0000-0000-0000-000000000001',
   (select id from public.user_site_assignments where profile_id=auth.uid() and ended_at is null),
-  'MANUAL',clock_timestamp()));
+  'MANUAL',clock_timestamp(),13.00));
 select pg_temp.waybill_assert((select v->>'ok'='true' from waybill_state where k='opened_blank_names'),
   'blank-name test trip opens');
 select set_config('request.jwt.claim.sub','f9000000-0000-0000-0000-000000000003',true);

@@ -61,7 +61,8 @@ const detail = {
     loading_site_id: tripRow.loading_site_id, loading_site_name: 'Snapshot Loading Site', opened_at: timestamp,
     loading_officer: { ...officer, role: 'loading_officer' }, offloading_site_id: 'site-2',
     offloading_site_name: 'Snapshot Offloading Site', closed_at: tripRow.closed_at,
-    quantity_tonnes: 12.5, offloading_officer: officer, cancelled_at: null, cancelled_officer: null,
+    quantity_tonnes: 12.5, estimated_quantity_tonnes: 10.25,
+    offloading_officer: officer, cancelled_at: null, cancelled_officer: null,
   },
   waybill: { invoice_number: 'INV-2026-000001', issued_at: timestamp, pdf_status: 'ready' },
   payout: { status: 'pending', created_at: timestamp, payment_ready_at: timestamp, paid_at: null },
@@ -168,6 +169,8 @@ assert(!closedHtml.includes('Cancel open trip'));
 assert(!closedHtml.includes('Edit Trip'));
 assert(!closedHtml.includes('account_number'));
 assert(!closedHtml.includes('description'));
+assert(closedHtml.includes('Estimated tonnage') && closedHtml.includes('10.25 tonnes')
+  && closedHtml.includes('12.50 tonnes'));
 const openTripDetail = { ...detail, trip: { ...detail.trip, status: 'open', closed_at: null,
   offloading_site_id: null, offloading_site_name: null, quantity_tonnes: null,
   offloading_officer: null, cancelled_at: null, cancelled_officer: null }, waybill: null, payout: null, exceptions: [] };
