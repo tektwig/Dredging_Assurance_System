@@ -20,6 +20,29 @@ export type AnalyticsOption = { id: string; label: string; is_active: boolean };
 export type AnalyticsOptionPage = { kind: AnalyticsOptionKind; items: AnalyticsOption[]; hasMore: boolean };
 
 type NullableNumber = number | null;
+export type AnalyticsDriverDailyPoint = {
+  date: string;
+  trips_opened: number;
+  trips_closed: number;
+  actual_tonnage_tonnes: number;
+  average_tonnage_per_trip_tonnes: NullableNumber;
+  average_tonnage_trip_count: number;
+  average_turnaround_seconds: NullableNumber;
+  average_turnaround_trip_count: number;
+};
+export type AnalyticsPeriodSummary = {
+  period_start: string;
+  period_end: string;
+  trips_opened: number;
+  trips_closed: number;
+  outstanding_at_period_end: number;
+  outstanding_excluded_unassigned_offloading_site_count: number;
+  actual_tonnage_tonnes: number;
+  average_tonnage_per_trip_tonnes: NullableNumber;
+  average_tonnage_trip_count: number;
+  average_turnaround_seconds: NullableNumber;
+  average_turnaround_trip_count: number;
+};
 export type AnalyticsStatus = {
   denominator: number;
   slices: Array<{ status: string; count: number; share: number }>;
@@ -83,6 +106,16 @@ export type OperationsAnalyticsData = {
       paired_trip_count: number;
     }>;
   };
+  driver_performance_daily: {
+    selected_driver_id: string | null;
+    days: AnalyticsDriverDailyPoint[];
+  };
+  period_summaries: {
+    weekly: AnalyticsPeriodSummary[];
+    monthly: AnalyticsPeriodSummary[];
+    outstanding_definition: 'open_at_end_of_last_included_lagos_operational_date';
+    offloading_site_filter_scope: 'all_matching_trips' | 'excludes_unassigned_at_period_end';
+  };
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -139,9 +172,99 @@ function parseStatus(value: unknown, statuses: readonly string[]): AnalyticsStat
   return { denominator: value.denominator, slices };
 }
 
+function expectedBuckets(start: string, end: string, granularity: 'week' | 'month') {
+  const buckets: Array<{ period_start: string; period_end: string; natural_start: string }> = [];
+  const cursor = new Date(`${start}T00:00:00.000Z`);
+  const finalDate = new Date(`${end}T00:00:00.000Z`);
+  while (cursor <= finalDate) {
+    const date = cursor.toISOString().slice(0, 10);
+    const natural = new Date(cursor);
+    if (granularity === 'week') natural.setUTCDate(natural.getUTCDate() - ((natural.getUTCDay() + 6) % 7));
+    else natural.setUTCDate(1);
+    const naturalStart = natural.toISOString().slice(0, 10);
+    const bucket = buckets.at(-1);
+    if (!bucket || bucket.natural_start !== naturalStart) {
+      buckets.push({ period_start: date, period_end: date, natural_start: naturalStart });
+    } else bucket.period_end = date;
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return buckets.map(({ period_start, period_end }) => ({ period_start, period_end }));
+}
+
+function parseDriverDaily(value: unknown, rangeStart: string, rangeEnd: string): OperationsAnalyticsData['driver_performance_daily'] {
+  const days = Math.floor((Date.parse(`${rangeEnd}T00:00:00Z`) - Date.parse(`${rangeStart}T00:00:00Z`)) / 86_400_000) + 1;
+  if (!isRecord(value) || !exactKeys(value, ['selected_driver_id', 'days'])
+    || !(value.selected_driver_id === null || typeof value.selected_driver_id === 'string')
+    || !Array.isArray(value.days) || value.days.length > 90
+    || (value.selected_driver_id === null && value.days.length !== 0)
+    || (value.selected_driver_id !== null && value.days.length !== days)) invalid();
+  const rows = value.days.map((row, index) => {
+    if (!isRecord(row) || !exactKeys(row, ['date', 'trips_opened', 'trips_closed', 'actual_tonnage_tonnes',
+      'average_tonnage_per_trip_tonnes', 'average_tonnage_trip_count', 'average_turnaround_seconds',
+      'average_turnaround_trip_count']) || !dateOnly(row.date) || !safeCount(row.trips_opened)
+      || !safeCount(row.trips_closed) || !safeNonNegative(row.actual_tonnage_tonnes)
+      || !safeNullableNumber(row.average_tonnage_per_trip_tonnes)
+      || (row.average_tonnage_per_trip_tonnes !== null && !safeNonNegative(row.average_tonnage_per_trip_tonnes))
+      || !safeCount(row.average_tonnage_trip_count) || row.average_tonnage_trip_count > row.trips_closed
+      || (row.average_tonnage_trip_count === 0) !== (row.average_tonnage_per_trip_tonnes === null)
+      || !safeNullableNumber(row.average_turnaround_seconds)
+      || (row.average_turnaround_seconds !== null && !safeNonNegative(row.average_turnaround_seconds))
+      || !safeCount(row.average_turnaround_trip_count) || row.average_turnaround_trip_count > row.trips_closed
+      || (row.average_turnaround_trip_count === 0) !== (row.average_turnaround_seconds === null)) invalid();
+    const expectedDate = new Date(Date.parse(`${rangeStart}T00:00:00Z`) + index * 86_400_000).toISOString().slice(0, 10);
+    if (row.date !== expectedDate) invalid();
+    return {
+      date: row.date, trips_opened: row.trips_opened, trips_closed: row.trips_closed,
+      actual_tonnage_tonnes: row.actual_tonnage_tonnes,
+      average_tonnage_per_trip_tonnes: row.average_tonnage_per_trip_tonnes,
+      average_tonnage_trip_count: row.average_tonnage_trip_count,
+      average_turnaround_seconds: row.average_turnaround_seconds,
+      average_turnaround_trip_count: row.average_turnaround_trip_count,
+    };
+  });
+  return { selected_driver_id: value.selected_driver_id, days: rows };
+}
+
+function parsePeriodSummary(value: unknown, expected: Array<{ period_start: string; period_end: string }>, scope: string): AnalyticsPeriodSummary[] {
+  if (!Array.isArray(value) || value.length !== expected.length || value.length > 14) invalid();
+  return value.map((row, index) => {
+    if (!isRecord(row) || !exactKeys(row, ['period_start', 'period_end', 'trips_opened', 'trips_closed',
+      'outstanding_at_period_end', 'outstanding_excluded_unassigned_offloading_site_count', 'actual_tonnage_tonnes',
+      'average_tonnage_per_trip_tonnes', 'average_tonnage_trip_count', 'average_turnaround_seconds',
+      'average_turnaround_trip_count'])
+      || !dateOnly(row.period_start) || !dateOnly(row.period_end)
+      || row.period_start !== expected[index].period_start || row.period_end !== expected[index].period_end
+      || !safeCount(row.trips_opened) || !safeCount(row.trips_closed)
+      || !safeCount(row.outstanding_at_period_end)
+      || !safeCount(row.outstanding_excluded_unassigned_offloading_site_count)
+      || !safeNonNegative(row.actual_tonnage_tonnes)
+      || !safeNullableNumber(row.average_tonnage_per_trip_tonnes)
+      || (row.average_tonnage_per_trip_tonnes !== null && !safeNonNegative(row.average_tonnage_per_trip_tonnes))
+      || !safeCount(row.average_tonnage_trip_count) || row.average_tonnage_trip_count > row.trips_closed
+      || (row.average_tonnage_trip_count === 0) !== (row.average_tonnage_per_trip_tonnes === null)
+      || !safeNullableNumber(row.average_turnaround_seconds)
+      || (row.average_turnaround_seconds !== null && !safeNonNegative(row.average_turnaround_seconds))
+      || !safeCount(row.average_turnaround_trip_count) || row.average_turnaround_trip_count > row.trips_closed
+      || (row.average_turnaround_trip_count === 0) !== (row.average_turnaround_seconds === null)
+      || (scope === 'excludes_unassigned_at_period_end'
+        ? row.outstanding_at_period_end !== 0
+        : row.outstanding_excluded_unassigned_offloading_site_count !== 0)) invalid();
+    return {
+      period_start: row.period_start, period_end: row.period_end, trips_opened: row.trips_opened,
+      trips_closed: row.trips_closed, outstanding_at_period_end: row.outstanding_at_period_end,
+      outstanding_excluded_unassigned_offloading_site_count: row.outstanding_excluded_unassigned_offloading_site_count,
+      actual_tonnage_tonnes: row.actual_tonnage_tonnes,
+      average_tonnage_per_trip_tonnes: row.average_tonnage_per_trip_tonnes,
+      average_tonnage_trip_count: row.average_tonnage_trip_count,
+      average_turnaround_seconds: row.average_turnaround_seconds,
+      average_turnaround_trip_count: row.average_turnaround_trip_count,
+    };
+  });
+}
+
 export function parseOperationsAnalytics(value: unknown): OperationsAnalyticsData {
   const rootKeys = ['as_of', 'range_start', 'range_end', 'time_zone', 'period', 'kpis', 'trips_trend',
-    'tonnage_trend', 'performance', 'status_distributions', 'variance'];
+    'tonnage_trend', 'performance', 'status_distributions', 'variance', 'driver_performance_daily', 'period_summaries'];
   if (!isRecord(value) || !exactKeys(value, rootKeys) || !timestamp(value.as_of)
     || !dateOnly(value.range_start) || !dateOnly(value.range_end) || value.range_start > value.range_end
     || value.time_zone !== 'Africa/Lagos' || !ANALYTICS_PERIODS.includes(value.period as AnalyticsPeriod)) invalid();
@@ -231,6 +354,16 @@ export function parseOperationsAnalytics(value: unknown): OperationsAnalyticsDat
       total_variance_tonnes: row.total_variance_tonnes, paired_trip_count: row.paired_trip_count };
   });
 
+  const driverPerformanceDaily = parseDriverDaily(value.driver_performance_daily, value.range_start, value.range_end);
+  const periodSummaries = value.period_summaries;
+  if (!isRecord(periodSummaries) || !exactKeys(periodSummaries, [
+    'weekly', 'monthly', 'outstanding_definition', 'offloading_site_filter_scope',
+  ]) || periodSummaries.outstanding_definition !== 'open_at_end_of_last_included_lagos_operational_date'
+    || !['all_matching_trips', 'excludes_unassigned_at_period_end'].includes(String(periodSummaries.offloading_site_filter_scope))) invalid();
+  const summaryScope = periodSummaries.offloading_site_filter_scope as OperationsAnalyticsData['period_summaries']['offloading_site_filter_scope'];
+  const weeklySummary = parsePeriodSummary(periodSummaries.weekly, expectedBuckets(value.range_start, value.range_end, 'week'), summaryScope);
+  const monthlySummary = parsePeriodSummary(periodSummaries.monthly, expectedBuckets(value.range_start, value.range_end, 'month'), summaryScope);
+
   return {
     as_of: value.as_of, range_start: value.range_start, range_end: value.range_end,
     time_zone: 'Africa/Lagos', period: value.period as AnalyticsPeriod,
@@ -256,6 +389,12 @@ export function parseOperationsAnalytics(value: unknown): OperationsAnalyticsDat
       paired_trip_count: variance.paired_trip_count,
       estimate_coverage: variance.estimate_coverage,
       daily: varianceDaily, trucks: varianceTrucks,
+    },
+    driver_performance_daily: driverPerformanceDaily,
+    period_summaries: {
+      weekly: weeklySummary, monthly: monthlySummary,
+      outstanding_definition: periodSummaries.outstanding_definition,
+      offloading_site_filter_scope: summaryScope,
     },
   };
 }

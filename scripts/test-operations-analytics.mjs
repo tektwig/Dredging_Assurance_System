@@ -92,13 +92,54 @@ const response = {
       label: `TRK-${index}`, average_variance_tonnes: index === 0 ? -3 : 2,
       total_variance_tonnes: index === 0 ? -6 : 2, paired_trip_count: 2 })),
   },
+  driver_performance_daily: {
+    selected_driver_id: 'driver-analytics',
+    days: days.map((date, index) => ({ date, trips_opened: index + 1, trips_closed: index === 1 ? 1 : 0,
+      actual_tonnage_tonnes: index === 1 ? 8 : 0,
+      average_tonnage_per_trip_tonnes: index === 1 ? 8 : null, average_tonnage_trip_count: index === 1 ? 1 : 0,
+      average_turnaround_seconds: index === 1 ? 3600 : null, average_turnaround_trip_count: index === 1 ? 1 : 0 })),
+  },
+  period_summaries: {
+    weekly: [
+      { period_start: '2026-09-26', period_end: '2026-09-27', trips_opened: 2, trips_closed: 1,
+        outstanding_at_period_end: 3, outstanding_excluded_unassigned_offloading_site_count: 0,
+        actual_tonnage_tonnes: 8, average_tonnage_per_trip_tonnes: 8, average_tonnage_trip_count: 1,
+        average_turnaround_seconds: 3600, average_turnaround_trip_count: 1 },
+      { period_start: '2026-09-28', period_end: '2026-10-02', trips_opened: 3, trips_closed: 2,
+        outstanding_at_period_end: 4, outstanding_excluded_unassigned_offloading_site_count: 0,
+        actual_tonnage_tonnes: 12, average_tonnage_per_trip_tonnes: 6, average_tonnage_trip_count: 2,
+        average_turnaround_seconds: 7200, average_turnaround_trip_count: 2 },
+    ],
+    monthly: [
+      { period_start: '2026-09-26', period_end: '2026-09-30', trips_opened: 4, trips_closed: 2,
+        outstanding_at_period_end: 3, outstanding_excluded_unassigned_offloading_site_count: 0,
+        actual_tonnage_tonnes: 16, average_tonnage_per_trip_tonnes: 8, average_tonnage_trip_count: 2,
+        average_turnaround_seconds: 5400, average_turnaround_trip_count: 2 },
+      { period_start: '2026-10-01', period_end: '2026-10-02', trips_opened: 1, trips_closed: 1,
+        outstanding_at_period_end: 4, outstanding_excluded_unassigned_offloading_site_count: 0,
+        actual_tonnage_tonnes: 4, average_tonnage_per_trip_tonnes: 4, average_tonnage_trip_count: 1,
+        average_turnaround_seconds: 3600, average_turnaround_trip_count: 1 },
+    ],
+    outstanding_definition: 'open_at_end_of_last_included_lagos_operational_date',
+    offloading_site_filter_scope: 'all_matching_trips',
+  },
 };
 
 const service = load('src/features/operations/services/operationsAnalytics.ts');
 const parsed = service.parseOperationsAnalytics(response);
 assert.equal(parsed.variance.paired_trip_count, 7);
 assert.equal(parsed.tonnage_trend[1].estimated_tonnage_tonnes, null);
+assert.equal(parsed.driver_performance_daily.days[1].actual_tonnage_tonnes, 8,
+  'actual output remains present for a closed trip whose estimate is unavailable');
+assert.equal(parsed.driver_performance_daily.days[1].average_tonnage_trip_count, 1);
+assert.equal(parsed.period_summaries.weekly[0].period_start, '2026-09-26');
+assert.equal(parsed.period_summaries.weekly[1].period_end, '2026-10-02');
+assert.equal(parsed.period_summaries.monthly[0].period_end, '2026-09-30');
 assert.equal(parsed.status_distributions.payout.denominator, 12);
+const noSelectedDriver = service.parseOperationsAnalytics({ ...response,
+  driver_performance_daily: { selected_driver_id: null, days: [] },
+});
+assert.equal(noSelectedDriver.driver_performance_daily.days.length, 0);
 assert.throws(() => service.parseOperationsAnalytics({ ...response, bank_name: 'Unexpected field' }), /Invalid/);
 assert.throws(() => service.parseOperationsAnalytics({ ...response, tonnage_trend: [
   { ...response.tonnage_trend[1], actual_tonnage_tonnes: 0 }, ...response.tonnage_trend.slice(1),
@@ -109,14 +150,42 @@ assert.throws(() => service.parseOperationsAnalytics({ ...response, status_distr
 assert.throws(() => service.parseOperationsAnalytics({ ...response, performance: {
   ...response.performance, items: [{ ...response.performance.items[0], phone: 'private' }, ...response.performance.items.slice(1)],
 } }), /Invalid/);
-console.log('PASS strict Analytics response schema, explicit NULL estimates, denominators, and privacy fields');
+assert.throws(() => service.parseOperationsAnalytics({ ...response, driver_performance_daily: {
+  ...response.driver_performance_daily,
+  days: response.driver_performance_daily.days.map((row, index) => index === 1
+    ? { ...row, average_tonnage_trip_count: 0 } : row),
+} }), /Invalid/);
+assert.throws(() => service.parseOperationsAnalytics({ ...response, period_summaries: {
+  ...response.period_summaries,
+  offloading_site_filter_scope: 'excludes_unassigned_at_period_end',
+} }), /Invalid/);
+assert.throws(() => service.parseOperationsAnalytics({ ...response, period_summaries: {
+  ...response.period_summaries, weekly: response.period_summaries.weekly.slice(1),
+} }), /Invalid/);
+console.log('PASS strict Analytics response schema, NULL-estimate actuals, bucket coverage, denominators, and privacy fields');
 
 calls.length = 0;
-const filters = { period: 'custom', date_from: days[0], date_to: days.at(-1), truck_id: 'truck-id' };
+for (const period of ['7_days', '30_days', '90_days']) {
+  calls.length = 0;
+  await service.loadOperationsAnalytics({ period, driver_id: 'driver-analytics' }, 'truck', 'trips');
+  assert.deepEqual(calls[0], { name: 'get_operations_analytics', args: {
+    p_filters: { period, driver_id: 'driver-analytics' },
+    p_performance_dimension: 'truck', p_performance_metric: 'trips',
+  } }, `${period} preset sends no custom dates`);
+}
+
+calls.length = 0;
+const filters = { period: 'custom', date_from: days[0], date_to: days.at(-1), loading_site_id: 'loading-site-id',
+  offloading_site_id: 'offloading-site-id', truck_id: 'truck-id', driver_id: 'driver-id' };
 assert.equal((await service.loadOperationsAnalytics(filters, 'offloading_site', 'average_turnaround')).range_start, days[0]);
 assert.deepEqual(calls[0], { name: 'get_operations_analytics', args: {
   p_filters: filters, p_performance_dimension: 'offloading_site', p_performance_metric: 'average_turnaround',
 } });
+const callsBeforeInvalidRanges = calls.length;
+await assert.rejects(() => service.loadOperationsAnalytics({ period: '7_days', date_from: days[0], date_to: days.at(-1) }, 'truck', 'trips'),
+  /Preset Analytics ranges do not accept custom dates/);
+await assert.rejects(() => service.loadOperationsAnalytics({ period: 'custom' }, 'truck', 'trips'), /Choose a valid custom date range/);
+assert.equal(calls.length, callsBeforeInvalidRanges, 'invalid range contracts are rejected before an RPC request');
 await assert.rejects(() => service.loadOperationsAnalytics({ ...filters, unexpected: 'raw' }, 'truck', 'trips'), /Invalid Analytics filters/);
 rpcHandler = async () => ({ data: { kind: 'truck', items: [{ id: 'truck-1', label: 'TRK-1', is_active: false }], has_more: false }, error: null });
 const options = await service.loadOperationsAnalyticsOptions('truck', 'TRK-1');
@@ -130,7 +199,8 @@ console.log('PASS server RPC arguments, bounded filter options, inactive entity 
 const view = load('src/features/operations/analytics/OperationsAnalytics.tsx');
 const viewProps = {
   filters: { period: '7_days' }, options: {}, selectedOptions: {}, optionsLoading: {}, optionsError: {},
-  today: days.at(-1), dimension: 'truck', metric: 'trips', onChangeFilters() {}, onSearchOptions() {},
+  today: days.at(-1), dimension: 'truck', metric: 'trips', summaryGranularity: 'weekly',
+  onSummaryGranularity() {}, onChangeFilters() {}, onSearchOptions() {},
   onSelectOption() {}, onRetryOptions() {}, onResetFilters() {}, onDimension() {}, onMetric() {}, onRetry() {},
 };
 const render = state => renderToStaticMarkup(React.createElement(router.MemoryRouter, null,
@@ -140,17 +210,40 @@ assert.match(render({ status: 'error' }), /Unable to load Operations Analytics/)
 const ready = render({ status: 'ready', data: parsed });
 for (const label of ['Analytics Centre', 'Total Trips', 'Actual Tonnage', 'Avg Tonnage / Trip',
   'Avg Turnaround Time', 'Avg Tonnage Variance', 'Trips Opened vs Closed', 'Estimated vs Actual Tonnage',
-  'Performance', 'Status Distribution', 'Signed Variance Over Time', 'Average Signed Variance by Truck',
+  'Driver Performance', 'Weekly / Monthly Summary', 'Outstanding at Period End',
+  'Trips Opened', 'Trips Closed', 'Performance', 'Status Distribution', 'Signed Variance Over Time', 'Average Signed Variance by Truck',
   'View daily trip trend data table', 'View estimated and actual tonnage data table',
+  'View daily driver performance data table', 'View weekly operational summary data table',
   'View performance data table', 'View trip status data table', 'View daily signed variance data table']) {
   assert(ready.includes(label), `Analytics ready view should include ${label}`);
 }
 assert(ready.includes('Denominator: 20 matching records'));
 assert(ready.includes('Unavailable'));
 assert(ready.includes('role="img"'));
+assert(ready.includes('aria-pressed="true">Weekly</button>'));
 assert(ready.includes('Africa/Lagos'));
 assert(!ready.includes('ANALYTICS-SECRET'));
-console.log('PASS Analytics loading/error/ready states, KPI cards, visualization families, denominators, and tabular alternatives');
+const monthly = renderToStaticMarkup(React.createElement(router.MemoryRouter, null,
+  React.createElement(view.OperationsAnalyticsView, { ...viewProps, summaryGranularity: 'monthly',
+    state: { status: 'ready', data: parsed } })));
+assert(monthly.includes('aria-pressed="true">Monthly</button>'));
+assert(monthly.includes('2026'));
+const offloadingScopeData = service.parseOperationsAnalytics({ ...response, period_summaries: {
+  ...response.period_summaries,
+  weekly: response.period_summaries.weekly.map(row => ({ ...row,
+    outstanding_at_period_end: 0, outstanding_excluded_unassigned_offloading_site_count: 2,
+  })),
+  monthly: response.period_summaries.monthly.map(row => ({ ...row,
+    outstanding_at_period_end: 0, outstanding_excluded_unassigned_offloading_site_count: 2,
+  })),
+  offloading_site_filter_scope: 'excludes_unassigned_at_period_end',
+} });
+const offloadingScopeHtml = render({ status: 'ready', data: offloadingScopeData });
+assert(offloadingScopeHtml.includes('no offloading site assigned at period end'));
+assert(offloadingScopeHtml.includes('Unassigned excluded'));
+const noDriverHtml = render({ status: 'ready', data: noSelectedDriver });
+assert(noDriverHtml.includes('Select a driver in the global filters'));
+console.log('PASS Analytics loading/error states, driver daily panel, weekly/monthly toggle, denominators, and accessible tables');
 
 const navigation = load('src/routing/roleRoutes.ts');
 assert.deepEqual(navigation.OPERATIONS_NAVIGATION.map(item => item.label), [

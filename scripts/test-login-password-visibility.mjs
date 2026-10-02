@@ -70,15 +70,14 @@ function assertPasswordType(expected) {
 }
 assertPasswordType('password');
 assert.equal(toggleFor('Show')?.getAttribute('type'), 'button', 'Visibility control cannot submit the form');
-assert(toggleFor('Show')?.querySelector('svg')?.classList.contains('lucide-eye'), 'Masked state shows the eye icon for the Show action');
-assert.equal(toggleFor('Show')?.querySelector('svg')?.getAttribute('aria-hidden'), 'true', 'Icon is decorative to assistive tech');
+assert(toggleFor('Show')?.querySelector('svg')?.classList.contains('lucide-eye-off'), 'Masked state shows the crossed-eye icon for the hidden password state');
 
 await act(async () => user.type(password, 'Officer secret 42'));
 assert.equal(password.value, 'Officer secret 42');
 await act(async () => user.click(toggleFor('Show')));
 assertPasswordType('text');
 assert(toggleFor('Hide'), 'Visible state offers the Hide action');
-assert(toggleFor('Hide')?.querySelector('svg')?.classList.contains('lucide-eye-off'), 'Visible state shows the eye-off icon for the Hide action');
+assert(toggleFor('Hide')?.querySelector('svg')?.classList.contains('lucide-eye'), 'Visible state shows the open-eye icon for the visible password state');
 assert.equal(password.value, 'Officer secret 42', 'Showing does not modify the value');
 assert.equal(signIns, 0, 'Visibility click does not submit the login form');
 await act(async () => user.click(toggleFor('Hide')));

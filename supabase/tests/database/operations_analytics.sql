@@ -24,7 +24,9 @@ select pg_temp.analytics_assert(
     and not has_function_privilege('anon','public.get_operations_analytics(jsonb,text,text)','EXECUTE')
     and not has_function_privilege('service_role','public.get_operations_analytics(jsonb,text,text)','EXECUTE')
     and not has_function_privilege('anon','public.get_operations_analytics_filter_options(text,text,integer)','EXECUTE')
-    and not has_function_privilege('service_role','public.get_operations_analytics_filter_options(text,text,integer)','EXECUTE'),
+    and not has_function_privilege('service_role','public.get_operations_analytics_filter_options(text,text,integer)','EXECUTE')
+    and not has_function_privilege('authenticated','private.get_operations_analytics_base(jsonb,text,text)','EXECUTE')
+    and not has_function_privilege('authenticated','private.operations_analytics_period_summaries(jsonb)','EXECUTE'),
   'Analytics RPCs are Operations-authorized and authenticated-only');
 
 insert into auth.users(id,email,raw_user_meta_data) values
@@ -63,6 +65,14 @@ select ('d5000000-0000-0000-0000-'||lpad(n::text,12,'0'))::uuid,
   date '2000-01-01',timestamp with time zone '2000-01-01 10:00 Africa/Lagos',
   'd1000000-0000-0000-0000-000000000001'
 from generate_series(1,17) as series(n);
+insert into public.daily_registrations(id,truck_id,initial_driver_id,operational_date,registered_at,registered_by)
+values
+ ('d5000000-0000-0000-0000-000000000018','d4000000-0000-0000-0000-000000000001',
+  'd3000000-0000-0000-0000-000000000001',date '1999-12-31',timestamp with time zone '1999-12-31 10:00 Africa/Lagos',
+  'd1000000-0000-0000-0000-000000000001'),
+ ('d5000000-0000-0000-0000-000000000019','d4000000-0000-0000-0000-000000000002',
+  'd3000000-0000-0000-0000-000000000001',date '1999-12-31',timestamp with time zone '1999-12-31 10:00 Africa/Lagos',
+  'd1000000-0000-0000-0000-000000000001');
 alter table public.daily_registrations enable trigger user;
 
 alter table public.trips disable trigger user;
@@ -98,7 +108,19 @@ values
   'd2000000-0000-0000-0000-000000000001','d2000000-0000-0000-0000-000000000003','closed',99.00,1.00,
   timestamp with time zone '2000-01-01 15:00 Africa/Lagos','d1000000-0000-0000-0000-000000000001',
   timestamp with time zone '2000-01-02 00:00 Africa/Lagos','d1000000-0000-0000-0000-000000000001',
-  null,null,null,'ANL-017','Analytics Driver One');
+  null,null,null,'ANL-017','Analytics Driver One'),
+ ('d6000000-0000-0000-0000-000000000018','ANL-LEGACY-CLOSE-AFTER-RANGE','d4000000-0000-0000-0000-000000000001',
+  'd3000000-0000-0000-0000-000000000001','d5000000-0000-0000-0000-000000000018',
+  'd2000000-0000-0000-0000-000000000001','d2000000-0000-0000-0000-000000000003','closed',6.50,null,
+  timestamp with time zone '1999-12-31 20:00 Africa/Lagos','d1000000-0000-0000-0000-000000000001',
+  timestamp with time zone '2000-01-02 00:00 Africa/Lagos','d1000000-0000-0000-0000-000000000001',
+  null,null,null,'ANL-001','Analytics Driver One'),
+ ('d6000000-0000-0000-0000-000000000019','ANL-LEGACY-CANCEL-AFTER-RANGE','d4000000-0000-0000-0000-000000000002',
+  'd3000000-0000-0000-0000-000000000001','d5000000-0000-0000-0000-000000000019',
+  'd2000000-0000-0000-0000-000000000001',null,'cancelled',null,null,
+  timestamp with time zone '1999-12-31 21:00 Africa/Lagos','d1000000-0000-0000-0000-000000000001',
+  null,null,timestamp with time zone '2000-01-02 00:00 Africa/Lagos','d1000000-0000-0000-0000-000000000001',
+  'TEST-BOUNDARY','ANL-002','Analytics Driver One');
 insert into public.trips(id,trip_number,truck_id,driver_id,daily_registration_id,loading_site_id,offloading_site_id,
   status,quantity_tonnes,estimated_quantity_tonnes,opened_at,opened_by,closed_at,closed_by,
   truck_registration_at_loading,driver_name_at_loading)
@@ -149,8 +171,21 @@ select set_config('request.jwt.claim.sub','d1000000-0000-0000-0000-000000000001'
 insert into analytics_results values ('custom',public.get_operations_analytics(
   '{"period":"custom","date_from":"2000-01-01","date_to":"2000-01-01"}','truck','trips'));
 insert into analytics_results values ('filtered',public.get_operations_analytics(
-  '{"period":"custom","date_from":"2000-01-01","date_to":"2000-01-01","truck_id":"d4000000-0000-0000-0000-000000000012"}',
+  '{"period":"custom","date_from":"2000-01-01","date_to":"2000-01-01","loading_site_id":"d2000000-0000-0000-0000-000000000001","offloading_site_id":"d2000000-0000-0000-0000-000000000003","truck_id":"d4000000-0000-0000-0000-000000000012","driver_id":"d3000000-0000-0000-0000-000000000002"}',
   'driver','average_tonnage'));
+insert into analytics_results values ('driver_daily',public.get_operations_analytics(
+  '{"period":"custom","date_from":"2000-01-01","date_to":"2000-01-01","driver_id":"d3000000-0000-0000-0000-000000000001"}',
+  'driver','trips'));
+insert into analytics_results values ('summary_range',public.get_operations_analytics(
+  '{"period":"custom","date_from":"1999-12-30","date_to":"2000-02-02"}','truck','trips'));
+insert into analytics_results values ('offloading_filtered',public.get_operations_analytics(
+  '{"period":"custom","date_from":"2000-01-01","date_to":"2000-01-01","offloading_site_id":"d2000000-0000-0000-0000-000000000003"}',
+  'truck','trips'));
+insert into analytics_results values ('max_range',public.get_operations_analytics(
+  '{"period":"custom","date_from":"2000-01-01","date_to":"2000-03-30"}','truck','trips'));
+insert into analytics_results values ('preset_7',public.get_operations_analytics('{"period":"7_days"}','truck','trips'));
+insert into analytics_results values ('preset_30',public.get_operations_analytics('{"period":"30_days"}','truck','trips'));
+insert into analytics_results values ('preset_90',public.get_operations_analytics('{"period":"90_days"}','truck','trips'));
 insert into analytics_results values ('options_truck',public.get_operations_analytics_filter_options('truck','ANL-012',50));
 insert into analytics_results values ('options_driver',public.get_operations_analytics_filter_options('driver','Inactive Analytics',50));
 insert into analytics_results values ('options_site',public.get_operations_analytics_filter_options('offloading_site','Inactive Analytics',100));
@@ -171,6 +206,66 @@ select pg_temp.analytics_assert((value#>>'{kpis,variance_trip_count}')::integer=
   and abs((value#>>'{kpis,estimate_coverage}')::numeric-(13.0/14))<0.000001,
   'variance is signed actual minus estimate and NULL estimates are excluded from the paired denominator')
 from analytics_results where key='custom';
+select pg_temp.analytics_assert((value#>>'{period_summaries,weekly,0,period_start}')::date=date '2000-01-01'
+  and (value#>>'{period_summaries,weekly,0,period_end}')::date=date '2000-01-01'
+  and (value#>>'{period_summaries,weekly,0,trips_opened}')::integer=17
+  and (value#>>'{period_summaries,weekly,0,trips_closed}')::integer=14
+  and (value#>>'{period_summaries,weekly,0,outstanding_at_period_end}')::integer=4
+  and (value#>>'{period_summaries,weekly,0,actual_tonnage_tonnes}')::numeric=32.5
+  and (value#>>'{period_summaries,weekly,0,average_tonnage_trip_count}')::integer=14
+  and (value#>>'{period_summaries,monthly,0,average_turnaround_trip_count}')::integer=14,
+  'weekly and monthly summaries preserve clipped buckets, output-only tonnage, samples, and historical end-of-day outstanding')
+from analytics_results where key='custom';
+select pg_temp.analytics_assert((value#>>'{driver_performance_daily,selected_driver_id}')='d3000000-0000-0000-0000-000000000001'
+  and jsonb_array_length(value#>'{driver_performance_daily,days}')=1
+  and (value#>>'{driver_performance_daily,days,0,trips_opened}')::integer=16
+  and (value#>>'{driver_performance_daily,days,0,trips_closed}')::integer=13
+  and (value#>>'{driver_performance_daily,days,0,actual_tonnage_tonnes}')::numeric=31.5
+  and abs((value#>>'{driver_performance_daily,days,0,average_tonnage_per_trip_tonnes}')::numeric-(31.5/13))<0.000001
+  and (value#>>'{driver_performance_daily,days,0,average_tonnage_trip_count}')::integer=13
+  and (value#>>'{driver_performance_daily,days,0,average_turnaround_trip_count}')::integer=13,
+  'driver daily production includes actual quantity when estimate is NULL and returns separate average denominators')
+from analytics_results where key='driver_daily';
+select pg_temp.analytics_assert(jsonb_array_length(value#>'{period_summaries,weekly}')=6
+  and (value#>>'{period_summaries,weekly,0,period_start}')::date=date '1999-12-30'
+  and (value#>>'{period_summaries,weekly,0,period_end}')::date=date '2000-01-02'
+  and (value#>>'{period_summaries,weekly,1,period_start}')::date=date '2000-01-03'
+  and (value#>>'{period_summaries,weekly,1,trips_opened}')::integer=0
+  and (value#>>'{period_summaries,weekly,1,trips_closed}')::integer=0
+  and (value#>>'{period_summaries,weekly,1,outstanding_at_period_end}')::integer=1
+  and (value#>>'{period_summaries,weekly,5,period_start}')::date=date '2000-01-31'
+  and (value#>>'{period_summaries,weekly,5,period_end}')::date=date '2000-02-02'
+  and jsonb_array_length(value#>'{period_summaries,monthly}')=3
+  and (value#>>'{period_summaries,monthly,0,period_end}')::date=date '1999-12-31'
+  and (value#>>'{period_summaries,monthly,1,period_start}')::date=date '2000-01-01'
+  and (value#>>'{period_summaries,monthly,2,period_start}')::date=date '2000-02-01',
+  'Lagos weekly and monthly buckets preserve empty periods and partial month/year boundaries')
+from analytics_results where key='summary_range';
+select pg_temp.analytics_assert(jsonb_array_length(value->'trips_trend')=90
+  and jsonb_array_length(value#>'{period_summaries,weekly}')<=14
+  and jsonb_array_length(value#>'{period_summaries,monthly}')=3,
+  'a valid inclusive 90-day range yields bounded daily, weekly, and monthly datasets')
+from analytics_results where key='max_range';
+select pg_temp.analytics_assert(value->>'period'='7_days'
+  and (value->>'range_end')::date-(value->>'range_start')::date=6
+  and jsonb_array_length(value->'trips_trend')=7,
+  '7-day preset is accepted and produces a seven-day range')
+from analytics_results where key='preset_7';
+select pg_temp.analytics_assert(value->>'period'='30_days'
+  and (value->>'range_end')::date-(value->>'range_start')::date=29
+  and jsonb_array_length(value->'trips_trend')=30,
+  '30-day preset is accepted and produces a thirty-day range')
+from analytics_results where key='preset_30';
+select pg_temp.analytics_assert(value->>'period'='90_days'
+  and (value->>'range_end')::date-(value->>'range_start')::date=89
+  and jsonb_array_length(value->'trips_trend')=90,
+  '90-day preset is accepted and produces a ninety-day range')
+from analytics_results where key='preset_90';
+select pg_temp.analytics_assert((value#>>'{period_summaries,weekly,0,outstanding_at_period_end}')::integer=0
+  and (value#>>'{period_summaries,weekly,0,outstanding_excluded_unassigned_offloading_site_count}')::integer=4
+  and value#>>'{period_summaries,offloading_site_filter_scope}'='excludes_unassigned_at_period_end',
+  'offloading-site filtered outstanding excludes open trips without an as-of site and exposes the excluded count')
+from analytics_results where key='offloading_filtered';
 select pg_temp.analytics_assert(jsonb_array_length(value->'trips_trend')=1
   and (value#>>'{trips_trend,0,opened}')::integer=17
   and (value#>>'{trips_trend,0,closed}')::integer=14
@@ -215,6 +310,10 @@ select pg_temp.analytics_error($q$select public.get_operations_analytics(
   '{"period":"custom","date_from":"2000-01-01","date_to":"2000-04-01"}','truck','trips')$q$,'22023');
 select pg_temp.analytics_error($q$select public.get_operations_analytics(
   '{"period":"90_days","date_from":"2000-01-01"}','truck','trips')$q$,'22023');
+select pg_temp.analytics_error($q$select public.get_operations_analytics(
+  '{"period":"30_days","date_from":"2000-01-01","date_to":"2000-01-30"}','truck','trips')$q$,'22023');
+select pg_temp.analytics_error($q$select public.get_operations_analytics(
+  '{"period":"custom"}','truck','trips')$q$,'22023');
 select pg_temp.analytics_error($q$select public.get_operations_analytics(
   '{"period":"custom","date_from":"2000-02-01","date_to":"2000-01-01"}','truck','trips')$q$,'22023');
 select pg_temp.analytics_error($q$select public.get_operations_analytics(

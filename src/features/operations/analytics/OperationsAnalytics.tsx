@@ -7,7 +7,8 @@ import {
 } from '../services/operationsAnalytics';
 import { AnalyticsGlobalFilters } from './components/AnalyticsGlobalFilters';
 import {
-  AnalyticsKpiGrid, AnalyticsPerformance, AnalyticsStatusDistribution, AnalyticsTrends, AnalyticsVariance,
+  AnalyticsDriverPerformance, AnalyticsKpiGrid, AnalyticsPerformance, AnalyticsPeriodSummaries,
+  AnalyticsStatusDistribution, AnalyticsTrends, AnalyticsVariance,
 } from './components/AnalyticsVisualizations';
 import './analytics.css';
 
@@ -32,14 +33,15 @@ function formatTimestamp(value: string): string {
 }
 
 export function OperationsAnalyticsView({ state, filters, options, selectedOptions, optionsLoading, optionsError,
-  today, dimension, metric, onChangeFilters, onSearchOptions, onSelectOption, onRetryOptions,
-  onResetFilters, onDimension, onMetric, onRetry }: {
+  today, dimension, metric, summaryGranularity, onChangeFilters, onSearchOptions, onSelectOption, onRetryOptions,
+  onResetFilters, onDimension, onMetric, onSummaryGranularity, onRetry }: {
   state: LoadState; filters: AnalyticsFilters;
   options: Partial<Record<AnalyticsOptionKind, AnalyticsOptionPage>>;
   selectedOptions: Partial<Record<AnalyticsOptionKind, AnalyticsOption>>;
   optionsLoading: Partial<Record<AnalyticsOptionKind, boolean>>;
   optionsError: Partial<Record<AnalyticsOptionKind, string>>;
   today: string; dimension: PerformanceDimension; metric: PerformanceMetric;
+  summaryGranularity: 'weekly' | 'monthly';
   onChangeFilters: (filters: AnalyticsFilters) => void;
   onSearchOptions: (kind: AnalyticsOptionKind, search: string) => void | (() => void);
   onSelectOption: (kind: AnalyticsOptionKind, option: AnalyticsOption | null) => void;
@@ -47,6 +49,7 @@ export function OperationsAnalyticsView({ state, filters, options, selectedOptio
   onResetFilters: () => void;
   onDimension: (dimension: PerformanceDimension) => void;
   onMetric: (metric: PerformanceMetric) => void;
+  onSummaryGranularity: (value: 'weekly' | 'monthly') => void;
   onRetry: () => void;
 }) {
   const readyData = state.status === 'ready' ? state.data : null;
@@ -68,6 +71,8 @@ export function OperationsAnalyticsView({ state, filters, options, selectedOptio
     {readyData && <div className="analytics-results">
       <AnalyticsKpiGrid data={readyData} />
       <AnalyticsTrends data={readyData} />
+      <AnalyticsDriverPerformance data={readyData} driverLabel={selectedOptions.driver?.label} />
+      <AnalyticsPeriodSummaries data={readyData} granularity={summaryGranularity} onGranularity={onSummaryGranularity} />
       <AnalyticsPerformance data={readyData} dimension={dimension} metric={metric}
         onDimension={onDimension} onMetric={onMetric} />
       <AnalyticsStatusDistribution data={readyData} />
@@ -81,6 +86,7 @@ export function OperationsAnalytics() {
   const [filters, setFilters] = useState<AnalyticsFilters>({ period: '30_days' });
   const [dimension, setDimension] = useState<PerformanceDimension>('truck');
   const [metric, setMetric] = useState<PerformanceMetric>('trips');
+  const [summaryGranularity, setSummaryGranularity] = useState<'weekly' | 'monthly'>('weekly');
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [options, setOptions] = useState<Partial<Record<AnalyticsOptionKind, AnalyticsOptionPage>>>({});
@@ -153,7 +159,9 @@ export function OperationsAnalytics() {
 
   return <OperationsAnalyticsView state={state} filters={filters} options={options} selectedOptions={selectedOptions}
     optionsLoading={optionsLoading} optionsError={optionsError} today={todayInLagos()}
-    dimension={dimension} metric={metric} onChangeFilters={changePeriod} onSearchOptions={searchOptions}
+    dimension={dimension} metric={metric} summaryGranularity={summaryGranularity}
+    onChangeFilters={changePeriod} onSearchOptions={searchOptions}
     onSelectOption={selectOption} onRetryOptions={kind => searchOptions(kind, '')} onResetFilters={resetFilters}
-    onDimension={setDimension} onMetric={setMetric} onRetry={() => setRevision(value => value + 1)} />;
+    onDimension={setDimension} onMetric={setMetric} onSummaryGranularity={setSummaryGranularity}
+    onRetry={() => setRevision(value => value + 1)} />;
 }

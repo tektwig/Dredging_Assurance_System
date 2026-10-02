@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import type {
-  AnalyticsStatus, OperationsAnalyticsData, PerformanceDimension, PerformanceMetric,
+  AnalyticsPeriodSummary, AnalyticsStatus, OperationsAnalyticsData, PerformanceDimension, PerformanceMetric,
 } from '../../services/operationsAnalytics';
 
 const COLORS = ['#125b59', '#d39e42', '#4978a4', '#8a6795', '#5a8b67', '#bf735b'];
@@ -117,6 +117,163 @@ export function AnalyticsTrends({ data }: { data: OperationsAnalyticsData }) {
       </table></TableDetails>
     </article>
   </section>;
+}
+
+const driverMetricOptions = [
+  { key: 'trips_opened', label: 'Trips Opened', unit: 'count' },
+  { key: 'trips_closed', label: 'Trips Closed', unit: 'count' },
+  { key: 'actual_tonnage_tonnes', label: 'Actual Tonnage', unit: 'tonnes' },
+  { key: 'average_tonnage_per_trip_tonnes', label: 'Average Actual Tonnage / Trip', unit: 'tonnes' },
+  { key: 'average_turnaround_seconds', label: 'Average Turnaround Time', unit: 'seconds' },
+] as const;
+type DriverMetricKey = typeof driverMetricOptions[number]['key'];
+
+function driverMetricValue(key: DriverMetricKey, value: number | null): string {
+  if (value === null) return 'No data';
+  if (key === 'trips_opened' || key === 'trips_closed') return value.toLocaleString('en-NG');
+  return key === 'average_turnaround_seconds' ? hours(value) : tonnes(value);
+}
+
+export function AnalyticsDriverPerformance({ data, driverLabel }: {
+  data: OperationsAnalyticsData; driverLabel?: string;
+}) {
+  const [metric, setMetric] = useState<DriverMetricKey>('trips_opened');
+  const selected = data.driver_performance_daily.selected_driver_id !== null;
+  const days = data.driver_performance_daily.days;
+  const option = driverMetricOptions.find(item => item.key === metric) ?? driverMetricOptions[0];
+  const formatAxis = (value: number) => option.unit === 'count'
+    ? value.toLocaleString('en-NG') : option.unit === 'seconds'
+      ? `${(value / 3600).toLocaleString('en-NG', { maximumFractionDigits: 1 })}h`
+      : value.toLocaleString('en-NG', { maximumFractionDigits: 1 });
+  return <article className="card analytics-panel">
+    <header><p className="eyebrow">Driver Performance · daily</p><h2>{driverLabel || 'Selected Driver'}</h2>
+      <p className="muted small">Daily trip counts use their event dates. Actual tonnage and averages use trips closed on each date; estimates are not used.</p></header>
+    {!selected ? <p className="list-state" role="status">Select a driver in the global filters to view daily performance.</p> : <>
+      <div className="analytics-chart-controls">
+        <label>Daily measure<select value={metric} onChange={event => setMetric(event.currentTarget.value as DriverMetricKey)}>
+          {driverMetricOptions.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}
+        </select></label>
+      </div>
+      <figure aria-labelledby="analytics-driver-daily-title">
+        <figcaption id="analytics-driver-daily-title" className="visually-hidden">
+          {driverLabel || 'Selected driver'} daily {option.label.toLowerCase()}
+        </figcaption>
+        <div className="analytics-chart" role="img" aria-label={`Daily ${option.label.toLowerCase()} for ${driverLabel || 'selected driver'} by Africa/Lagos operational date`}>
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={days} margin={{ top: 12, right: 16, bottom: 4, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" tickFormatter={(value: string) => value.slice(5)} minTickGap={24} />
+              <YAxis tickFormatter={formatAxis} allowDecimals={option.unit !== 'count'} />
+              <Tooltip labelFormatter={value => typeof value === 'string' ? dateLabel(value) : String(value ?? '')}
+                formatter={value => driverMetricValue(metric, typeof value === 'number' ? value : null)} />
+              <Line type="linear" dataKey={metric} name={option.label} stroke="#125b59" strokeWidth={2} dot={false} connectNulls={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </figure>
+      <TableDetails title="daily driver performance"><table><caption>Daily performance for {driverLabel || 'selected driver'} in Africa/Lagos</caption>
+        <thead><tr><th scope="col">Date</th><th scope="col">Trips opened</th><th scope="col">Trips closed</th>
+          <th scope="col">Actual tonnes</th><th scope="col">Average actual tonnes / trip</th><th scope="col">Tonnage sample</th>
+          <th scope="col">Average turnaround</th><th scope="col">Turnaround sample</th></tr></thead>
+        <tbody>{days.map(row => <tr key={row.date}><th scope="row">{dateLabel(row.date)}</th>
+          <td>{row.trips_opened.toLocaleString('en-NG')}</td><td>{row.trips_closed.toLocaleString('en-NG')}</td>
+          <td>{tonnes(row.actual_tonnage_tonnes)}</td><td>{tonnes(row.average_tonnage_per_trip_tonnes)}</td>
+          <td>{row.average_tonnage_trip_count.toLocaleString('en-NG')}</td><td>{hours(row.average_turnaround_seconds)}</td>
+          <td>{row.average_turnaround_trip_count.toLocaleString('en-NG')}</td></tr>)}</tbody>
+      </table></TableDetails>
+    </>}
+  </article>;
+}
+
+const summaryMetricOptions = [
+  { key: 'trips_opened', label: 'Trips Opened', unit: 'count' },
+  { key: 'trips_closed', label: 'Trips Closed', unit: 'count' },
+  { key: 'outstanding_at_period_end', label: 'Outstanding at Period End', unit: 'count' },
+  { key: 'actual_tonnage_tonnes', label: 'Actual Tonnage', unit: 'tonnes' },
+  { key: 'average_tonnage_per_trip_tonnes', label: 'Average Tonnage / Trip', unit: 'tonnes' },
+  { key: 'average_turnaround_seconds', label: 'Average Turnaround Time', unit: 'seconds' },
+] as const;
+type SummaryMetricKey = typeof summaryMetricOptions[number]['key'];
+
+function summaryMetricValue(key: SummaryMetricKey, value: number | null): string {
+  if (value === null) return 'No data';
+  if (key === 'trips_opened' || key === 'trips_closed' || key === 'outstanding_at_period_end') {
+    return value.toLocaleString('en-NG');
+  }
+  return key === 'average_turnaround_seconds' ? hours(value) : tonnes(value);
+}
+
+function periodSpan(row: AnalyticsPeriodSummary): string {
+  return row.period_start === row.period_end
+    ? dateLabel(row.period_start) : `${dateLabel(row.period_start)} – ${dateLabel(row.period_end)}`;
+}
+
+export function AnalyticsPeriodSummaries({ data, granularity, onGranularity }: {
+  data: OperationsAnalyticsData;
+  granularity: 'weekly' | 'monthly';
+  onGranularity: (value: 'weekly' | 'monthly') => void;
+}) {
+  const [metric, setMetric] = useState<SummaryMetricKey>('trips_opened');
+  const rows = data.period_summaries[granularity];
+  const option = summaryMetricOptions.find(item => item.key === metric) ?? summaryMetricOptions[0];
+  const showOffloadingNote = data.period_summaries.offloading_site_filter_scope === 'excludes_unassigned_at_period_end';
+  const formatAxis = (value: number) => option.unit === 'count'
+    ? value.toLocaleString('en-NG') : option.unit === 'seconds'
+      ? `${(value / 3600).toLocaleString('en-NG', { maximumFractionDigits: 1 })}h`
+      : value.toLocaleString('en-NG', { maximumFractionDigits: 1 });
+  return <article className="card analytics-panel">
+    <header><p className="eyebrow">Operational summaries · Africa/Lagos</p><h2>Weekly / Monthly Summary</h2>
+      <p className="muted small">Opened and closed are event counts. Outstanding is the open-trip balance at the end of the last included operational date.</p>
+      {showOffloadingNote && <p className="analytics-filter-note" role="note">
+        The Offloading Site filter excludes outstanding trips that had no offloading site assigned at period end. The excluded count is shown per bucket.
+      </p>}
+    </header>
+    <div className="analytics-summary-controls" role="group" aria-label="Summary grouping">
+      <button type="button" className={`button ${granularity === 'weekly' ? 'primary' : 'secondary'}`}
+        aria-pressed={granularity === 'weekly'} onClick={() => onGranularity('weekly')}>Weekly</button>
+      <button type="button" className={`button ${granularity === 'monthly' ? 'primary' : 'secondary'}`}
+        aria-pressed={granularity === 'monthly'} onClick={() => onGranularity('monthly')}>Monthly</button>
+    </div>
+    <div className="analytics-chart-controls">
+      <label>Summary measure<select value={metric} onChange={event => setMetric(event.currentTarget.value as SummaryMetricKey)}>
+        {summaryMetricOptions.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}
+      </select></label>
+    </div>
+    <figure aria-labelledby="analytics-summary-chart-title">
+      <figcaption id="analytics-summary-chart-title" className="visually-hidden">
+        {granularity} {option.label.toLowerCase()} for selected period
+      </figcaption>
+      <div className="analytics-chart" role="img" aria-label={`${granularity} ${option.label.toLowerCase()} for selected period`}>
+        <ResponsiveContainer width="100%" height={280}>
+          <BarChart data={rows} margin={{ top: 12, right: 16, bottom: 4, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="period_start" tickFormatter={(value: string) => granularity === 'weekly' ? value.slice(5) : value.slice(0, 7)} minTickGap={24} />
+            <YAxis tickFormatter={formatAxis} allowDecimals={option.unit !== 'count'} />
+            <Tooltip labelFormatter={value => {
+              const row = rows.find(item => item.period_start === value);
+              return row ? periodSpan(row) : String(value ?? '');
+            }} formatter={value => summaryMetricValue(metric, typeof value === 'number' ? value : null)} />
+            <Bar dataKey={metric} name={option.label} fill="#125b59" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </figure>
+    <TableDetails title={`${granularity} operational summary`}><table><caption>
+      {granularity} operational metrics; event counts, period-end balance, and close-date production are distinct measures.
+    </caption>
+      <thead><tr><th scope="col">Covered dates</th><th scope="col">Trips opened</th><th scope="col">Trips closed</th>
+        <th scope="col">Outstanding at period end</th>{showOffloadingNote && <th scope="col">Unassigned excluded</th>}
+        <th scope="col">Actual tonnes</th><th scope="col">Average tonnes / trip</th><th scope="col">Tonnage sample</th>
+        <th scope="col">Average turnaround</th><th scope="col">Turnaround sample</th></tr></thead>
+      <tbody>{rows.map(row => <tr key={row.period_start}><th scope="row">{periodSpan(row)}</th>
+        <td>{row.trips_opened.toLocaleString('en-NG')}</td><td>{row.trips_closed.toLocaleString('en-NG')}</td>
+        <td>{row.outstanding_at_period_end.toLocaleString('en-NG')}</td>
+        {showOffloadingNote && <td>{row.outstanding_excluded_unassigned_offloading_site_count.toLocaleString('en-NG')}</td>}
+        <td>{tonnes(row.actual_tonnage_tonnes)}</td><td>{tonnes(row.average_tonnage_per_trip_tonnes)}</td>
+        <td>{row.average_tonnage_trip_count.toLocaleString('en-NG')}</td><td>{hours(row.average_turnaround_seconds)}</td>
+        <td>{row.average_turnaround_trip_count.toLocaleString('en-NG')}</td></tr>)}</tbody>
+    </table></TableDetails>
+  </article>;
 }
 
 const dimensionLabels: Record<PerformanceDimension, string> = {
