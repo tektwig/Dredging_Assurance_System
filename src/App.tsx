@@ -1,9 +1,12 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthProvider';
 import { StatusPage } from './components/StatusPage';
 import { LoadingPortal } from './features/loading/LoadingPortal';
 import { OffloadingPortal } from './features/offloading/OffloadingPortal';
 import { OperationsDashboard } from './features/operations/dashboard/OperationsDashboard';
+const OperationsAnalytics = lazy(() => import('./features/operations/analytics/OperationsAnalytics')
+  .then(module => ({ default: module.OperationsAnalytics })));
 import { ManageCredentialsPage } from './features/operations/credentials/ManageCredentialsPage';
 import { OperationsExceptionDetail } from './features/operations/exceptions/OperationsExceptionDetail';
 import { OperationsExceptionsRegister } from './features/operations/exceptions/OperationsExceptionsRegister';
@@ -65,7 +68,10 @@ export default function App() {
           <Route path="exceptions" element={<OperationsExceptionsRegister />} />
           <Route path="exceptions/:exceptionId" element={<OperationsExceptionDetail />} />
           <Route path="reports" element={<OperationsReports />} />
-          {OPERATIONS_NAVIGATION.slice(6).map(item => <Route key={item.route} path={item.route}
+          <Route path="analytics" element={<Suspense fallback={<p role="status">Loading Analytics…</p>}>
+            <OperationsAnalytics />
+          </Suspense>} />
+          {OPERATIONS_NAVIGATION.slice(6).filter(item => item.route !== 'analytics').map(item => <Route key={item.route} path={item.route}
             element={<PortalPage role="operations_manager" title={item.title} />} />)}
           <Route path="*" element={<Navigate to={PORTALS.operations_manager.path} replace />} />
         </Route>

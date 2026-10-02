@@ -1,0 +1,81 @@
+.operations-analytics-page { display: grid; gap: 1.25rem; min-width: 0; }
+.analytics-page-header { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
+.analytics-page-header h1 { margin-bottom: .4rem; }
+.analytics-page-header .eyebrow { margin-bottom: .45rem; }
+.analytics-page-header > div > p:last-child { margin: 0; }
+.analytics-as-of { margin: 0 0 .25rem; color: #60717e; font-size: .8rem; text-align: right; }
+.analytics-filters { padding: clamp(1rem, 2.5vw, 1.5rem); }
+.analytics-panel-title { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.analytics-panel-title h2, .analytics-panel header h2 { margin: 0 0 .45rem; font-size: clamp(1.25rem, 2vw, 1.55rem); }
+.analytics-panel-title .eyebrow, .analytics-panel header .eyebrow { margin-bottom: .35rem; }
+.analytics-panel-title > .button { white-space: nowrap; }
+.analytics-filter-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
+.analytics-filter-entity, .analytics-custom-range { display: grid; align-content: start; gap: .4rem; min-width: 0; }
+.analytics-filter-entity label, .analytics-custom-range label, .analytics-chart-controls label { font-size: .8rem; }
+.analytics-filter-entity input, .analytics-filter-entity select, .analytics-custom-range input,
+.analytics-chart-controls select, .analytics-filter-entity select {
+  min-width: 0; min-height: 2.7rem; width: 100%; padding: .55rem .75rem; border: 1px solid #c7d1d8;
+  border-radius: .5rem; background: #fbfcfd; color: #172b3a; font: inherit;
+}
+.analytics-filter-entity .muted, .analytics-custom-range .muted { margin: .1rem 0 0; }
+.analytics-option-error { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; color: #8c2424; font-size: .8rem; }
+.analytics-option-error .button { min-height: 2rem; padding: .35rem .6rem; font-size: .78rem; }
+.analytics-custom-range { grid-column: span 2; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; }
+.analytics-custom-range label { align-self: end; }
+.analytics-custom-range button, .analytics-custom-range .muted { grid-column: span 2; justify-self: start; }
+.analytics-results { display: grid; gap: 1.25rem; min-width: 0; }
+.analytics-kpi-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .75rem; }
+.analytics-kpi { display: grid; align-content: start; gap: .45rem; min-width: 0; padding: 1rem; }
+.analytics-kpi p { margin: 0; color: #60717e; font-size: .78rem; font-weight: 700; }
+.analytics-kpi strong { font-size: clamp(1.25rem, 2vw, 1.8rem); letter-spacing: -.035em; overflow-wrap: anywhere; }
+.analytics-kpi > span { line-height: 1.45; }
+.analytics-panel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; min-width: 0; }
+.analytics-panel { display: grid; align-content: start; gap: .8rem; min-width: 0; padding: clamp(1rem, 2.2vw, 1.5rem); }
+.analytics-panel > header > p:last-child { margin-bottom: 0; }
+.analytics-panel figure { min-width: 0; margin: 0; }
+.analytics-chart { width: 100%; min-width: 0; height: 280px; }
+.analytics-chart-tall { height: auto; }
+.analytics-chart svg { overflow: visible; }
+.analytics-panel .recharts-text { font-size: .72rem; }
+.analytics-chart-controls { display: flex; flex-wrap: wrap; gap: .8rem; }
+.analytics-chart-controls label { display: grid; gap: .35rem; min-width: min(100%, 12rem); flex: 1 1 12rem; }
+.analytics-chart-controls select { min-height: 2.5rem; }
+.analytics-distribution-switcher { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6rem; }
+.analytics-distribution-choice { display: grid; gap: .25rem; justify-items: start; min-width: 0; padding: .7rem; border: 1px solid #dce4e9; border-radius: .65rem; background: #fff; color: #172b3a; text-align: left; cursor: pointer; }
+.analytics-distribution-choice.selected { border-color: #125b59; box-shadow: inset 0 0 0 1px #125b59; background: #f1f8f6; }
+.analytics-distribution-choice strong { font-size: 1.25rem; }
+.analytics-distribution-choice small { color: #60717e; }
+.analytics-variance-summary { margin: .6rem 0 .2rem; }
+.analytics-variance-summary strong { font-size: 1.15rem; }
+.analytics-data-details { border-top: 1px solid #dce4e9; padding-top: .7rem; }
+.analytics-data-details summary { width: fit-content; color: #125b59; font-size: .82rem; font-weight: 700; cursor: pointer; }
+.analytics-table-scroll { width: 100%; overflow-x: auto; margin-top: .65rem; }
+.analytics-table-scroll table { width: 100%; border-collapse: collapse; text-align: left; font-size: .78rem; }
+.analytics-table-scroll caption { padding: .4rem 0 .7rem; color: #60717e; text-align: left; }
+.analytics-table-scroll th, .analytics-table-scroll td { padding: .55rem .65rem; border-bottom: 1px solid #e4eaed; white-space: nowrap; }
+.analytics-table-scroll th { color: #526975; }
+.analytics-table-scroll tbody th { color: #172b3a; }
+.analytics-footnote { margin: 0; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 960px) {
+  .analytics-kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .analytics-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .analytics-panel-grid { grid-template-columns: minmax(0, 1fr); }
+  .analytics-page-header { align-items: flex-start; flex-direction: column; }
+  .analytics-as-of { text-align: left; }
+}
+@media (max-width: 520px) {
+  .analytics-filter-grid { grid-template-columns: minmax(0, 1fr); }
+  .analytics-custom-range { grid-column: auto; }
+  .analytics-custom-range button, .analytics-custom-range .muted { grid-column: auto; }
+  .analytics-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .analytics-kpi:last-child { grid-column: span 2; }
+  .analytics-panel-title { align-items: flex-start; flex-direction: column; }
+  .analytics-distribution-switcher { grid-template-columns: minmax(0, 1fr); }
+  .analytics-distribution-choice { grid-template-columns: 1fr auto; align-items: center; }
+  .analytics-distribution-choice small { grid-column: span 2; }
+  .analytics-panel .recharts-cartesian-axis-tick { font-size: .65rem; }
+}

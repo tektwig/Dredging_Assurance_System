@@ -89,7 +89,11 @@ select pg_temp.estimate_assert(public.get_operations_trip_detail(
   (select (result#>>'{trip,id}')::uuid from estimate_results where name='opened'))#>>'{trip,estimated_quantity_tonnes}'='12.34',
   'Operations detail returns estimate separately');
 select pg_temp.estimate_assert((public.get_operations_report('trips',
-  '{"basis":"open","date_from":"2026-09-01","date_to":"2026-09-30"}'::jsonb,1,25)
+  (select jsonb_build_object('basis','open',
+    'date_from',to_char((opened_at at time zone 'Africa/Lagos')::date,'YYYY-MM-DD'),
+    'date_to',to_char((opened_at at time zone 'Africa/Lagos')::date,'YYYY-MM-DD'))
+    from public.trips where id=(select (result#>>'{trip,id}')::uuid from estimate_results where name='opened')),
+  1,25)
   #>>'{items,0,estimated_tonnage_tonnes}')='12.34',
   'Trips report projection includes estimate without changing actual tonnage fields');
 select pg_temp.estimate_assert((select count(*)=0 from public.trip_closure_invoices where trip_id=(
