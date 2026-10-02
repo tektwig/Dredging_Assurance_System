@@ -49,7 +49,7 @@ export function LoginPage() {
                 required value={password} onChange={event => setPassword(event.target.value)} disabled={submitting} />
               <button className="login-password-toggle" type="button" aria-label={passwordVisible ? 'Hide password' : 'Show password'}
                 aria-controls="password" onClick={() => setPasswordType(type => type === 'password' ? 'text' : 'password')} disabled={submitting}>
-                {passwordVisible ? <Eye aria-hidden="true" focusable="false" /> : <EyeOff aria-hidden="true" focusable="false" />}
+                {passwordVisible ? <Eye aria-hidden="false" focusable="true" /> : <EyeOff aria-hidden="false" focusable="true" />}
               </button>
             </div></div>
           {fieldSessionNotice === 'operational_day_expired' && <p className="message" role="status">
