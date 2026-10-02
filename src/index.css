@@ -33,6 +33,13 @@ form { margin-top: 2rem; }
 label { font-size: .85rem; font-weight: 700; }
 input { width: 100%; border: 1px solid #c7d1d8; border-radius: .5rem; background: #fbfcfd; min-height: 3.2rem; padding: .8rem 1rem; color: #172b3a; }
 input:focus { border-color: #16706e; }
+.login-password-field { position: relative; }
+.login-password-field input { padding-right: 3.5rem; }
+.login-password-toggle { position: absolute; inset-block: .35rem; right: .35rem; width: 2.5rem; display: grid; place-items: center;
+  border: 0; border-radius: .4rem; background: transparent; color: #405967; cursor: pointer; }
+.login-password-toggle:hover:not(:disabled) { background: #edf3f4; }
+.login-password-toggle:disabled { opacity: .55; cursor: wait; }
+.login-password-toggle svg { width: 1.25rem; height: 1.25rem; }
 .button { border: 1px solid transparent; border-radius: .5rem; background: #125b59; color: white; font-size: .9rem; font-weight: 700; padding: .9rem 1.25rem; min-height: 2.8rem; cursor: pointer; text-decoration: none; display: inline-flex; justify-content: center; align-items: center; }
 .button:hover:not(:disabled) { background: #0e4948; }
 .button:disabled { opacity: .65; cursor: wait; }

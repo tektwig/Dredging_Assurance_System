@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthProvider';
+import { FieldWorkflowProvider } from './features/fieldWorkflow/FieldWorkflowProvider';
 import { StatusPage } from './components/StatusPage';
 import { LoadingPortal } from './features/loading/LoadingPortal';
 import { OffloadingPortal } from './features/offloading/OffloadingPortal';
@@ -31,7 +32,7 @@ export default function App() {
   if (configurationError) return <StatusPage title="Application configuration required">
     <p role="alert">{configurationError}</p>
   </StatusPage>;
-  return <BrowserRouter><AuthProvider><Routes>
+  return <BrowserRouter><AuthProvider><FieldWorkflowProvider><Routes>
     <Route element={<AccountGate />}>
       <Route element={<LoginOnly />}><Route path="/login" element={<LoginPage />} /></Route>
       <Route element={<RequireSession />}>
@@ -90,5 +91,5 @@ export default function App() {
       </Route>
       <Route path="*" element={<HomeRedirect />} />
     </Route>
-  </Routes></AuthProvider></BrowserRouter>;
+  </Routes></FieldWorkflowProvider></AuthProvider></BrowserRouter>;
 }

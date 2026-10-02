@@ -265,6 +265,9 @@ console.log('PASS portal shell, form behavior, site gates, statistics, safe revi
 
 let portalAccount = { status: 'active', profile: { id: 'officer-1', role: 'loading_officer', display_name: 'Test Officer' } };
 overrides.set(absolute('src/auth/AuthProvider.tsx'), { useAuth: () => ({ account: portalAccount }) });
+overrides.set(absolute('src/features/fieldWorkflow/FieldWorkflowProvider.tsx'), {
+  useFieldWorkflowStore: () => ({ getLoading: () => null, saveLoading() {}, clearLoading() {} }),
+});
 const { LoadingPortal } = load('src/features/loading/LoadingPortal.tsx');
 assert(renderToStaticMarkup(React.createElement(LoadingPortal)).includes('Loading Portal'));
 portalAccount = { status: 'active', profile: { ...portalAccount.profile, role: 'offloading_officer' } };

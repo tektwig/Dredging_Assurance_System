@@ -36,11 +36,13 @@ const calls = [];
 let searchResponse;
 let registrationResponse;
 let registrationError;
+let driverLookupResponse;
 overrides.set(absolute('src/lib/supabase.ts'), { supabase: {
   from(table) { assert.fail(`Unexpected direct table access: ${table}`); },
   async rpc(name, args) {
     calls.push({ name, args });
     if (name === 'search_loading_drivers') return { data: searchResponse, error: null };
+    if (name === 'lookup_loading_driver_by_id') return { data: driverLookupResponse, error: null };
     if (name === 'register_loading_participant') return { data: registrationResponse, error: registrationError };
     assert.fail(`Unexpected RPC: ${name}`);
   },
@@ -54,6 +56,24 @@ searchResponse = { ok: true, drivers: [
 ] };
 assert.deepEqual(await service.searchLoadingDrivers({ query: 'James' }), { kind: 'results', drivers: [other] });
 assert.deepEqual(calls.at(-1), { name: 'search_loading_drivers', args: { p_query: 'James', p_limit: 10 } });
+driverLookupResponse = { ok: true, assignment_id: 'assignment-1', driver: {
+  id: other.id, full_name: other.fullName, phone_number: other.phoneNumber, email: other.email, is_active: true,
+  bank_name: 'NEVER_DISPLAY',
+} };
+assert.deepEqual(await service.lookupLoadingDriverById(other.id, 'assignment-1'), {
+  kind: 'found', assignmentId: 'assignment-1', driver: other,
+});
+assert.deepEqual(calls.at(-1), { name: 'lookup_loading_driver_by_id', args: {
+  p_driver_id: other.id, p_expected_assignment_id: 'assignment-1',
+} });
+driverLookupResponse = { ok: false, code: 'SITE_ASSIGNMENT_CHANGED' };
+assert.deepEqual(await service.lookupLoadingDriverById(other.id, 'old-assignment'), {
+  kind: 'business_failure', code: 'SITE_ASSIGNMENT_CHANGED',
+});
+driverLookupResponse = { ok: false, code: 'INACTIVE_DRIVER' };
+assert.deepEqual(await service.lookupLoadingDriverById(other.id, 'assignment-1'), {
+  kind: 'business_failure', code: 'INACTIVE_DRIVER',
+});
 registrationResponse = { ok: true, request_id: 'req-1',
   truck: { id: truck.id, registration_number: truck.registrationNumber, normalized_registration: truck.normalizedRegistration, created: true },
   driver: { id: other.id, full_name: other.fullName, phone_number: other.phoneNumber, email: other.email, created: true },

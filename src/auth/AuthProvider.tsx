@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { isProfile, type Profile } from '../types/profile';
 import type { AccountState } from './authState';
+import { watchFieldSession, type FieldSessionProbe } from './fieldSessionWatcher';
 
 type SessionState =
   | { status: 'restoring' | 'session-error' }
@@ -11,7 +12,10 @@ type ProfileResult = {
   session: Session;
   status: 'active' | 'inactive' | 'missing-profile' | 'profile-error';
   profile?: Profile;
+  fieldOperationalDate?: string;
+  fieldSessionExpiresInMs?: number;
 };
+type FieldSessionNotice = 'operational_day_expired' | 'field_access_revoked' | null;
 interface AuthContextValue {
   account: AccountState;
   signIn: (email: string, password: string) => Promise<boolean>;
@@ -19,9 +23,31 @@ interface AuthContextValue {
   retry: () => void;
   signingOut: boolean;
   signOutError: string | null;
+  fieldSessionNotice: FieldSessionNotice;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function parseFieldSessionProbe(value: unknown): FieldSessionProbe {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { status: 'unavailable' };
+  const row = value as Record<string, unknown>;
+  if (row.status === 'valid' && typeof row.operational_date === 'string'
+    && Number.isFinite(row.expires_in_ms) && Number(row.expires_in_ms) >= 0) {
+    return { status: 'valid', expiresInMs: Number(row.expires_in_ms), operationalDate: row.operational_date };
+  }
+  if (row.status === 'expired' || row.status === 'inactive' || row.status === 'not_field') {
+    return { status: row.status };
+  }
+  return { status: 'unavailable' };
+}
+
+async function readFieldSessionProbe(): Promise<FieldSessionProbe> {
+  if (!supabase) return { status: 'unavailable' };
+  try {
+    const { data, error } = await supabase.rpc('get_field_session_status');
+    return error ? { status: 'unavailable' } : parseFieldSessionProbe(data);
+  } catch { return { status: 'unavailable' }; }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [sessionState, setSessionState] = useState<SessionState>({ status: 'restoring' });
@@ -29,7 +55,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [revision, setRevision] = useState(0);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [fieldSessionNotice, setFieldSessionNotice] = useState<FieldSessionNotice>(null);
   const signingOutRef = useRef(false);
+  const terminatingFieldAccessRef = useRef(false);
+
+  const terminateFieldAccess = useCallback(async (reason: Exclude<FieldSessionNotice, null>) => {
+    if (!supabase || terminatingFieldAccessRef.current) return;
+    terminatingFieldAccessRef.current = true;
+    signingOutRef.current = true;
+    setFieldSessionNotice(reason);
+    setSigningOut(true);
+    try { await supabase.auth.signOut({ scope: 'local' }); } catch { /* Field access is still blocked in local state. */ }
+    finally {
+      setProfileResult(null);
+      setSessionState({ status: 'ready', session: null });
+      signingOutRef.current = false;
+      terminatingFieldAccessRef.current = false;
+      setSigningOut(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!supabase) return;
@@ -84,7 +128,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         else if (!data) setProfileResult({ session: session!, status: 'missing-profile' });
         else if (!isProfile(data) || data.id !== session!.user.id) {
           setProfileResult({ session: session!, status: 'profile-error' });
-        } else setProfileResult({ session: session!, status: data.is_active ? 'active' : 'inactive', profile: data });
+        } else if (!data.is_active) setProfileResult({ session: session!, status: 'inactive', profile: data });
+        else if (data.role === 'loading_officer' || data.role === 'offloading_officer') {
+          const fieldStatus = await readFieldSessionProbe();
+          if (!alive) return;
+          if (fieldStatus.status === 'valid' && fieldStatus.operationalDate) setProfileResult({
+            session: session!, status: 'active', profile: data,
+            fieldOperationalDate: fieldStatus.operationalDate,
+            fieldSessionExpiresInMs: fieldStatus.expiresInMs,
+          });
+          else if (fieldStatus.status === 'expired') void terminateFieldAccess('operational_day_expired');
+          else if (fieldStatus.status === 'inactive') void terminateFieldAccess('field_access_revoked');
+          else if (fieldStatus.status === 'not_field') setRevision(value => value + 1);
+          else setProfileResult({ session: session!, status: 'profile-error' });
+        } else setProfileResult({ session: session!, status: 'active', profile: data });
       } catch {
         if (alive) setProfileResult({ session: session!, status: 'profile-error' });
       } finally {
@@ -97,11 +154,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [session]);
+  }, [session, terminateFieldAccess]);
+
+  const activeFieldProfile = sessionState.status === 'ready' && session && profileResult?.session === session
+    && profileResult.status === 'active' && profileResult.profile
+    && (profileResult.profile.role === 'loading_officer' || profileResult.profile.role === 'offloading_officer')
+    ? profileResult.profile : null;
+  useEffect(() => {
+    if (!activeFieldProfile || !supabase) return;
+    return watchFieldSession(readFieldSessionProbe, status => {
+      if (status === 'expired') void terminateFieldAccess('operational_day_expired');
+      else if (status === 'inactive') void terminateFieldAccess('field_access_revoked');
+      else if (status === 'not_field') setRevision(value => value + 1);
+    });
+  }, [activeFieldProfile?.id, activeFieldProfile?.role, profileResult?.fieldOperationalDate,
+    terminateFieldAccess]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     if (!supabase) return false;
     setSignOutError(null);
+    setFieldSessionNotice(null);
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       return !error;
@@ -113,6 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signingOutRef.current = true;
     setSigningOut(true);
     setSignOutError(null);
+    setFieldSessionNotice(null);
     try {
       const { error } = await supabase.auth.signOut({ scope: 'local' });
       if (error) throw error;
@@ -139,11 +212,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Never render a previous user's profile while a new session loads.
   else if (profileResult?.session !== session) account = { status: 'loading-profile', session };
   else if ((profileResult.status === 'active' || profileResult.status === 'inactive') && profileResult.profile) {
-    account = { status: profileResult.status, session, profile: profileResult.profile };
+    account = { status: profileResult.status, session, profile: profileResult.profile,
+      fieldOperationalDate: profileResult.fieldOperationalDate,
+      fieldSessionExpiresInMs: profileResult.fieldSessionExpiresInMs };
   } else if (profileResult.status === 'missing-profile') account = { status: 'missing-profile', session };
   else account = { status: 'profile-error', session };
 
-  return <AuthContext.Provider value={{ account, signIn, signOut, retry, signingOut, signOutError }}>
+  return <AuthContext.Provider value={{ account, signIn, signOut, retry, signingOut, signOutError, fieldSessionNotice }}>
     {children}
   </AuthContext.Provider>;
 }

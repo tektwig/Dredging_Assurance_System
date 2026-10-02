@@ -1,11 +1,14 @@
 import { useRef, useState, type FormEvent } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { INVALID_CREDENTIALS } from '../auth/authState';
 
 export function LoginPage() {
-  const { signIn } = useAuth();
+  const { signIn, fieldSessionNotice } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordType, setPasswordType] = useState<'password' | 'text'>('password');
+  const passwordVisible = passwordType === 'text';
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef(false);
@@ -41,8 +44,20 @@ export function LoginPage() {
             <input id="email" name="email" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false}
               required value={email} onChange={event => setEmail(event.target.value)} disabled={submitting} /></div>
           <div className="field"><label htmlFor="password">Password</label>
-            <input id="password" name="password" type="password" autoComplete="current-password"
-              required value={password} onChange={event => setPassword(event.target.value)} disabled={submitting} /></div>
+            <div className="login-password-field">
+              <input id="password" name="password" type={passwordType} autoComplete="current-password"
+                required value={password} onChange={event => setPassword(event.target.value)} disabled={submitting} />
+              <button className="login-password-toggle" type="button" aria-label={passwordVisible ? 'Hide password' : 'Show password'}
+                aria-controls="password" onClick={() => setPasswordType(type => type === 'password' ? 'text' : 'password')} disabled={submitting}>
+                {passwordVisible ? <Eye aria-hidden="true" focusable="false" /> : <EyeOff aria-hidden="true" focusable="false" />}
+              </button>
+            </div></div>
+          {fieldSessionNotice === 'operational_day_expired' && <p className="message" role="status">
+            Your operational day has ended. Sign in again to continue.
+          </p>}
+          {fieldSessionNotice === 'field_access_revoked' && <p className="message" role="status">
+            Field access has changed. Sign in again or contact your administrator.
+          </p>}
           {error && <p className="message error-message" role="alert">{error}</p>}
           <button className="button full-width" type="submit" disabled={submitting}>
             {submitting ? 'Signing in…' : 'Sign In'}

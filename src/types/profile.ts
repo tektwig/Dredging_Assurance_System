@@ -50,6 +50,8 @@ export interface Database {
     };
     Views: { [_ in never]: never };
     Functions: {
+      get_field_session_status: { Args: Record<string, never>; Returns: unknown };
+      lookup_loading_driver_by_id: { Args: { p_driver_id: string; p_expected_assignment_id: string }; Returns: unknown };
       get_operations_analytics: { Args: { p_filters?: Record<string, string>; p_performance_dimension?: string;
         p_performance_metric?: string }; Returns: unknown };
       get_operations_analytics_filter_options: { Args: { p_kind: string; p_search?: string | null;

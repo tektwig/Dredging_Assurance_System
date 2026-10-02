@@ -1,5 +1,6 @@
 import { supabase } from '../../../lib/supabase';
-import type { DriverSearchRequest, DriverSearchResult, RegistrationFailureCode, RegistrationRequest, RegistrationResult, SafeDriverSummary } from '../types';
+import type { DriverSearchRequest, DriverSearchResult, LoadingDriverByIdResult, RegistrationFailureCode,
+  RegistrationRequest, RegistrationResult, SafeDriverSummary } from '../types';
 import { LoadingAuthorizationError, RegistrationOutcomeUnknownError } from './errors';
 
 const registrationCodes: readonly RegistrationFailureCode[] = [
@@ -41,6 +42,26 @@ export async function searchLoadingDrivers(request: DriverSearchRequest): Promis
   const drivers = row.drivers.map(safeDriver);
   if (drivers.some(driver => driver === null)) throw new Error('Invalid driver search response');
   return { kind: 'results', drivers: drivers as SafeDriverSummary[] };
+}
+
+export async function lookupLoadingDriverById(driverId: string, assignmentId: string): Promise<LoadingDriverByIdResult> {
+  if (!supabase) throw new Error('Client unavailable');
+  const { data, error } = await supabase.rpc('lookup_loading_driver_by_id', {
+    p_driver_id: driverId, p_expected_assignment_id: assignmentId,
+  });
+  if (error?.code === '42501') throw new LoadingAuthorizationError();
+  if (error) throw new Error('Driver lookup unavailable');
+  const row = object(data);
+  if (row?.ok === false && typeof row.code === 'string'
+    && ['SITE_ASSIGNMENT_REQUIRED','INVALID_SITE_ASSIGNMENT','INACTIVE_SITE','SITE_ASSIGNMENT_CHANGED',
+      'DRIVER_NOT_FOUND','INACTIVE_DRIVER'].includes(row.code)) {
+    return { kind: 'business_failure', code: row.code as Extract<LoadingDriverByIdResult, { kind: 'business_failure' }>['code'] };
+  }
+  const driver = safeDriver(row?.driver);
+  if (row?.ok !== true || typeof row.assignment_id !== 'string' || !driver || !driver.isActive) {
+    throw new Error('Invalid driver lookup response');
+  }
+  return { kind: 'found', assignmentId: row.assignment_id, driver };
 }
 
 export async function registerLoadingParticipant(request: RegistrationRequest): Promise<RegistrationResult> {
