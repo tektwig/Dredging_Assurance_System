@@ -4,10 +4,11 @@ import { useAuth } from '../auth/AuthProvider';
 import { INVALID_CREDENTIALS } from '../auth/authState';
 
 export function LoginPage() {
-  const { signIn } = useAuth();
+  const { signIn, fieldSessionNotice } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [passwordType, setPasswordType] = useState<'password' | 'text'>('password');
+  const passwordVisible = passwordType === 'text';
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef(false);
@@ -20,7 +21,7 @@ export function LoginPage() {
     setError(null);
     const success = await signIn(email.trim(), password);
     setPassword('');
-    setShowPassword(false);
+    setPasswordType('password');
     if (!success) setError(INVALID_CREDENTIALS);
     pending.current = false;
     setSubmitting(false);
@@ -43,44 +44,21 @@ export function LoginPage() {
           <div className="field"><label htmlFor="email">Email address</label>
             <input id="email" name="email" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false}
               required value={email} onChange={event => setEmail(event.target.value)} disabled={submitting} /></div>
-          <div className="field">
-            <div className="field-header">
-              <label htmlFor="password">Password</label>
-              <button
-                type="button"
-                className="password-toggle-btn"
-                onClick={() => setShowPassword(prev => !prev)}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-                disabled={submitting}
-              >
-                {showPassword ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
-                <span>{showPassword ? 'Hide' : 'Show'}</span>
+          <div className="field"><label htmlFor="password">Password</label>
+            <div className="login-password-field">
+              <input id="password" name="password" type={passwordType} autoComplete="current-password"
+                required value={password} onChange={event => setPassword(event.target.value)} disabled={submitting} />
+              <button className="login-password-toggle" type="button" aria-label={passwordVisible ? 'Hide password' : 'Show password'}
+                aria-controls="password" onClick={() => setPasswordType(type => type === 'password' ? 'text' : 'password')} disabled={submitting}>
+                {passwordVisible ? <Eye aria-hidden="false" focusable="true" /> : <EyeOff aria-hidden="false" focusable="true" />}
               </button>
-            </div>
-            <div className="password-input-wrapper">
-              <input
-                id="password"
-                name="password"
-                type={showPassword ? 'text' : 'password'}
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={event => setPassword(event.target.value)}
-                disabled={submitting}
-              />
-              <button
-                type="button"
-                className="password-peek-icon-btn"
-                onClick={() => setShowPassword(prev => !prev)}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
-                title={showPassword ? 'Hide password' : 'Show password'}
-                disabled={submitting}
-                tabIndex={-1}
-              >
-                {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
-              </button>
-            </div>
-          </div>
+            </div></div>
+          {fieldSessionNotice === 'operational_day_expired' && <p className="message" role="status">
+            Your 24-hour field session has ended. Sign in again to continue.
+          </p>}
+          {fieldSessionNotice === 'field_access_revoked' && <p className="message" role="status">
+            Field access has changed. Sign in again or contact your administrator.
+          </p>}
           {error && <p className="message error-message" role="alert">{error}</p>}
           <button className="button full-width" type="submit" disabled={submitting}>
             {submitting ? 'Signing in…' : 'Sign In'}

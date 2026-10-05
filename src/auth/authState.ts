@@ -6,7 +6,8 @@ export type AccountState =
   | { status: 'unauthenticated' }
   | { status: 'session-error' }
   | { status: 'loading-profile'; session: Session }
-  | { status: 'active'; session: Session; profile: Profile }
+  | { status: 'active'; session: Session; profile: Profile;
+      fieldOperationalDate?: string; fieldSessionExpiresInMs?: number }
   | { status: 'inactive'; session: Session; profile: Profile }
   | { status: 'missing-profile'; session: Session }
   | { status: 'profile-error'; session: Session };

@@ -35,6 +35,11 @@ export type DriverSearchResult =
   | { kind: 'results'; drivers: SafeDriverSummary[] }
   | { kind: 'business_failure'; code: 'INVALID_SEARCH' | 'SITE_ASSIGNMENT_REQUIRED' | 'INVALID_SITE_ASSIGNMENT' | 'INACTIVE_SITE' };
 
+export type LoadingDriverByIdResult =
+  | { kind: 'found'; assignmentId: string; driver: SafeDriverSummary }
+  | { kind: 'business_failure'; code: 'SITE_ASSIGNMENT_REQUIRED' | 'INVALID_SITE_ASSIGNMENT'
+    | 'INACTIVE_SITE' | 'SITE_ASSIGNMENT_CHANGED' | 'DRIVER_NOT_FOUND' | 'INACTIVE_DRIVER' };
+
 export type NewDriverForm = {
   fullName: string;
   phoneNumber: string;

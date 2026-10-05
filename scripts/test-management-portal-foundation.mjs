@@ -67,7 +67,7 @@ const renderApp = (path, role, status = 'active') => {
 };
 
 const operationsPaths = ['/operations', '/operations/trips', '/operations/trucks-drivers',
-  '/operations/waybills-payouts', '/operations/exceptions', '/operations/reports'];
+  '/operations/waybills-payouts', '/operations/exceptions', '/operations/reports', '/operations/analytics'];
 const operationsTripDetailPath = '/operations/trips/00000000-0000-0000-0000-000000000001';
 const adminPaths = ['/admin', '/admin/users', '/admin/sites', '/admin/configuration', '/admin/audit'];
 assert.deepEqual(OPERATIONS_NAVIGATION.map(item => item.route ? `/operations/${item.route}` : '/operations'), operationsPaths);
@@ -103,6 +103,9 @@ for (const path of operationsPaths) {
   } else if (path === '/operations/reports') {
     assert(output.includes('Report categories'));
     assert(output.includes('Loading results'));
+    assert(!output.includes('This module is a Phase 1 placeholder'));
+  } else if (path === '/operations/analytics') {
+    assert(output.includes('Loading Analytics'));
     assert(!output.includes('This module is a Phase 1 placeholder'));
   } else assert(output.includes('This module is a Phase 1 placeholder'));
   assert(output.includes('Operations navigation'));

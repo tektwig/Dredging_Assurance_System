@@ -241,6 +241,25 @@ input:focus {
   outline-offset: 1px;
 }
 
+.login-password-field { position: relative; }
+.login-password-field input { padding-right: 3.5rem; }
+.login-password-toggle {
+  position: absolute;
+  inset-block: .35rem;
+  right: .35rem;
+  width: 2.5rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: .4rem;
+  background: transparent;
+  color: #405967;
+  cursor: pointer;
+}
+.login-password-toggle:hover:not(:disabled) { background: #edf3f4; }
+.login-password-toggle:disabled { opacity: .55; cursor: wait; }
+.login-password-toggle svg { width: 1.25rem; height: 1.25rem; }
+
 .button {
   border: 1px solid transparent;
   border-radius: .5rem;

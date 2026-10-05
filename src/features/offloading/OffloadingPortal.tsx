@@ -15,6 +15,8 @@ import type { OffloadingStatisticsState } from './types';
 import { operationalDateKey } from '../loading/utils/operationalDate';
 import { useRealtimeTrips } from '../../hooks/useRealtimeTrips';
 import { NotificationToastContainer } from '../../components/common/NotificationToast';
+import { useFieldWorkflowStore, type FieldWorkflowScope, type OffloadingWorkflowDraft } from '../fieldWorkflow/FieldWorkflowProvider';
+import { checkOffloadingRestore } from '../fieldWorkflow/restoration';
 import '../loading/loading.css';
 import './offloading.css';
 
@@ -22,11 +24,16 @@ export function OffloadingPortal() {
   const { account } = useAuth();
   if (account.status !== 'active' || account.profile.role !== 'offloading_officer') return null;
   return <OffloadingPortalContent key={account.profile.id} actorId={account.profile.id}
+    operationalDate={account.fieldOperationalDate ?? operationalDateKey()}
     officerName={account.profile.display_name.trim() || 'Offloading Officer'} />;
 }
 
-function OffloadingPortalContent({ actorId, officerName }: { actorId: string; officerName: string }) {
+function OffloadingPortalContent({ actorId, operationalDate, officerName }: {
+  actorId: string; operationalDate: string; officerName: string;
+}) {
   const { retry } = useAuth();
+  const workflowStore = useFieldWorkflowStore();
+  const workflowScope: FieldWorkflowScope = { actorId, role: 'offloading_officer', operationalDate };
   const [plate, setPlate] = useState('');
   const [quantity, setQuantity] = useState('');
   const [closure, setClosure] = useState<ClosureState>({ status: 'idle' });
@@ -39,6 +46,9 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
   const plateRef = useRef(plate);
   const autoLookupEvidence = useRef<string | null>(null);
   const selectedTripRef = useRef(false);
+  const restoredDraftRef = useRef<OffloadingWorkflowDraft | null>(null);
+  const restoreLookupKeyRef = useRef<string | null>(null);
+  const skipPersistAfterRestoreRef = useRef(false);
   selectedTripRef.current = lookup.state.status === 'found';
   plateRef.current = plate;
   const lookupController = useMemo(() => new OffloadingLookupController(lookupOffloadingOpenTrip, snapshot => {
@@ -46,7 +56,10 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
     setLookup(snapshot);
   }), []);
   const closureController = useMemo(() => new ClosureController(closeOffloadingTrip, setClosure, retry,
-    undefined, () => setStatisticsRevision(value => value + 1)), [retry]);
+    undefined, () => {
+      workflowStore.clearOffloading(workflowScope);
+      setStatisticsRevision(value => value + 1);
+    }), [retry, actorId, operationalDate, workflowStore]);
   const ocrService = useMemo(() => createPlateOcrService(), []);
   const captureController = useMemo(() => new PlateCaptureController(actorId,
     ocrService, setCapture, candidate => {
@@ -65,6 +78,60 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
   const found = lookup.state.status === 'found' ? lookup.state : null;
   const parsedQuantity = parseTonnage(quantity);
   const dateKey = operationalDateKey(now);
+
+  useEffect(() => {
+    const key = `${actorId}:${operationalDate}`;
+    if (restoreLookupKeyRef.current === key) return;
+    restoreLookupKeyRef.current = key;
+    const draft = workflowStore.getOffloading(workflowScope);
+    if (!draft || !draft.plate.trim()) return;
+    restoredDraftRef.current = draft;
+    skipPersistAfterRestoreRef.current = true;
+    plateRef.current = draft.plate;
+    setPlate(draft.plate);
+    setQuantity(draft.quantity);
+    // IDs from memory are comparison hints only. The RPC fetches the officer's
+    // current assignment and currently open trip before restoring review.
+    void lookupController.submit(draft.plate, null);
+  }, [actorId, operationalDate, workflowStore, lookupController]);
+
+  useEffect(() => {
+    const draft = restoredDraftRef.current;
+    if (!draft) return;
+    const state = lookup.state;
+    const decision = checkOffloadingRestore(draft, state);
+    if (decision === 'pending') return;
+    if (decision === 'stale') {
+      workflowStore.clearOffloading(workflowScope);
+      restoredDraftRef.current = null;
+      selectedTripRef.current = false;
+      lookupController.reset();
+      plateRef.current = '';
+      setPlate('');
+      setQuantity('');
+      return;
+    }
+    restoredDraftRef.current = null;
+  }, [lookup.state, workflowStore, lookupController, actorId, operationalDate]);
+
+  useEffect(() => {
+    if (skipPersistAfterRestoreRef.current) {
+      skipPersistAfterRestoreRef.current = false;
+      return;
+    }
+    if (restoredDraftRef.current) return;
+    if (!plate.trim() && !quantity.trim()) {
+      workflowStore.clearOffloading(workflowScope);
+      return;
+    }
+    const current = lookup.state;
+    workflowStore.saveOffloading(workflowScope, {
+      assignmentId: current.status === 'found' ? current.assignment.assignmentId : null,
+      tripId: current.status === 'found' ? current.trip.id : null,
+      plate,
+      quantity,
+    });
+  }, [plate, quantity, lookup.state, workflowStore, actorId, operationalDate]);
   const review = found && parsedQuantity !== null ? {
     assignment: found.assignment, trip: found.trip, capture: found.capture, quantityTonnes: parsedQuantity,
   } : null;
@@ -100,16 +167,18 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
 
   useEffect(() => {
     if (closure.status !== 'site_changed') return;
+    workflowStore.clearOffloading(workflowScope);
     selectedTripRef.current = false;
     lookupController.reset();
     captureController.clear();
     plateRef.current = '';
     setPlate('');
     setQuantity('');
-  }, [closure.status, lookupController, captureController]);
+  }, [closure.status, lookupController, captureController, workflowStore, actorId, operationalDate]);
 
   function captureImage(file: File) {
     if (selectedTripRef.current || lookupController.current.pending || closureController.current.status !== 'idle') return;
+    workflowStore.clearOffloading(workflowScope);
     closureController.setInput(null);
     lookupController.reset();
     plateRef.current = '';
@@ -120,6 +189,7 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
   }
   function startScan() {
     if (selectedTripRef.current || closureController.current.status !== 'idle') return;
+    workflowStore.clearOffloading(workflowScope);
     closureController.setInput(null);
     captureController.clear();
     lookupController.reset();
@@ -130,6 +200,7 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
   }
   function reset() {
     if (!closureController.reset()) return;
+    workflowStore.clearOffloading(workflowScope);
     selectedTripRef.current = false;
     captureController.clear();
     lookupController.reset();
@@ -139,6 +210,16 @@ function OffloadingPortalContent({ actorId, officerName }: { actorId: string; of
     autoLookupEvidence.current = null;
     setResetEpoch(value => value + 1);
   }
+
+  useEffect(() => {
+    if (closure.status === 'authorization') workflowStore.clearOffloading(workflowScope);
+  }, [closure.status, workflowStore, actorId, operationalDate]);
+
+  useEffect(() => {
+    if (lookup.state.status === 'site_unavailable' || lookup.state.status === 'access_unavailable') {
+      workflowStore.clearOffloading(workflowScope);
+    }
+  }, [lookup.state.status, workflowStore, actorId, operationalDate]);
   const evidence = capture.status === 'detected' ? capture.evidence : null;
   const { toasts, dismissToast } = useRealtimeTrips({
     channelName: 'offloading-portal-trips-realtime',

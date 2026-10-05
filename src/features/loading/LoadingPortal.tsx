@@ -6,7 +6,7 @@ import { LoadingPortalView } from './components/LoadingPortalView';
 import { TripReview } from './components/TripReview';
 import { RegistrationDialog } from './components/RegistrationDialog';
 import { loadAssignedSite, loadLoadingStatistics, lookupLoadingTruck } from './services/loadingData';
-import { registerLoadingParticipant, searchLoadingDrivers } from './services/driverData';
+import { lookupLoadingDriverById, registerLoadingParticipant, searchLoadingDrivers } from './services/driverData';
 import { LoadingAuthorizationError } from './services/errors';
 import { openLoadingTrip } from './services/tripData';
 import { createPlateOcrService } from './services/plateOcr';
@@ -20,16 +20,21 @@ import { PlateCaptureController, type PlateCaptureState } from './utils/plateCap
 import { useRealtimeTrips } from '../../hooks/useRealtimeTrips';
 import { NotificationToastContainer } from '../../components/common/NotificationToast';
 import { parseTonnage } from '../offloading/utils/tonnage';
+import { useFieldWorkflowStore, type FieldWorkflowScope, type LoadingWorkflowDraft } from '../fieldWorkflow/FieldWorkflowProvider';
+import { checkLoadingRestore } from '../fieldWorkflow/restoration';
 import './loading.css';
 
 export function LoadingPortal() {
   const { account } = useAuth();
   if (account.status !== 'active' || account.profile.role !== 'loading_officer') return null;
   return <LoadingPortalContent key={account.profile.id} actorId={account.profile.id}
+    operationalDate={account.fieldOperationalDate ?? operationalDateKey()}
     officerName={account.profile.display_name.trim() || 'Loading Officer'} />;
 }
 
-function LoadingPortalContent({ actorId, officerName }: { actorId: string; officerName: string }) {
+function LoadingPortalContent({ actorId, operationalDate, officerName }: { actorId: string; operationalDate: string; officerName: string }) {
+  const workflowStore = useFieldWorkflowStore();
+  const workflowScope: FieldWorkflowScope = { actorId, role: 'loading_officer', operationalDate };
   const [site, setSite] = useState<SiteContextState>({ status: 'loading' });
   const [statistics, setStatistics] = useState<StatisticsState>({ status: 'loading' });
   const [siteRevision, setSiteRevision] = useState(0);
@@ -47,7 +52,12 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
   const [lateOpenedTrip, setLateOpenedTrip] = useState<string | null>(null);
   const [capture, setCapture] = useState<PlateCaptureState>({ status: 'idle' });
   const siteRef = useRef(site);
+  const previousAssignmentRef = useRef<string | null>(null);
   const lookupAssignmentRef = useRef<string | null>(null);
+  const restoredDraftRef = useRef<LoadingWorkflowDraft | null>(null);
+  const restoreLookupKeyRef = useRef<string | null>(null);
+  const restoringDriverIdRef = useRef<string | null>(null);
+  const skipPersistAfterRestoreRef = useRef(false);
   siteRef.current = site;
   const controller = useMemo(() => new LoadingLookupController(
     plateValue => lookupLoadingTruck({ plate: plateValue }),
@@ -128,6 +138,11 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     openInput.capture?.id ?? null]) : null;
   useEffect(() => { openController.setInput(openInput); }, [openController, inputKey]);
   useEffect(() => {
+    if (assignmentId && previousAssignmentRef.current && assignmentId !== previousAssignmentRef.current) {
+      workflowStore.clearLoading(workflowScope);
+      setPlate('');
+    }
+    if (assignmentId) previousAssignmentRef.current = assignmentId;
     const saved = driverController.current.saved;
     if (saved) setLateRegistration(saved.receipt);
     lookupAssignmentRef.current = null;
@@ -137,7 +152,104 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     truckConfirmedRef.current = false;
     setTruckConfirmed(false);
     setEstimatedTonnage('');
-  }, [assignmentId, controller, driverController, captureController]);
+  }, [assignmentId, controller, driverController, captureController, workflowStore, actorId, operationalDate]);
+
+  useEffect(() => {
+    if (site.status !== 'ready') return;
+    const key = `${actorId}:${operationalDate}:${site.site.assignmentId}`;
+    if (restoreLookupKeyRef.current === key) return;
+    restoreLookupKeyRef.current = key;
+    const draft = workflowStore.getLoading(workflowScope);
+    if (!draft) return;
+    if (draft.assignmentId !== site.site.assignmentId || !draft.plate.trim()) {
+      workflowStore.clearLoading(workflowScope);
+      return;
+    }
+    restoredDraftRef.current = draft;
+    skipPersistAfterRestoreRef.current = true;
+    restoringDriverIdRef.current = draft.driverId;
+    setPlate(draft.plate);
+    setEstimatedTonnage(draft.estimatedTonnage);
+    lookupAssignmentRef.current = site.site.assignmentId;
+    // Restored IDs are hints only. The lookup refreshes truck, driver, open-trip
+    // and assignment status before the UI can enable review.
+    void controller.submit(draft.plate, site.site.assignmentId);
+  }, [actorId, operationalDate, site, controller, workflowStore]);
+
+  useEffect(() => {
+    const draft = restoredDraftRef.current;
+    if (!draft || site.status !== 'ready') return;
+    const state = lookupSnapshot.state;
+    const decision = checkLoadingRestore(draft, site.site.assignmentId, state);
+    if (decision === 'pending') return;
+    if (decision === 'stale') {
+      workflowStore.clearLoading(workflowScope);
+      restoredDraftRef.current = null;
+      restoringDriverIdRef.current = null;
+      setPlate('');
+      setEstimatedTonnage('');
+      return;
+    }
+    if (state.status !== 'known_ready' && state.status !== 'inactive_driver') return;
+    if (!draft.driverId || draft.driverId === state.driver.id || state.status === 'inactive_driver') {
+      restoredDraftRef.current = null;
+      restoringDriverIdRef.current = null;
+      return;
+    }
+    let current = true;
+    void lookupLoadingDriverById(draft.driverId, site.site.assignmentId).then(result => {
+      if (!current) return;
+      if (result.kind === 'business_failure' && ['SITE_ASSIGNMENT_REQUIRED', 'INVALID_SITE_ASSIGNMENT',
+        'INACTIVE_SITE', 'SITE_ASSIGNMENT_CHANGED'].includes(result.code)) {
+        workflowStore.clearLoading(workflowScope);
+        restoredDraftRef.current = null;
+        restoringDriverIdRef.current = null;
+        setSite({ status: 'loading' });
+        setSiteRevision(value => value + 1);
+      } else if (result.kind === 'found' && result.assignmentId === site.site.assignmentId) {
+        driverController.selectExisting(result.driver);
+        if (draft.makeRegular) driverController.setMakeRegular(true);
+      } else {
+        driverController.chooseDifferent();
+        workflowStore.saveLoading(workflowScope, { ...draft, driverId: null, makeRegular: false });
+      }
+      restoredDraftRef.current = null;
+      restoringDriverIdRef.current = null;
+    }).catch(() => {
+      if (!current) return;
+      workflowStore.clearLoading(workflowScope);
+      restoredDraftRef.current = null;
+      restoringDriverIdRef.current = null;
+      driverController.chooseDifferent();
+    });
+    return () => { current = false; };
+  }, [site, lookupSnapshot.state, driverController, workflowStore]);
+
+  useEffect(() => {
+    if (skipPersistAfterRestoreRef.current) {
+      skipPersistAfterRestoreRef.current = false;
+      return;
+    }
+    if (site.status !== 'ready' || !assignmentId || restoredDraftRef.current) return;
+    if (!plate.trim() && !estimatedTonnage.trim() && !driverSnapshot?.selected) {
+      workflowStore.clearLoading(workflowScope);
+      return;
+    }
+    const state = lookupSnapshot.state;
+    const truckId = 'truck' in state ? state.truck.id : null;
+    const selectedDriverId = restoringDriverIdRef.current
+      ?? driverController.current.selected?.driver.id ?? null;
+    workflowStore.saveLoading(workflowScope, {
+      assignmentId, plate, estimatedTonnage, truckId,
+      driverId: selectedDriverId,
+      makeRegular: driverController.current.selected?.makeRegular ?? false,
+    });
+  }, [site.status, assignmentId, plate, estimatedTonnage, driverSnapshot, lookupSnapshot.state,
+    driverController, workflowStore, actorId, operationalDate]);
+
+  useEffect(() => {
+    if (openState.status === 'success') workflowStore.clearLoading(workflowScope);
+  }, [openState.status, workflowStore, actorId, operationalDate]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 60_000);
@@ -212,6 +324,7 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
       onMakeRegular={value => driverController.setMakeRegular(value)} /> : undefined;
 
   function nextTruck() {
+    workflowStore.clearLoading(workflowScope);
     openController.nextTruck();
     setPlate('');
     truckConfirmedRef.current = false;
@@ -228,6 +341,7 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
     if (['submitting', 'ambiguous', 'success'].includes(openController.current.status)
       || driverController.current.registration.status === 'submitting'
       || driverController.current.registration.status === 'refreshing') return;
+    workflowStore.clearLoading(workflowScope);
     openController.nextTruck();
     setPlate('');
     truckConfirmedRef.current = false;
@@ -286,7 +400,7 @@ function LoadingPortalContent({ actorId, officerName }: { actorId: string; offic
         onDismissLateRegistration={() => setLateRegistration(null)}
         onRetryRegistrationCheck={() => { void driverController.retrySavedValidation(); }}
         onLookup={onLookup}
-        onRetrySite={() => { openController.setInput(null); truckConfirmedRef.current = false; lookupAssignmentRef.current = null;
+        onRetrySite={() => { workflowStore.clearLoading(workflowScope); openController.setInput(null); truckConfirmedRef.current = false; lookupAssignmentRef.current = null;
           controller.editPlate(); driverController.reset(); captureController.clear(); setSiteRevision(value => value + 1); }}
         onRetryStatistics={() => setStatisticsRevision(value => value + 1)} />
       <NotificationToastContainer toasts={toasts} onDismiss={dismissToast} />

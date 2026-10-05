@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.app.json --noEmit --incremental false && tsc -p tsconfig.node.json --noEmit --incremental false",
-    "test:frontend": "node scripts/test-frontend-foundation.mjs && node scripts/test-management-portal-foundation.mjs && node scripts/test-create-operational-user.mjs && node scripts/test-operations-dashboard.mjs && node scripts/test-operations-trips.mjs && node scripts/test-operations-assets.mjs && node scripts/test-operations-waybills.mjs && node scripts/test-operations-exceptions.mjs && node scripts/test-operations-reports.mjs && node scripts/test-loading-portal.mjs && node scripts/test-loading-driver-workflow.mjs && node scripts/test-loading-trip-opening.mjs && node scripts/test-loading-ocr.mjs && node scripts/test-offloading-lookup.mjs && node scripts/test-offloading-closure.mjs && node scripts/test-offloading-statistics.mjs"
+    "test:frontend": "node scripts/test-frontend-foundation.mjs && node scripts/test-management-portal-foundation.mjs && node scripts/test-create-operational-user.mjs && node scripts/test-operations-dashboard.mjs && node scripts/test-operations-trips.mjs && node scripts/test-operations-assets.mjs && node scripts/test-operations-waybills.mjs && node scripts/test-operations-exceptions.mjs && node scripts/test-operations-reports.mjs && node scripts/test-operations-analytics.mjs && node scripts/test-loading-portal.mjs && node scripts/test-loading-driver-workflow.mjs && node scripts/test-loading-trip-opening.mjs && node scripts/test-loading-ocr.mjs && node scripts/test-offloading-lookup.mjs && node scripts/test-offloading-closure.mjs && node scripts/test-offloading-statistics.mjs",
+    "posttest:frontend": "node scripts/test-field-session-workflow.mjs && node scripts/test-login-password-visibility.mjs"
   },
   "dependencies": {
     "@paddleocr/paddleocr-js": "^0.4.2",
@@ -18,13 +19,16 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "6.30.4",
+    "recharts": "^3.10.1",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "@testing-library/user-event": "^14.6.7",
     "@types/node": "^22.13.9",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^29.1.1",
     "supabase": "^2.117.0",
     "typescript": "~5.7.3",
     "vite": "^6.2.0"

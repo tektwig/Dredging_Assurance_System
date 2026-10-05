@@ -21,6 +21,7 @@ export const OPERATIONS_NAVIGATION = [
   { label: 'Waybills & Payouts', route: 'waybills-payouts', title: 'Waybills & Payouts' },
   { label: 'Exceptions', route: 'exceptions', title: 'Exceptions' },
   { label: 'Reports', route: 'reports', title: 'Reports' },
+  { label: 'Analytics', route: 'analytics', title: 'Analytics Centre' },
 ] as const satisfies readonly PortalNavigationItem[];
 
 export const ADMIN_NAVIGATION = [
