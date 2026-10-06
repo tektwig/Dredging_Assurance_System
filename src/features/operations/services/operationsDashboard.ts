@@ -80,6 +80,13 @@ function parseCategory(value: unknown, expectedKeys: readonly string[]): Dashboa
   return { count: value.count, items: value.items as DashboardPreview[] };
 }
 
+function mapWaybillNumbers(category: DashboardActionCategory): DashboardActionCategory {
+  return { ...category, items: category.items.map(item => {
+    const { invoice_number, ...fields } = item;
+    return { ...fields, waybill_number: invoice_number };
+  }) };
+}
+
 export function parseOperationsDashboardSummary(value: unknown): OperationsDashboardSummary {
   const keys = ['trips_opened_today', 'trips_closed_today', 'open_trips', 'tonnage_today',
     'trucks_processed_today', 'exceptions_requiring_attention', 'action_required'] as const;
@@ -96,17 +103,17 @@ export function parseOperationsDashboardSummary(value: unknown): OperationsDashb
   const action = value.action_required;
   const unresolvedExceptions = parseCategory(action.unresolved_exceptions,
     ['exception_id', 'exception_type', 'trip_number', 'truck_registration', 'created_at']);
-  const failedWaybillPdfs = parseCategory(action.failed_waybill_pdfs,
-    ['document_id', 'invoice_number', 'trip_number', 'failed_at']);
-  const failedWaybillEmails = parseCategory(action.failed_waybill_emails,
-    ['notification_id', 'invoice_number', 'trip_number', 'failed_at']);
+  const failedWaybillPdfs = mapWaybillNumbers(parseCategory(action.failed_waybill_pdfs,
+    ['document_id', 'invoice_number', 'trip_number', 'failed_at']));
+  const failedWaybillEmails = mapWaybillNumbers(parseCategory(action.failed_waybill_emails,
+    ['notification_id', 'invoice_number', 'trip_number', 'failed_at']));
   const paymentDetailsRequired = parseCategory(action.payment_details_required,
     ['payment_id', 'trip_number', 'truck_registration', 'driver_name', 'created_at']);
   if (unresolvedExceptions.items.some(item => typeof item.exception_id !== 'string' || typeof item.exception_type !== 'string'
       || !nullableText(item.trip_number) || !nullableText(item.truck_registration) || !date(item.created_at))
-    || failedWaybillPdfs.items.some(item => typeof item.document_id !== 'string' || typeof item.invoice_number !== 'string'
+    || failedWaybillPdfs.items.some(item => typeof item.document_id !== 'string' || typeof item.waybill_number !== 'string'
       || typeof item.trip_number !== 'string' || !date(item.failed_at))
-    || failedWaybillEmails.items.some(item => typeof item.notification_id !== 'string' || typeof item.invoice_number !== 'string'
+    || failedWaybillEmails.items.some(item => typeof item.notification_id !== 'string' || typeof item.waybill_number !== 'string'
       || typeof item.trip_number !== 'string' || !date(item.failed_at))
     || paymentDetailsRequired.items.some(item => typeof item.payment_id !== 'string' || typeof item.trip_number !== 'string'
       || typeof item.truck_registration !== 'string' || typeof item.driver_name !== 'string' || !date(item.created_at))) {

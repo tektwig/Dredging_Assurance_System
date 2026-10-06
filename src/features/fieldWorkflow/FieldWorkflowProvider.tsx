@@ -18,9 +18,8 @@ export type LoadingWorkflowDraft = {
 };
 
 export type OffloadingWorkflowDraft = {
-  assignmentId: string | null;
-  tripId: string | null;
-  plate: string;
+  assignmentId: string;
+  tripId: string;
   quantity: string;
 };
 
@@ -68,7 +67,6 @@ export class FieldWorkflowStore {
     this.offloading = {
       assignmentId: value.assignmentId,
       tripId: value.tripId,
-      plate: value.plate,
       quantity: value.quantity,
     };
   }

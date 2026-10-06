@@ -247,11 +247,11 @@ existing environment files are replaced.
 Closing a trip creates the immutable Waybill and a separate pending
 `trip_closure_invoice_documents` row in the same database transaction. The row
 stores only document/job state and the deterministic `<year>/<invoice_number>.pdf`
-path. `process-waybill-pdfs` claims leased jobs, reads the invoice through a
+path. `process-waybill-pdfs` claims leased jobs, reads the immutable Waybill snapshot through a
 service-role-only lease-checked RPC, renders it with `pdf-lib`, uploads with
 upsert to the private `waybills` bucket and marks the document ready. PDF and
 Storage calls occur after closure commits; failures use sanitized error codes,
-bounded retries and do not modify the trip or invoice.
+bounded retries and do not modify the trip or Waybill.
 
 Configure `WAYBILL_PDF_WORKER_SECRET` as an independent server-side secret of at
 least 32 characters. After separately authorized deployment, a trusted scheduler
@@ -277,7 +277,7 @@ accepted**, not inbox delivery; bounce/delivery webhooks are not implemented.
 ### Waybill PDF email delivery
 
 The existing `process-trip-notifications` worker also delivers a `waybill_ready`
-event after the PDF document reaches `ready`. It reconciles immutable invoice and
+event after the PDF document reaches `ready`. It reconciles immutable Waybill and
 ready-document rows through a service-role-only RPC on each run, safely
 backfilling already-ready Waybills and catching later completions. Original
 deliveries retain sequence `0`; a unique `(trip_id,event_type,audience,delivery_sequence)`
@@ -288,13 +288,13 @@ comma-separated address list). This is separate from the unchanged `trip_closed`
 message and its required `TRIP_NOTIFICATION_FINANCE_EMAILS` configuration.
 
 For each `waybill_ready` lease, the worker validates the database
-invoice/document relationship, invoice number, and deterministic storage path
+Waybill/document relationship, Waybill number, and deterministic storage path
 before downloading the PDF from the private bucket using server-side
 service-role credentials. It attaches the bytes directly to Resend as
 `<invoice_number>.pdf`; no public or signed Storage URL is created. Retries reuse
 the same outbox row ID as the Resend idempotency key and the existing ready PDF.
 Download, validation, or provider failures update only notification state; they
-never regenerate or change a PDF, invoice, or closed trip. Failure details are
+never regenerate or change a PDF, Waybill, or closed trip. Failure details are
 sanitized, and Waybill-ready outbox metadata contains no banking fields. The
 existing notification scheduler also reconciles ready events; no separate
 notification system or scheduler is introduced.
@@ -308,8 +308,8 @@ bodies and sensitive request payloads are not logged.
 
 Migration `20260927000700_operations_waybills_payouts.sql` adds Operations-only,
 server-paginated Waybill register/detail/history RPCs. Register and history omit
-banking and recipient/provider data. Detail returns only the selected invoice
-and payout banking; closure-time invoice banking is never changed. Ready PDFs
+banking and recipient/provider data. Detail returns only the selected Waybill
+and payout banking; the closure-time Waybill banking snapshot is never changed. Ready PDFs
 are downloaded by the authenticated Operations browser directly from the
 existing private bucket with its RLS-protected user session, without a public
 or signed URL.

@@ -48,16 +48,29 @@ const tripRow = { trip_id: 'trip-1', trip_number: 'TRP-001', truck_id: 'truck-1'
   cancelled_at: null, estimated_tonnage_tonnes: 10.25, tonnage_tonnes: 12.5, status: 'closed' };
 const page = { summary: { rows: 1, trips_opened: 0, trips_closed: 1, trips_cancelled: 0, open_trips: 0, tonnage_tonnes: 12.5 },
   items: [tripRow], total_count: 1, page: 1, page_size: 25, has_next: false };
+const waybillSummary = { waybills: 1, pdf_failed: 0, delivery_failed: 0,
+  payment_details_required: 0, pending_payout: 1, paid: 0 };
+const waybillRow = { invoice_id: 'waybill-1', invoice_number: 'INV-2026-000001', trip_number: 'TRP-001',
+  truck_plate: 'RPT-001', driver_name: 'Driver', tonnage_tonnes: 12.5, issued_at: timestamp,
+  pdf_status: 'ready', driver_delivery_status: 'sent', internal_delivery_status: 'sent', payout_status: 'pending' };
+const waybillPage = { summary: waybillSummary, items: [waybillRow], total_count: 1,
+  page: 1, page_size: 25, has_next: false };
 assert.equal(service.validateReportPage('trips', page).items.length, 1);
 assert.throws(() => service.validateReportPage('trips', { ...page, items: [{ ...tripRow, bank_name: 'Sensitive' }] }), /Invalid/);
 assert.throws(() => service.validateReportPage('trips', { ...page, summary: { ...page.summary, raw_payload: 1 } }), /Invalid/);
 assert.throws(() => service.validateReportPage('trips', { ...page, page_size: 101 }), /Invalid/);
+const parsedWaybillPage = service.validateReportPage('waybills', waybillPage);
+assert.equal(parsedWaybillPage.items[0].waybill_id, 'waybill-1');
+assert.equal(parsedWaybillPage.items[0].waybill_number, 'INV-2026-000001');
+assert(!('invoice_number' in parsedWaybillPage.items[0]) && !('invoice_id' in parsedWaybillPage.items[0]));
+assert(service.buildCsv('waybills', parsedWaybillPage.items).includes('"INV-2026-000001"'));
 console.log('PASS fixed report projections, bounded pagination and sensitive-field rejection');
 
-rpcHandler = async name => ({ data: name === 'get_operations_report' ? page : {
-  export_id: 'export-1', report_kind: 'trips', format: 'csv', filters: { basis: 'opened', date_from: '2000-01-01', date_to: '2000-01-30' },
-  summary: page.summary, items: [tripRow], row_count: 1, generated_at: timestamp,
-}, error: null });
+rpcHandler = async (name, args) => ({ data: name === 'get_operations_report'
+  ? args.p_kind === 'waybills' ? waybillPage : page
+  : { export_id: 'export-1', report_kind: args.p_kind, format: 'csv', filters: args.p_filters,
+    summary: args.p_kind === 'waybills' ? waybillSummary : page.summary,
+    items: args.p_kind === 'waybills' ? [waybillRow] : [tripRow], row_count: 1, generated_at: timestamp }, error: null });
 assert.equal((await service.loadOperationsReport('trips', { basis: 'opened', date_from: '2000-01-01', date_to: '2000-01-30' }, 1)).totalCount, 1);
 assert.deepEqual(calls.at(-1), { name: 'get_operations_report', args: {
   p_kind: 'trips', p_filters: { basis: 'opened', date_from: '2000-01-01', date_to: '2000-01-30' }, p_page: 1, p_page_size: 25,
@@ -66,6 +79,11 @@ const exported = await service.exportOperationsReport('trips', { basis: 'opened'
 assert.equal(exported.rowCount, 1);
 assert.equal(calls.at(-1).name, 'export_operations_report');
 assert.equal(calls.at(-1).args.p_format, 'csv');
+const waybillReport = await service.loadOperationsReport('waybills', {}, 1);
+assert.equal(waybillReport.items[0].waybill_number, 'INV-2026-000001');
+const waybillExport = await service.exportOperationsReport('waybills', {}, 'csv');
+assert.equal(waybillExport.items[0].waybill_id, 'waybill-1');
+assert.equal(waybillExport.items[0].waybill_number, 'INV-2026-000001');
 await assert.rejects(() => service.loadOperationsReport('trips', { raw: 'any' }, 1), /Invalid report filters/);
 rpcHandler = async () => ({ data: null, error: { code: 'P0001', details: 'EXPORT_LIMIT_EXCEEDED' } });
 await assert.rejects(() => service.exportOperationsReport('trips', {}, 'csv'), /1,000 rows/);

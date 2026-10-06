@@ -1,5 +1,5 @@
 import { supabase } from '../../../lib/supabase';
-import type { OffloadingLookupResult } from '../types';
+import { normalizeOffloadingPlate, type OffloadingLookupResult, type OffloadingOpenTripsResult } from '../types';
 
 export class OffloadingAuthorizationError extends Error {
   constructor() { super('Offloading access unavailable'); }
@@ -43,6 +43,54 @@ export function parseOffloadingLookup(value: unknown): OffloadingLookupResult {
     openedAt: trip.opened_at as string, loadingSiteName: trip.loading_site_name as string,
     estimatedQuantityTonnes: trip.estimated_quantity_tonnes as number | null,
   } };
+}
+
+const openTripsFailures = new Set(['SITE_ASSIGNMENT_REQUIRED', 'INVALID_SITE_ASSIGNMENT', 'INACTIVE_SITE']);
+
+export function parseOffloadingOpenTrips(value: unknown): OffloadingOpenTripsResult {
+  if (!record(value)) throw new Error('Invalid Offloading Open Trips response');
+  if (value.ok === false && nonempty(value.code) && openTripsFailures.has(value.code)) {
+    return { kind: 'business_failure', code: value.code as Extract<OffloadingOpenTripsResult,
+      { kind: 'business_failure' }>['code'] };
+  }
+  if (value.ok !== true || !record(value.assignment) || !Array.isArray(value.trips)) {
+    throw new Error('Invalid Offloading Open Trips response');
+  }
+  const assignment = value.assignment;
+  if (![assignment.assignment_id, assignment.site_id, assignment.site_name].every(nonempty)) {
+    throw new Error('Invalid Offloading Open Trips response');
+  }
+  const trips = value.trips.map(row => {
+    if (!record(row) || ![row.id, row.trip_number, row.truck_id, row.registration_number,
+      row.normalized_registration, row.opened_at, row.loading_site_name].every(nonempty)
+      || Number.isNaN(Date.parse(row.opened_at as string))
+      || normalizeOffloadingPlate(row.registration_number as string) !== row.normalized_registration
+      || !/^[A-Z0-9]{1,32}$/.test(row.normalized_registration as string)) {
+      throw new Error('Invalid Offloading Open Trips response');
+    }
+    return {
+      id: row.id as string,
+      tripNumber: row.trip_number as string,
+      truckId: row.truck_id as string,
+      registrationNumber: row.registration_number as string,
+      normalizedRegistration: row.normalized_registration as string,
+      openedAt: row.opened_at as string,
+      loadingSiteName: row.loading_site_name as string,
+    };
+  });
+  return { kind: 'ready', value: {
+    assignment: { assignmentId: assignment.assignment_id as string,
+      siteId: assignment.site_id as string, siteName: assignment.site_name as string },
+    trips,
+  } };
+}
+
+export async function loadOffloadingOpenTrips(): Promise<OffloadingOpenTripsResult> {
+  if (!supabase) throw new Error('Offloading Open Trips unavailable');
+  const { data, error } = await supabase.rpc('get_offloading_open_trips');
+  if (error?.code === '42501') throw new OffloadingAuthorizationError();
+  if (error) throw new Error('Offloading Open Trips unavailable');
+  return parseOffloadingOpenTrips(data);
 }
 
 export async function lookupOffloadingOpenTrip(plate: string): Promise<OffloadingLookupResult> {

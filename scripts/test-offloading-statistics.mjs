@@ -98,7 +98,7 @@ assert.equal(operationalDateKey(new Date('2026-09-27T22:59:59Z')), '2026-09-27')
 assert.equal(operationalDateKey(new Date('2026-09-27T23:00:00Z')), '2026-09-28');
 const portalSource = readFileSync('src/features/offloading/OffloadingPortal.tsx', 'utf8');
 assert(portalSource.includes('setInterval(() => setNow(new Date()), 60_000)'));
-assert(portalSource.includes('[actorId, dateKey, statisticsRevision]'));
+assert(portalSource.includes('[actorId, operationalDate, dateKey, statisticsRevision]'));
 
 const { ClosureController } = load('src/features/offloading/utils/closureController.ts');
 const review = { assignment: { assignmentId: 'assignment-a', siteId: 'site-a', siteName: 'Site A' },

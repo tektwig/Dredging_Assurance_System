@@ -29,7 +29,10 @@ select pg_temp.pdf_assert(not has_table_privilege('service_role','public.trip_cl
   and has_function_privilege('service_role','public.get_waybill_pdf_snapshot(uuid,uuid)','EXECUTE')
   and not has_function_privilege('authenticated','public.get_waybill_pdf_snapshot(uuid,uuid)','EXECUTE'),
   'worker can read snapshots only through its lease-scoped RPC');
-select pg_temp.pdf_assert(has_function_privilege('service_role','public.enqueue_waybill_ready_notifications(text[])','EXECUTE')
+select pg_temp.pdf_assert(has_function_privilege('service_role','public.enqueue_waybill_ready_notifications()','EXECUTE')
+  and not has_function_privilege('anon','public.enqueue_waybill_ready_notifications()','EXECUTE')
+  and not has_function_privilege('authenticated','public.enqueue_waybill_ready_notifications()','EXECUTE')
+  and has_function_privilege('service_role','public.enqueue_waybill_ready_notifications(text[])','EXECUTE')
   and not has_function_privilege('anon','public.enqueue_waybill_ready_notifications(text[])','EXECUTE')
   and not has_function_privilege('authenticated','public.enqueue_waybill_ready_notifications(text[])','EXECUTE')
   and has_function_privilege('service_role','public.get_waybill_ready_pdf(uuid,uuid)','EXECUTE')
@@ -38,6 +41,8 @@ select pg_temp.pdf_assert(has_function_privilege('service_role','public.enqueue_
   and has_function_privilege('service_role','public.claim_trip_notifications(text[],text,integer,boolean)','EXECUTE')
   and not has_function_privilege('anon','public.claim_trip_notifications(text[],text,integer,boolean)','EXECUTE')
   and not has_function_privilege('authenticated','public.claim_trip_notifications(text[],text,integer,boolean)','EXECUTE')
+  and has_function_privilege('service_role','public.claim_trip_notifications(text[],text,integer,boolean,boolean)','EXECUTE')
+  and not has_function_privilege('authenticated','public.claim_trip_notifications(text[],text,integer,boolean,boolean)','EXECUTE')
   and has_function_privilege('service_role','public.finish_trip_notification(uuid,uuid,boolean,text,text)','EXECUTE')
   and not has_function_privilege('authenticated','public.finish_trip_notification(uuid,uuid,boolean,text,text)','EXECUTE'),
   'Waybill notification reconciliation and PDF metadata RPCs are service-role only');
@@ -123,7 +128,7 @@ where trip_id not in (select id from pdf_test_trips);
 select pg_temp.pdf_assert((select count(*)=2 from public.trip_closure_invoice_documents d
   join public.trip_closure_invoices i on i.id=d.invoice_id and i.trip_id=d.trip_id
   where d.trip_id in (select id from pdf_test_trips) and d.status='pending' and d.attempts=0
-    and d.storage_path=substring(i.invoice_number from 5 for 4)||'/'||i.invoice_number||'.pdf'),
+    and d.storage_path=private.waybill_storage_path(i.invoice_number)),
   'one deterministic pending PDF document is queued per closed Waybill');
 select pg_temp.pdf_expect_error($q$
  insert into public.trip_closure_invoice_documents(invoice_id,trip_id,invoice_number,storage_path)
@@ -201,13 +206,13 @@ select pg_temp.pdf_assert((select count(*)=1 and min(attempts)=1 from claimed_pd
   'claim moves one queued document into processing and increments attempts');
 select pg_temp.pdf_assert((select count(*)=1 from public.get_waybill_pdf_snapshot(
   (select id from claimed_pdf),(select lease_token from claimed_pdf))),
-  'worker can read exactly its invoice snapshot while holding the current lease');
+  'worker can read exactly its Waybill snapshot while holding the current lease');
 update public.trip_closure_invoice_documents
 set lease_until=clock_timestamp()-interval '1 second'
 where id=(select id from claimed_pdf);
 select pg_temp.pdf_assert((select count(*)=0 from public.get_waybill_pdf_snapshot(
   (select id from claimed_pdf),(select lease_token from claimed_pdf))),
-  'expired worker cannot fetch the invoice snapshot before another claim');
+  'expired worker cannot fetch the Waybill snapshot before another claim');
 select pg_temp.pdf_assert(not public.finish_waybill_pdf_job(
   (select id from claimed_pdf),(select lease_token from claimed_pdf),true,null),
   'expired worker cannot mark a PDF ready before another claim');
@@ -232,17 +237,16 @@ select pg_temp.pdf_assert((select status='ready' and ready_at is not null and at
   'ready state has timestamp and preserves its single document row');
 
 create temp table waybill_enqueue_count as
-select public.enqueue_waybill_ready_notifications(
-  array['ops@example.invalid','finance@example.invalid','ops@example.invalid']) as inserted;
+select public.enqueue_waybill_ready_notifications() as inserted;
 select pg_temp.pdf_assert((select inserted>=2 from waybill_enqueue_count),
   'ready Waybill reconciliation also backfills existing ready documents; observed count=' ||
     (select inserted::text from waybill_enqueue_count));
-select pg_temp.pdf_assert(public.enqueue_waybill_ready_notifications(
-  array['ops@example.invalid','finance@example.invalid'])=0,
+select pg_temp.pdf_assert(public.enqueue_waybill_ready_notifications()=0
+  and public.enqueue_waybill_ready_notifications(array['ignored@example.invalid'])=0,
   'reconciliation is idempotent and does not duplicate ready events');
 select pg_temp.pdf_assert((select count(*)=2 from public.notification_outbox
   where trip_id=(select trip_id from claimed_pdf) and event_type='waybill_ready'),
-  'one Waybill-ready event exists per audience');
+  'only driver and target-company Waybill-ready events exist once each');
 select pg_temp.pdf_assert((select recipients=array['pdf-driver@example.invalid']
   and payload->>'invoice_number'=(select invoice_number from claimed_pdf)
   and payload->>'storage_path'=(select storage_path from claimed_pdf)
@@ -250,11 +254,14 @@ select pg_temp.pdf_assert((select recipients=array['pdf-driver@example.invalid']
   from public.notification_outbox where trip_id=(select trip_id from claimed_pdf)
     and event_type='waybill_ready' and audience='driver'),
   'driver message targets only its immutable email and has no bank/address metadata leakage');
-select pg_temp.pdf_assert((select recipients=array['ops@example.invalid','finance@example.invalid']
-  and not (payload ?| array['bank_name','account_name','account_number','driver_email'])
+select pg_temp.pdf_assert((select count(*)=0 from public.notification_outbox
+  where trip_id=(select trip_id from claimed_pdf) and event_type='waybill_ready' and audience='finance'),
+  'Operations and Finance do not receive an automatic Waybill email row');
+select pg_temp.pdf_assert((select recipients is null
+  and not (payload ?| array['recipient','recipients','email','client_email'])
   from public.notification_outbox where trip_id=(select trip_id from claimed_pdf)
-    and event_type='waybill_ready' and audience='finance'),
-  'internal recipients are deduplicated and Waybill-ready metadata omits banking data');
+    and event_type='waybill_ready' and audience='client'),
+  'target-company address remains outside the browser-readable outbox row');
 select pg_temp.pdf_assert((select count(*)=0 from public.notification_outbox
   where trip_id in (select id from pdf_test_trips where id<>(select trip_id from claimed_pdf))
     and event_type='waybill_ready'),
@@ -268,14 +275,21 @@ select pg_temp.pdf_assert((select count(*)=0 from claimed_without_waybill where 
   'legacy claim callers continue to lease only trip_closed notifications');
 create temp table claimed_waybill_notifications as
 select * from public.claim_trip_notifications(
-  array['legacy-finance@example.invalid'],'sender@example.invalid',10,true);
+  array['legacy-finance@example.invalid'],'sender@example.invalid',10,true,false);
+select pg_temp.pdf_assert((select count(*)=1 from claimed_waybill_notifications
+    where event_type='waybill_ready' and audience='driver' and trip_id=(select trip_id from claimed_pdf))
+  and not exists(select 1 from claimed_waybill_notifications
+    where event_type='waybill_ready' and audience='client')
+  and (select status='pending' and recipients is null from public.notification_outbox
+    where trip_id=(select trip_id from claimed_pdf) and event_type='waybill_ready' and audience='client'),
+  'missing target-company configuration still claims driver mail and leaves target copy pending');
 do $$
 declare v_count integer; batch_number integer;
 begin
   for batch_number in 1..10 loop
     insert into claimed_waybill_notifications
     select * from public.claim_trip_notifications(
-      array['legacy-finance@example.invalid'],'sender@example.invalid',10,true);
+      array['legacy-finance@example.invalid'],'sender@example.invalid',10,true,true);
     get diagnostics v_count=row_count;
     exit when v_count=0;
   end loop;
@@ -285,8 +299,17 @@ select pg_temp.pdf_assert((select count(*)=2 from claimed_waybill_notifications
   and (select count(*)=1 from claimed_waybill_notifications
     where event_type='waybill_ready' and audience='driver' and trip_id=(select trip_id from claimed_pdf))
   and (select count(*)=1 from claimed_waybill_notifications
-    where event_type='waybill_ready' and audience='finance' and trip_id=(select trip_id from claimed_pdf)),
-  'worker claims the queued driver and internal ready events through the existing outbox');
+    where event_type='waybill_ready' and audience='client' and trip_id=(select trip_id from claimed_pdf)),
+  'worker claims driver and target-company ready events through the existing outbox');
+select pg_temp.pdf_assert((select recipients=array[]::text[] and email_request->'to'='[]'::jsonb
+  from claimed_waybill_notifications where audience='client' and trip_id=(select trip_id from claimed_pdf)),
+  'claimed target-company row persists no target address');
+select pg_temp.pdf_assert((select count(*)=2 from claimed_waybill_notifications
+  where event_type='waybill_ready' and trip_id=(select trip_id from claimed_pdf)
+    and email_request->>'subject'=('Waybill ' || (payload->>'invoice_number') || ' for trip ' || (payload->>'trip_number'))
+    and email_request->>'text'=('The issued Waybill PDF is attached.' || E'\nWaybill Number: ' || (payload->>'invoice_number')
+      || E'\nTrip Number: ' || (payload->>'trip_number'))),
+  'generated driver and target-company templates use Waybill terminology and stored references');
 select pg_temp.pdf_assert((select count(*)=1 from public.get_waybill_ready_pdf(
   (select id from claimed_waybill_notifications where event_type='waybill_ready' and trip_id=(select trip_id from claimed_pdf) limit 1),
   (select lease_token from claimed_waybill_notifications where event_type='waybill_ready' and trip_id=(select trip_id from claimed_pdf) limit 1))),
@@ -372,14 +395,21 @@ update public.trip_closure_invoice_documents
 set status='ready',ready_at=clock_timestamp(),failed_at=null,lease_token=null,lease_until=null
 where trip_id=(select trip_id from public.trip_closure_invoices
   where trip_id in (select id from pdf_test_trips) and driver_email is null limit 1);
+create temp table missing_driver_enqueue_result as
+select public.enqueue_waybill_ready_notifications(array['ignored@example.invalid']) as inserted;
+select pg_temp.pdf_assert((select inserted=1 from missing_driver_enqueue_result),
+  'missing immutable driver_email still queues only the target-company copy');
 select pg_temp.pdf_assert((select driver_email is null from public.trip_closure_invoices
   where trip_id=(select trip_id from public.trip_closure_invoices
     where trip_id in (select id from pdf_test_trips) and driver_email is null limit 1))
-  and public.enqueue_waybill_ready_notifications(array['ops@example.invalid'])=1
   and (select count(*)=0 from public.notification_outbox n
     where n.trip_id=(select trip_id from public.trip_closure_invoices
       where trip_id in (select id from pdf_test_trips) and driver_email is null limit 1)
-      and n.event_type='waybill_ready' and n.audience='driver'),
-  'ready Waybill without immutable driver_email sends no driver event');
+      and n.event_type='waybill_ready' and n.audience='driver')
+  and (select count(*)=1 from public.notification_outbox n
+    where n.trip_id=(select trip_id from public.trip_closure_invoices
+      where trip_id in (select id from pdf_test_trips) and driver_email is null limit 1)
+      and n.event_type='waybill_ready' and n.audience='client'),
+  'missing immutable driver_email suppresses driver mail while target-company delivery remains queued');
 
 rollback;

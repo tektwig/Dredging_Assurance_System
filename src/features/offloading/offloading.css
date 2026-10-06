@@ -9,3 +9,19 @@
 .offloading-tonnage p { margin: 0; color: #8b3a24; }
 .offloading-review-actions { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 1.2rem; }
 .offloading-review-actions .button { min-height: 3rem; }
+.offloading-open-trips { display: grid; gap: .8rem; list-style: none; margin: 1rem 0 0; padding: 0; }
+.offloading-open-trips > li { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 1rem; border: 1px solid #cbd9d6; border-radius: .55rem; background: #fff; }
+.offloading-open-trip-details { min-width: 0; }
+.offloading-open-trip-plate { font-size: 1.25rem; letter-spacing: .04em; }
+.offloading-open-trip-details dl { display: flex; flex-wrap: wrap; gap: .55rem 1.25rem; margin: .65rem 0 0; }
+.offloading-open-trip-details dl > div { display: grid; gap: .15rem; }
+.offloading-open-trip-details dt { color: #50645f; font-size: .78rem; }
+.offloading-open-trip-details dd { margin: 0; font-weight: 600; }
+.offloading-open-trips .button { flex: 0 0 auto; min-height: 3rem; }
+.offloading-scan-step { margin-top: 1.2rem; padding-top: 1rem; border-top: 1px solid #cbd9d6; }
+.offloading-portal .loading-work-card > .loading-result-ready h2 { margin: .2rem 0 .75rem; }
+@media (max-width: 600px) {
+  .offloading-open-trips > li { align-items: stretch; flex-direction: column; }
+  .offloading-open-trips .button { width: 100%; }
+}

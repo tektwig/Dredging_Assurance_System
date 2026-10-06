@@ -54,20 +54,17 @@ export async function generateWaybillPdf(snapshot: WaybillSnapshot): Promise<Uin
     ['Offloading Officer', snapshot.offloading_officer_name],
     ['Issued At', snapshot.issued_at],
   ];
-  const hasBankDetails = Boolean(snapshot.bank_name || snapshot.account_name || snapshot.account_number);
-  if (hasBankDetails) {
-    fields.splice(9, 0,
-      ['Bank Name', snapshot.bank_name],
-      ['Account Name', snapshot.account_name],
-      ['Account Number', snapshot.account_number]);
-  }
+  fields.splice(9, 0,
+    ['Bank Name', snapshot.bank_name],
+    ['Account Name', snapshot.account_name],
+    ['Account Number', snapshot.account_number]);
 
   let page = document.addPage([pageWidth, pageHeight]);
   let y = pageHeight - margin;
   const drawHeader = () => {
     page.drawText('WAYBILL', { x: margin, y, size: 18, font: bold, color: rgb(0.12, 0.2, 0.3) });
     y -= 26;
-    page.drawText(`Invoice Number: ${snapshot.invoice_number}`, { x: margin, y, size: 11, font: bold });
+    page.drawText(`Waybill Number: ${snapshot.invoice_number}`, { x: margin, y, size: 11, font: bold });
     y -= 26;
   };
   const nextPage = () => {

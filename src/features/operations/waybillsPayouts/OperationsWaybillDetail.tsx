@@ -12,29 +12,26 @@ import { formatLagosDate } from './OperationsWaybillsRegister';
 import './waybills.css';
 
 type State = { status: 'loading' } | { status: 'error' } | { status: 'not-found' } | { status: 'ready'; data: WaybillDetail };
-type Audience = 'driver' | 'finance';
-
 function DetailField({ label, children }: { label: string; children: ReactNode }) {
   return <div><dt>{label}</dt><dd>{children ?? '—'}</dd></div>;
 }
 
 function ResendForm({ detail, onDone, onError }: { detail: WaybillDetail; onDone: () => void; onError: (message: string) => void }) {
-  const [audience, setAudience] = useState<Audience>('driver');
   const [reason, setReason] = useState(detail.delivery.driver === 'failed' ? 'DELIVERY_UNCONFIRMED' : 'DRIVER_REQUEST');
   const [duplicateConfirmed, setDuplicateConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const requestId = useRef(crypto.randomUUID());
-  const currentStatus = audience === 'driver' ? detail.delivery.driver : detail.delivery.internal;
+  const currentStatus = detail.delivery.driver;
   const risk = currentStatus === 'failed';
-  const eligible = detail.document.status === 'ready' && (audience !== 'driver' || detail.invoice.driver_email_available);
+  const eligible = detail.document.status === 'ready' && detail.waybill.driver_email_available;
   const resetRequest = () => { requestId.current = crypto.randomUUID(); setDuplicateConfirmed(false); setError(''); };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (busy || !eligible || risk && !duplicateConfirmed) return;
     setBusy(true); setError('');
     try {
-      await resendWaybill(detail.invoice.id, audience, requestId.current, reason, duplicateConfirmed);
+      await resendWaybill(detail.waybill.id, 'driver', requestId.current, reason, duplicateConfirmed);
       requestId.current = crypto.randomUUID(); onDone();
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : 'Unable to resend Waybill';
@@ -46,26 +43,19 @@ function ResendForm({ detail, onDone, onError }: { detail: WaybillDetail; onDone
   const retry = async () => {
     if (busy) return;
     setBusy(true); setError('');
-    try { await retryWaybillDelivery(detail.invoice.id, audience, 'DELIVERY_UNCONFIRMED'); onDone(); }
+    try { await retryWaybillDelivery(detail.waybill.id, 'driver', 'DELIVERY_UNCONFIRMED'); onDone(); }
     catch (failure) { const message = failure instanceof Error ? failure.message : 'Unable to retry delivery';
       setError(message); onError(message); }
     finally { setBusy(false); }
   };
   return <form className="waybill-action-form" onSubmit={event => void submit(event)}>
-    <h3>Controlled resend</h3>
-    <p className="muted">Creates a separate audited delivery attempt using the existing PDF and immutable recipient snapshot.</p>
-    <label>Audience<select value={audience} onChange={event => {
-      const selected = event.currentTarget.value as Audience;
-      setAudience(selected);
-      setReason((selected === 'driver' ? detail.delivery.driver : detail.delivery.internal) === 'failed'
-        ? 'DELIVERY_UNCONFIRMED' : selected === 'driver' ? 'DRIVER_REQUEST' : 'INTERNAL_REQUEST');
-      resetRequest();
-    }}><option value="driver">Driver</option><option value="finance">Internal Operations / Finance</option></select></label>
+    <h3>Controlled driver resend</h3>
+    <p className="muted">Creates a separate audited driver delivery using the existing PDF and immutable recipient snapshot.
+      Operations and Finance access the Waybill through this portal.</p>
     <label>Reason code<select value={reason} onChange={event => { setReason(event.currentTarget.value); resetRequest(); }}>
       {risk ? <><option value="DELIVERY_UNCONFIRMED">Delivery unconfirmed</option>
         <option value="CORRECTIVE_RESEND">Corrective resend</option></>
-        : <><option value="DRIVER_REQUEST">Driver request</option><option value="INTERNAL_REQUEST">Internal request</option>
-          <option value="CORRECTIVE_RESEND">Corrective resend</option></>}
+        : <><option value="DRIVER_REQUEST">Driver request</option><option value="CORRECTIVE_RESEND">Corrective resend</option></>}
     </select></label>
     {risk && <><p className="waybill-warning">A previous delivery failed. Provider acceptance may be uncertain.
       Try the same delivery within its safe retry window. Outside that window, a new resend may duplicate delivery.</p>
@@ -143,33 +133,33 @@ export function OperationsWaybillDetailView({ state, history, historyError, hist
   if (state.status === 'error') return <ListResultState status="error" message="Unable to load Waybill detail." onRetry={onRetry} />;
   if (state.status === 'not-found') return <section className="card"><h1>Waybill not found</h1>
     <Link to="/operations/waybills-payouts">Back to Waybills</Link></section>;
-  const { invoice, document, payment, delivery } = state.data;
+  const { waybill, document, payment, delivery } = state.data;
   return <div className="operations-waybills-page">
     <header><Link to="/operations/waybills-payouts">← Waybills &amp; Payouts</Link>
-      <p className="eyebrow">Immutable Waybill</p><h1>{invoice.invoice_number}</h1>
-      <p>Trip <Link to={`/operations/trips/${invoice.trip_id}`}>{invoice.trip_number}</Link> · Issued {formatLagosDate(invoice.issued_at)}</p></header>
+      <p className="eyebrow">Immutable Waybill</p><h1>{waybill.waybill_number}</h1>
+      <p>Trip <Link to={`/operations/trips/${waybill.trip_id}`}>{waybill.trip_number}</Link> · Issued {formatLagosDate(waybill.issued_at)}</p></header>
     <section className="card waybill-section"><h2>Waybill snapshot</h2><dl className="waybill-detail-grid">
-      <DetailField label="Truck">{invoice.truck_registration}</DetailField><DetailField label="Type">{invoice.truck_type}</DetailField>
-      <DetailField label="Capacity">{invoice.truck_capacity_tonnes === null ? '—' : `${invoice.truck_capacity_tonnes.toFixed(2)} t`}</DetailField>
-      <DetailField label="Owner">{invoice.truck_owner_name}</DetailField><DetailField label="Driver">{invoice.driver_name}</DetailField>
-      <DetailField label="Phone">{invoice.driver_phone}</DetailField><DetailField label="License">{invoice.driver_license}</DetailField>
-      <DetailField label="Loading site">{invoice.loading_site_name}</DetailField>
-      <DetailField label="Loading officer">{invoice.loading_officer_name}</DetailField>
-      <DetailField label="Opened">{formatLagosDate(invoice.opened_at)}</DetailField>
-      <DetailField label="Offloading site">{invoice.offloading_site_name}</DetailField>
-      <DetailField label="Offloading officer">{invoice.offloading_officer_name}</DetailField>
-      <DetailField label="Closed">{formatLagosDate(invoice.closed_at)}</DetailField>
-      <DetailField label="Tonnage">{invoice.quantity_tonnes.toFixed(2)} t</DetailField>
-      <DetailField label="Closure account name">{invoice.closure_account_name}</DetailField>
-      <DetailField label="Closure account number">{invoice.closure_account_number}</DetailField>
-      <DetailField label="Closure bank">{invoice.closure_bank_name}</DetailField>
+      <DetailField label="Truck">{waybill.truck_registration}</DetailField><DetailField label="Type">{waybill.truck_type}</DetailField>
+      <DetailField label="Capacity">{waybill.truck_capacity_tonnes === null ? '—' : `${waybill.truck_capacity_tonnes.toFixed(2)} t`}</DetailField>
+      <DetailField label="Owner">{waybill.truck_owner_name}</DetailField><DetailField label="Driver">{waybill.driver_name}</DetailField>
+      <DetailField label="Phone">{waybill.driver_phone}</DetailField><DetailField label="License">{waybill.driver_license}</DetailField>
+      <DetailField label="Loading site">{waybill.loading_site_name}</DetailField>
+      <DetailField label="Loading officer">{waybill.loading_officer_name}</DetailField>
+      <DetailField label="Opened">{formatLagosDate(waybill.opened_at)}</DetailField>
+      <DetailField label="Offloading site">{waybill.offloading_site_name}</DetailField>
+      <DetailField label="Offloading officer">{waybill.offloading_officer_name}</DetailField>
+      <DetailField label="Closed">{formatLagosDate(waybill.closed_at)}</DetailField>
+      <DetailField label="Tonnage">{waybill.quantity_tonnes.toFixed(2)} t</DetailField>
+      <DetailField label="Closure account name">{waybill.closure_account_name}</DetailField>
+      <DetailField label="Closure account number">{waybill.closure_account_number}</DetailField>
+      <DetailField label="Closure bank">{waybill.closure_bank_name}</DetailField>
     </dl></section>
     <section className="card waybill-section"><h2>PDF</h2><p>Status: {document.status}</p>
       {document.ready_at && <p>Ready: {formatLagosDate(document.ready_at)}</p>}
       <button className="button secondary" type="button" disabled={document.status !== 'ready'}
         onClick={() => onDownload(state.data)}>Download private PDF</button></section>
     <section className="card waybill-section"><h2>Delivery</h2>
-      <p>Driver: {delivery.driver ?? 'not queued'} · Internal: {delivery.internal ?? 'not queued'}</p>
+      <p>Driver email: {delivery.driver ?? 'not queued'} · Operations / Finance: portal access and download only.</p>
       <ResendForm detail={state.data} onDone={onRefresh} onError={onActionError} />
       <h3>Delivery history</h3>
       {!history && (historyError ? <ListResultState status="error" message="Unable to load delivery history." onRetry={onRetry} />
@@ -178,7 +168,8 @@ export function OperationsWaybillDetailView({ state, history, historyError, hist
       {history && history.items.length > 0 && <><div className="operations-table-scroll"><table className="operations-table">
         <thead><tr><th>Created</th><th>Audience</th><th>Sequence</th><th>Status</th><th>Attempts</th><th>Sent</th><th>Reason</th></tr></thead>
         <tbody>{history.items.map(attempt => <tr key={attempt.notification_id}>
-          <td>{formatLagosDate(attempt.created_at)}</td><td>{attempt.audience === 'finance' ? 'Internal' : 'Driver'}</td>
+          <td>{formatLagosDate(attempt.created_at)}</td><td>{attempt.audience === 'finance' ? 'Internal'
+            : attempt.audience === 'client' ? 'Target company' : 'Driver'}</td>
           <td>{attempt.sequence}</td><td>{attempt.status}</td><td>{attempt.attempts}</td>
           <td>{formatLagosDate(attempt.sent_at)}</td><td>{attempt.requested_reason_code ?? 'Original delivery'}</td>
         </tr>)}</tbody></table></div>
@@ -197,7 +188,7 @@ export function OperationsWaybillDetailView({ state, history, historyError, hist
 }
 
 export function OperationsWaybillDetail() {
-  const { invoiceId } = useParams();
+  const { waybillId } = useParams();
   const [state, setState] = useState<State>({ status: 'loading' });
   const [history, setHistory] = useState<Page<DeliveryAttempt> | null>(null);
   const [historyError, setHistoryError] = useState(false);
@@ -208,14 +199,14 @@ export function OperationsWaybillDetail() {
   useEffect(() => {
     let current = true;
     setState({ status: 'loading' }); setHistory(null); setHistoryError(false);
-    if (!invoiceId) { setState({ status: 'not-found' }); return; }
-    void loadWaybillDetail(invoiceId).then(data => {
+    if (!waybillId) { setState({ status: 'not-found' }); return; }
+    void loadWaybillDetail(waybillId).then(data => {
       if (current) setState(data ? { status: 'ready', data } : { status: 'not-found' });
     }).catch(() => { if (current) setState({ status: 'error' }); });
-    void loadDeliveryHistory(invoiceId, historyPage).then(data => { if (current) setHistory(data); })
+    void loadDeliveryHistory(waybillId, historyPage).then(data => { if (current) setHistory(data); })
       .catch(() => { if (current) setHistoryError(true); });
     return () => { current = false; };
-  }, [invoiceId, historyPage, revision]);
+  }, [waybillId, historyPage, revision]);
   return <>{message && <p role="alert">{message}</p>}
     <OperationsWaybillDetailView state={state} history={history} historyError={historyError} historyPage={historyPage}
       onHistoryPageChange={setHistoryPage} onRetry={refresh} onRefresh={refresh}

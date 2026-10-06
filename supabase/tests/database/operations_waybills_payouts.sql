@@ -122,6 +122,11 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub','c8110000-0000-0000-0000-000000000001',true);
 select pg_temp.waybill_ops_assert((public.get_operations_waybills(1,25,'INV-2026-888881')->>'total_count')::integer=1,
   'server register filters by Waybill number');
+select pg_temp.waybill_ops_assert((public.get_operations_waybill_detail('c8170000-0000-0000-0000-000000000001')
+  #>>'{invoice,invoice_number}')='INV-2026-888881'
+  and (public.get_operations_waybill_detail('c8170000-0000-0000-0000-000000000001')
+    #>>'{document,storage_path}')='2026/INV-2026-888881.pdf',
+  'Operations keeps displaying and resolving the stored path for a historical INV Waybill');
 select pg_temp.waybill_ops_assert((public.get_operations_waybills(1,25,'WAY001')->>'total_count')::integer=1
   and (public.get_operations_waybills(1,25,'Missing Bank')->>'total_count')::integer=1,
   'server register searches normalized snapshot plate and snapshot driver');
@@ -201,7 +206,7 @@ select pg_temp.waybill_ops_assert((public.resend_operations_waybill(
   'DRIVER_REQUEST',false)->>'sequence')='1','request UUID replay is idempotent');
 select pg_temp.waybill_ops_error($q$select public.resend_operations_waybill(
   'c8170000-0000-0000-0000-000000000001','finance','c8180000-0000-0000-0000-000000000003',
-  'DRIVER_REQUEST',false)$q$,'P4091');
+  'DRIVER_REQUEST',false)$q$,'22023');
 select pg_temp.waybill_ops_assert(position('immutable-driver@example.invalid' in
   public.get_operations_waybill_delivery_history('c8170000-0000-0000-0000-000000000001')::text)=0,
   'history omits recipients');
@@ -231,36 +236,13 @@ select pg_temp.waybill_ops_assert((public.resend_operations_waybill(
   'c8170000-0000-0000-0000-000000000001','driver','c8180000-0000-0000-0000-000000000004',
   'DELIVERY_UNCONFIRMED',true)->>'sequence')='2',
   'explicit duplicate-risk confirmation appends a new driver attempt');
-select pg_temp.waybill_ops_assert((public.resend_operations_waybill(
+select pg_temp.waybill_ops_error($q$select public.resend_operations_waybill(
   'c8170000-0000-0000-0000-000000000001','finance','c8180000-0000-0000-0000-000000000005',
-  'INTERNAL_REQUEST',false)->>'sequence')='1',
-  'internal audience can be resent independently');
+  'INTERNAL_REQUEST',false)$q$,'22023');
 select pg_temp.waybill_ops_assert((public.get_operations_dashboard_summary()
   #>>'{action_required,failed_waybill_emails,count}')::integer=0,
   'Dashboard ignores superseded failed delivery');
 reset role;
-select pg_temp.waybill_ops_assert((select recipients is null and email_request is null
-  from public.notification_outbox where resend_request_id='c8180000-0000-0000-0000-000000000005'),
-  'internal recipients are deferred to trusted worker configuration');
-select pg_temp.waybill_ops_assert((select count(*)=1 from public.claim_trip_notifications(
-  array['legacy-finance@example.invalid'],'sender@example.invalid',10,true,
-  array['current-ops@example.invalid']) where resend_request_id='c8180000-0000-0000-0000-000000000005'),
-  'worker claims internal resend with current configured recipients');
-select pg_temp.waybill_ops_assert((select recipients=array['current-ops@example.invalid']
-  from public.notification_outbox where resend_request_id='c8180000-0000-0000-0000-000000000005'),
-  'first claim freezes internal recipients');
-update public.notification_outbox set status='sent',sent_at=clock_timestamp(),lease_token=null,lease_until=null
-where resend_request_id='c8180000-0000-0000-0000-000000000005';
-set local role authenticated;
-select set_config('request.jwt.claim.sub','c8110000-0000-0000-0000-000000000001',true);
-select pg_temp.waybill_ops_assert((public.resend_operations_waybill(
-  'c8170000-0000-0000-0000-000000000001','finance','c8180000-0000-0000-0000-000000000006',
-  'INTERNAL_REQUEST',false)->>'sequence')='2','later internal resend preserves sent history');
-reset role;
-select pg_temp.waybill_ops_assert((select count(*)=0 from public.claim_trip_notifications(
-  array['legacy-finance@example.invalid'],'sender@example.invalid',10,true,array[]::text[])
-  where resend_request_id='c8180000-0000-0000-0000-000000000006'),
-  'unconfigured internal resend is not claimed');
 set local role authenticated;
 select set_config('request.jwt.claim.sub','c8110000-0000-0000-0000-000000000004',true);
 select pg_temp.waybill_ops_error($q$select public.retry_trip_notification(

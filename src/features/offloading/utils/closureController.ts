@@ -8,6 +8,7 @@ export type ClosureState =
   | { status: 'ambiguous'; review: ClosureReview }
   | { status: 'business_failure'; review: ClosureReview;
       code: Extract<ClosureResult, { kind: 'business_failure' }>['code']; tripNumber?: string }
+  | { status: 'trip_unavailable'; tripNumber?: string }
   | { status: 'site_changed' }
   | { status: 'authorization' }
   | { status: 'success'; result: ClosureSuccess };
@@ -43,7 +44,8 @@ export class ClosureController {
   }
   setInput(review: ClosureReview | null) {
     if (this.pending || this.state.status === 'ambiguous' || this.state.status === 'success'
-      || this.state.status === 'site_changed' || this.state.status === 'authorization') return;
+      || this.state.status === 'trip_unavailable' || this.state.status === 'site_changed'
+      || this.state.status === 'authorization') return;
     const key = reviewKey(review);
     if (key === this.key) return;
     this.revision++;
@@ -85,6 +87,11 @@ export class ClosureController {
         this.candidate = null;
         this.key = null;
         this.publish({ status: 'site_changed' });
+      } else if (result.code === 'TRIP_NOT_OPEN' || result.code === 'TRIP_NOT_FOUND') {
+        this.request = null;
+        this.candidate = null;
+        this.key = null;
+        this.publish({ status: 'trip_unavailable', tripNumber: result.tripNumber });
       } else {
         this.request = null;
         this.publish({ status: 'business_failure', review: request.review,
@@ -108,6 +115,15 @@ export class ClosureController {
     this.key = null;
     this.request = null;
     this.publish({ status: 'idle' });
+    return true;
+  }
+  tripUnavailable(tripNumber?: string) {
+    if (this.pending || this.state.status === 'ambiguous') return false;
+    this.revision++;
+    this.candidate = null;
+    this.key = null;
+    this.request = null;
+    this.publish({ status: 'trip_unavailable', tripNumber });
     return true;
   }
   dispose() { this.disposed = true; this.revision++; this.request = null; }

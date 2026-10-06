@@ -78,7 +78,7 @@ export function parseCloseTripResponse(value: unknown, request: ClosureRequest):
     || capture.capture_method !== review.capture.method
     || capture.image_recorded !== !!review.capture.imagePath
     || typeof waybill.invoice_number !== 'string'
-    || !/^INV-[0-9]{4}-[0-9]{6,}$/.test(waybill.invoice_number)
+    || !/^(INV|WB)-[0-9]{4}-[0-9]{6,}$/.test(waybill.invoice_number)
     || typeof value.notification_queued !== 'boolean') throw new ClosureOutcomeUnknownError();
   return { kind: 'success', requestId: value.request_id as string,
     trip: { id: trip.id as string, tripNumber: trip.trip_number as string, status: 'closed',

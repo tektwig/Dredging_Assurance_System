@@ -31,7 +31,7 @@ const reportColumns: Record<OperationsReportKind, readonly [string, string][]> =
     ['tonnage_tonnes', 'Actual Tonnage'], ['status', 'Status']],
   performance: [['label', 'Truck / Driver / Site'], ['trip_count', 'Trips'], ['closed_count', 'Closed Trips'],
     ['tonnage_tonnes', 'Tonnage']],
-  waybills: [['invoice_number', 'Waybill #'], ['trip_number', 'Trip #'], ['truck_plate', 'Truck'],
+  waybills: [['waybill_number', 'Waybill #'], ['trip_number', 'Trip #'], ['truck_plate', 'Truck'],
     ['driver_name', 'Driver'], ['tonnage_tonnes', 'Tonnage'], ['issued_at', 'Issued At'], ['pdf_status', 'PDF Status'],
     ['driver_delivery_status', 'Driver Delivery'], ['internal_delivery_status', 'Internal Delivery'], ['payout_status', 'Payout Status']],
   exceptions: [['exception_type', 'Type'], ['status', 'Status'], ['blocks_operations', 'Blocking'],
@@ -69,6 +69,14 @@ function validateRows(kind: OperationsReportKind, value: unknown): value is Repo
   return value.every(row => record(row) && exactKeys(row, keys[kind]) && Object.values(row).every(safeCell));
 }
 
+function mapReportRows(kind: OperationsReportKind, rows: ReportRow[]): ReportRow[] {
+  if (kind !== 'waybills') return rows;
+  return rows.map(row => {
+    const { invoice_id, invoice_number, ...fields } = row;
+    return { ...fields, waybill_id: invoice_id, waybill_number: invoice_number };
+  });
+}
+
 function validateSummary(value: unknown): value is Record<string, number> {
   return record(value) && Object.values(value).every(safeNumber);
 }
@@ -91,7 +99,7 @@ export function validateReportPage(kind: OperationsReportKind, value: unknown): 
     || !Number.isSafeInteger(value.page_size) || (value.page_size as number) < 1
     || (value.page_size as number) > MAX_PAGE_SIZE || value.items.length > (value.page_size as number)
     || typeof value.has_next !== 'boolean') throw new Error('Invalid Operations report response');
-  return { summary: value.summary, items: value.items, totalCount: value.total_count as number,
+  return { summary: value.summary, items: mapReportRows(kind, value.items), totalCount: value.total_count as number,
     page: value.page as number, pageSize: value.page_size as number, hasNext: value.has_next };
 }
 
@@ -137,7 +145,7 @@ export async function exportOperationsReport(
     throw new Error('Invalid Operations export response');
   }
   return { exportId: value.export_id, reportKind: kind, format, filters: value.filters as ReportFilters,
-    summary: value.summary, items: value.items, rowCount: value.row_count, generatedAt: value.generated_at };
+    summary: value.summary, items: mapReportRows(kind, value.items), rowCount: value.row_count, generatedAt: value.generated_at };
 }
 
 export function reportColumnsFor(kind: OperationsReportKind) {

@@ -48,7 +48,7 @@ function value(item: DashboardPreview, key: string): string {
 function categoryItem(category: string, item: DashboardPreview): string {
   if (category === 'exception') return `${value(item, 'exception_type').replace(/_/g, ' ')}${value(item, 'trip_number') ? ` · ${value(item, 'trip_number')}` : ''}${value(item, 'truck_registration') ? ` · ${value(item, 'truck_registration')}` : ''}`;
   if (category === 'payment') return `${value(item, 'trip_number')} · ${value(item, 'truck_registration')} · ${value(item, 'driver_name')}`;
-  return `${value(item, 'invoice_number')} · ${value(item, 'trip_number')}`;
+  return `${value(item, 'waybill_number')} · ${value(item, 'trip_number')}`;
 }
 
 function ActionCard({ title, target, category, kind }: {

@@ -108,7 +108,7 @@ function Filters({ kind, filters, change }: { kind: OperationsReportKind; filter
 function ReportTable({ kind, page }: { kind: OperationsReportKind; page: OperationsReportPage }) {
   const columns = reportColumnsFor(kind);
   return <div className="table-scroll"><table><thead><tr>{columns.map(([, label]) => <th key={label}>{label}</th>)}</tr></thead>
-    <tbody>{page.items.map((row, index) => <tr key={String(row.trip_id ?? row.invoice_id ?? row.entity_id ?? `${row.exception_type}-${row.status}-${index}`)}>
+    <tbody>{page.items.map((row, index) => <tr key={String(row.trip_id ?? row.waybill_id ?? row.entity_id ?? `${row.exception_type}-${row.status}-${index}`)}>
       {columns.map(([key]) => <td key={key}>{formatValue(row[key])}</td>)}
     </tr>)}</tbody></table></div>;
 }

@@ -540,23 +540,6 @@ export async function lookupOffloadingOpenTrip(plate: string): Promise<LiveOfflo
   };
 }
 
-export async function closeLiveTrip(params: {
-  tripId: string;
-  offloadingSiteId: string;
-  quantityTonnes: number;
-}): Promise<JsonObject> {
-  const client = await ensureAuthenticatedClient();
-  const { data, error } = await client.rpc('close_trip', {
-    p_trip_id: params.tripId,
-    p_offloading_site_id: params.offloadingSiteId,
-    p_quantity_tonnes: Number(params.quantityTonnes.toFixed(2)),
-  });
-  if (error) throw error;
-  const result = data as JsonObject;
-  if (!result?.ok) throw new Error(formatOperationalError(result?.code) || 'The live trip could not be closed.');
-  return result.trip;
-}
-
 export async function raiseLiveTripException(params: {
   type: string;
   description: string;
@@ -633,3 +616,4 @@ export function subscribeToLiveTrips(onChange: () => void) {
     void supabase?.removeChannel(channel);
   };
 }
+

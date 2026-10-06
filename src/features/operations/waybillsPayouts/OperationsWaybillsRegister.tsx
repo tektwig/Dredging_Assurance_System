@@ -52,8 +52,8 @@ export function OperationsWaybillsRegisterView({ state, filters, page, onFilters
       <div className="operations-table-scroll card"><table className="operations-table">
         <thead><tr><th>Waybill #</th><th>Trip #</th><th>Truck</th><th>Driver</th><th>Tonnage</th>
           <th>Waybill Status</th><th>Delivery Status</th><th>Payout Status</th><th>Closed At</th></tr></thead>
-        <tbody>{state.data.items.map(row => <tr key={row.invoice_id}>
-          <td><Link to={`/operations/waybills-payouts/${row.invoice_id}`}>{row.invoice_number}</Link></td>
+        <tbody>{state.data.items.map(row => <tr key={row.waybill_id}>
+          <td><Link to={`/operations/waybills-payouts/${row.waybill_id}`}>{row.waybill_number}</Link></td>
           <td><Link to={`/operations/trips/${row.trip_id}`}>{row.trip_number}</Link></td>
           <td>{row.truck_registration}</td><td>{row.driver_name}</td><td>{row.quantity_tonnes.toFixed(2)} t</td>
           <td>Issued · PDF {row.pdf_status}</td>

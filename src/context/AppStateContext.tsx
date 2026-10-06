@@ -18,7 +18,6 @@ import {
 import { INITIAL_INVOICES, INITIAL_PAYOUT_BATCHES } from '../services/mockData';
 import { isSupabaseLive, supabase } from '../services/supabase';
 import {
-  closeLiveTrip,
   createLiveLoadingTrip,
   fetchLiveSnapshot,
   LiveOffloadingTripLookup,
@@ -629,33 +628,11 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return { success: false, message: 'This terminal is offline. Reconnect before closing the live trip.' };
     }
 
-    const offloadingSite =
-      sites.find(
-        (site) => (site.id === activeSiteId || site.id === params.offloadingSiteId) && site.site_type === 'offloading' && site.status === 'active'
-      ) ||
-      sites.find((site) => site.site_type === 'offloading' && site.status === 'active') ||
-      sites.find((site) => site.id === params.offloadingSiteId || site.id === activeSiteId);
-
-    const targetSiteId = params.offloadingSiteId || offloadingSite?.id || activeSiteId;
-
-    if (!targetSiteId) return { success: false, message: 'Select your assigned offloading site before closing the trip.' };
-
-    try {
-      await closeLiveTrip({
-        tripId,
-        offloadingSiteId: targetSiteId,
-        quantityTonnes: params.quantity,
-      });
-      await refreshLiveData();
-      const targetTrip = trips.find((trip) => trip.id === tripId);
-      const capacity = targetTrip?.truck?.capacity_tonnes || 30;
-      const variancePercent = ((params.quantity - capacity) / capacity) * 100;
-      return { success: true, varianceAlert: Math.abs(variancePercent) > 15 };
-    } catch (error: unknown) {
-      return { success: false, message: error instanceof Error ? error.message : 'The live trip could not be closed.' };
-    }
+    return {
+      success: false,
+      message: 'This legacy offloading workflow cannot close live trips. Use the Offloading Portal.',
+    };
   };
-
   const lookupOffloadingOpenTripHandler: AppStateContextType['lookupOffloadingOpenTrip'] = async (plate) => {
     if (isSupabaseLive && supabase && navigator.onLine) {
       return lookupOffloadingOpenTrip(plate);
@@ -1301,3 +1278,4 @@ export const useAppState = () => {
   }
   return context;
 };
+

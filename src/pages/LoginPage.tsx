@@ -54,7 +54,7 @@ export function LoginPage() {
               </button>
             </div></div>
           {fieldSessionNotice === 'operational_day_expired' && <p className="message" role="status">
-            Your 24-hour field session has ended. Sign in again to continue.
+            Your operational-day field session has ended. Sign in again to continue.
           </p>}
           {fieldSessionNotice === 'field_access_revoked' && <p className="message" role="status">
             Field access has changed. Sign in again or contact your administrator.

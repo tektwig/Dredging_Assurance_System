@@ -1,9 +1,6 @@
-import { useState } from 'react';
 import { parseTonnage } from '../utils/tonnage';
 import type { OffloadingLookupState } from '../types';
 import type { ClosureState } from '../utils/closureController';
-import type { TripClosureInvoice } from '../../../types';
-import { TripClosureInvoiceModal } from '../../../components/operations/TripClosureInvoiceModal';
 
 type Props = { lookup: Extract<OffloadingLookupState, { status: 'found' }> | null;
   state: ClosureState; quantity: string; onQuantity: (value: string) => void;
@@ -24,69 +21,14 @@ function failureMessage(code: Extract<ClosureState, { status: 'business_failure'
 }
 
 export function ClosurePanel({ lookup, state, quantity, onQuantity, onReview, onBack, onClose }: Props) {
-  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
-
-  if (state.status === 'success') {
-    const invoice: TripClosureInvoice = {
-      id: state.result.waybill.invoiceNumber,
-      invoice_number: state.result.waybill.invoiceNumber,
-      trip_id: state.result.trip.id,
-      trip_number: state.result.trip.tripNumber,
-      truck_id: state.result.trip.truckId,
-      truck_registration: state.result.capture.confirmedPlate,
-      driver_id: state.result.trip.driverId,
-      driver_name: lookup?.trip.driverName || 'Verified Driver',
-      driver_phone: (lookup?.trip as any)?.driver_phone || (lookup?.trip as any)?.driverPhone || undefined,
-      driver_email: (lookup?.trip as any)?.driver_email || (lookup?.trip as any)?.driverEmail || undefined,
-      loading_site_id: '',
-      loading_site_name: lookup?.trip.loadingSiteName || 'Loading Yard',
-      offloading_site_id: state.result.trip.offloadingSiteId,
-      offloading_site_name: lookup?.assignment.siteName || 'Offloading Yard',
-      quantity_tonnes: state.result.trip.quantityTonnes,
-      opened_at: lookup?.trip.openedAt || state.result.trip.closedAt,
-      closed_at: state.result.trip.closedAt,
-      issued_at: new Date().toISOString(),
-      bank_name: (lookup?.trip as any)?.bank_name || undefined,
-      account_name: (lookup?.trip as any)?.account_name || undefined,
-      account_number: (lookup?.trip as any)?.account_number || undefined,
-    };
-
-    return (
-      <>
-        <div className="loading-trip-success" role="status">
-          <p className="eyebrow">Trip closed</p>
-          <h3>{state.result.trip.tripNumber}</h3>
-          <dl className="loading-details">
-            <div><dt>Waybill</dt><dd>{state.result.waybill.invoiceNumber}</dd></div>
-            <div><dt>Confirmed plate</dt><dd>{state.result.capture.confirmedPlate}</dd></div>
-            <div><dt>Tonnage</dt><dd>{state.result.trip.quantityTonnes.toFixed(2)} tonnes</dd></div>
-            <div><dt>Status</dt><dd>Closed</dd></div>
-            <div><dt>Closed at</dt><dd>{new Date(state.result.trip.closedAt).toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}</dd></div>
-          </dl>
-          <div style={{ marginTop: '1.25rem' }}>
-            <button
-              type="button"
-              className="button"
-              onClick={() => setShowInvoiceModal(true)}
-            >
-              📄 View &amp; Print Commercial Invoice
-            </button>
-          </div>
-          <p className="loading-next-note">
-            {state.result.notificationQueued
-              ? 'Notification queued successfully.'
-              : 'Trip closure succeeded.'}
-          </p>
-        </div>
-        {showInvoiceModal && (
-          <TripClosureInvoiceModal
-            invoice={invoice}
-            onClose={() => setShowInvoiceModal(false)}
-          />
-        )}
-      </>
-    );
-  }
+  if (state.status === 'success') return <div className="loading-trip-success" role="status">
+    <p className="eyebrow">Trip closed successfully</p>
+    <h3>{state.result.trip.tripNumber}</h3>
+  </div>;
+  if (state.status === 'trip_unavailable') return <div className="loading-result loading-result-warning" role="status">
+    <h3>Trip is no longer open</h3>
+    <p>{state.tripNumber ? `${state.tripNumber} is no longer available. ` : ''}Open Trips has been refreshed.</p>
+  </div>;
   if (state.status === 'site_changed') return <div className="loading-result loading-result-warning" role="alert">
     <h3>Offloading site changed</h3><p>Your assignment changed or is unavailable. Start again and find the trip with current access.</p>
   </div>;

@@ -166,12 +166,21 @@ assert.match(detailHtml({ status: 'not-found' }), /Trip not found/);
 const closedHtml = detailHtml({ status: 'ready', data: parsedDetail });
 for (const value of ['Authoritative lifecycle', 'Loading', 'Open Trip', 'Offloading', 'Closed', 'Waybill', 'Payout',
   'INV-2026-000001', 'PDF: ready', 'Safe Officer Name', 'Exceptions']) assert(closedHtml.includes(value), value);
+assert.equal(parsedDetail.waybill.waybill_number, 'INV-2026-000001', 'Historical Waybill references remain visible');
+assert(!('invoice_number' in parsedDetail.waybill), 'The frontend exposes Waybill terminology');
 assert(!closedHtml.includes('Cancel open trip'));
 assert(!closedHtml.includes('Edit Trip'));
+assert(!closedHtml.includes('Commercial Invoice'));
+assert(!closedHtml.includes('View / Download Invoice'));
+assert(!closedHtml.includes('DL-7492-LG'));
 assert(!closedHtml.includes('account_number'));
 assert(!closedHtml.includes('description'));
 assert(closedHtml.includes('Estimated tonnage') && closedHtml.includes('10.25 tonnes')
   && closedHtml.includes('12.50 tonnes'));
+const unknownPdfStatus = { ...parsedDetail, waybill: { ...parsedDetail.waybill, pdf_status: null } };
+const unknownPdfHtml = detailHtml({ status: 'ready', data: unknownPdfStatus });
+assert(unknownPdfHtml.includes('PDF: Unavailable'));
+assert(!unknownPdfHtml.includes('PDF: Ready'));
 const openTripDetail = { ...detail, trip: { ...detail.trip, status: 'open', closed_at: null,
   offloading_site_id: null, offloading_site_name: null, quantity_tonnes: null,
   offloading_officer: null, cancelled_at: null, cancelled_officer: null }, waybill: null, payout: null, exceptions: [] };
@@ -189,7 +198,7 @@ const cancelledDetail = { ...detail, trip: { ...detail.trip, status: 'cancelled'
 const cancelledHtml = detailHtml({ status: 'ready', data: cancelledDetail });
 assert(cancelledHtml.includes('Trip Cancelled'));
 assert(cancelledHtml.includes('closure, Waybill and payout steps are not implied'));
-assert(!cancelledHtml.includes('invoice_number'));
+assert(!cancelledHtml.includes('Invoice'));
 console.log('PASS detail lifecycle, cancellation terminal state, and open-only required-reason dialog');
 
 const cancelledResponse = { ...detail, trip: { ...detail.trip, status: 'cancelled', closed_at: null,

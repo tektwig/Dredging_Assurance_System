@@ -1,6 +1,6 @@
 // Invoke from a trusted scheduler after deployment. No browser access or CORS.
 // Uses the Resend HTTP API; no email is sent during a database transaction.
-import { isDevelopmentProjectUrl, processNotifications, type WorkerConfig } from './worker.ts';
+import { isDevelopmentProjectUrl, isValidEmailAddress, processNotifications, type WorkerConfig } from './worker.ts';
 
 const env = (name: string): string => Deno.env.get(name)?.trim() ?? '';
 
@@ -59,10 +59,11 @@ Deno.serve(async (request: Request) => {
     resendApiKey: env('RESEND_API_KEY'),
     sender: env('TRIP_NOTIFICATION_FROM'),
     financeRecipients: env('TRIP_NOTIFICATION_FINANCE_EMAILS').split(',').map(x => x.trim()).filter(Boolean),
-    waybillInternalRecipients: [...new Set(env('WAYBILL_INTERNAL_RECIPIENTS').split(',').map(x => x.trim()).filter(Boolean))],
+    waybillClientEmail: isValidEmailAddress(env('WAYBILL_CLIENT_EMAIL')) ? env('WAYBILL_CLIENT_EMAIL') : null,
     recipientSinkEnabled: recipientSinkSetting === 'true',
   };
-  if (!config.supabaseUrl || !config.serviceRoleKey || !config.resendApiKey || !config.sender || !config.financeRecipients.length) {
+  if (!config.supabaseUrl || !config.serviceRoleKey || !config.resendApiKey || !config.sender
+    || !config.financeRecipients.length) {
     return new Response('Worker not configured', { status: 503 });
   }
   if (config.recipientSinkEnabled && !isDevelopmentProjectUrl(config.supabaseUrl)) {

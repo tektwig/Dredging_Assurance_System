@@ -40,7 +40,7 @@ const activityResponse = {
     { event_id: 'trip-opened:trip-1', event_type: 'trip_opened', occurred_at: '2026-09-27T09:00:00.000Z',
       trip_number: 'TRP-1', truck_registration: 'ABC-123', officer_id: 'officer-1',
       officer_name: 'Officer One', officer_role: 'operations_manager', site_name: 'Loading Site', payment_status: null },
-    { event_id: 'waybill-issued:invoice-1', event_type: 'waybill_issued', occurred_at: '2026-09-27T09:30:00.000Z',
+    { event_id: 'waybill-issued:waybill-1', event_type: 'waybill_issued', occurred_at: '2026-09-27T09:30:00.000Z',
       trip_number: 'TRP-1', truck_registration: 'ABC-123', officer_id: 'officer-1',
       officer_name: 'Officer One', officer_role: 'offloading_officer', site_name: 'Offloading Site', payment_status: null },
   ],
@@ -89,6 +89,12 @@ const summary = service.parseOperationsDashboardSummary(summaryResponse);
 assert.equal(summary.tripsOpenedToday, 3);
 assert.equal(summary.tonnageToday, 12.5);
 assert.equal(summary.actionRequired.failedWaybillEmails.count, 0);
+const waybillSummaryResponse = { ...summaryResponse, action_required: { ...summaryResponse.action_required,
+  failed_waybill_pdfs: { count: 1, items: [{ document_id: 'doc-1', invoice_number: 'INV-2026-000001',
+    trip_number: 'TRP-1', failed_at: '2026-09-27T10:00:00.000Z' }] } } };
+const waybillSummary = service.parseOperationsDashboardSummary(waybillSummaryResponse);
+assert.equal(waybillSummary.actionRequired.failedWaybillPdfs.items[0].waybill_number, 'INV-2026-000001');
+assert(!('invoice_number' in waybillSummary.actionRequired.failedWaybillPdfs.items[0]));
 assert.throws(() => service.parseOperationsDashboardSummary({ ...summaryResponse, bank_name: 'unexpected' }), /Invalid/);
 assert.throws(() => service.parseOperationsDashboardSummary({ ...summaryResponse, tonnage_today: 1.234 }), /Invalid/);
 assert.throws(() => service.parseOperationsDashboardSummary({ ...summaryResponse, action_required: {

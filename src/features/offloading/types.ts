@@ -12,6 +12,47 @@ export type OffloadingStatisticsState =
   | { status: 'ready'; statistics: OffloadingStatistics }
   | { status: 'error' };
 
+export type OffloadingOpenTripListItem = {
+  id: string;
+  tripNumber: string;
+  truckId: string;
+  registrationNumber: string;
+  normalizedRegistration: string;
+  openedAt: string;
+  loadingSiteName: string;
+};
+
+export type OffloadingOpenTrips = {
+  assignment: OffloadingAssignment;
+  trips: OffloadingOpenTripListItem[];
+};
+
+export type OffloadingOpenTripsResult =
+  | { kind: 'ready'; value: OffloadingOpenTrips }
+  | { kind: 'business_failure'; code: 'SITE_ASSIGNMENT_REQUIRED' | 'INVALID_SITE_ASSIGNMENT' | 'INACTIVE_SITE' };
+
+export type OffloadingOpenTripsState =
+  | { status: 'loading' }
+  | { status: 'ready'; value: OffloadingOpenTrips }
+  | { status: 'site_unavailable' }
+  | { status: 'access_unavailable' }
+  | { status: 'error' };
+
+export type OffloadingVerificationState =
+  | { status: 'idle' }
+  | { status: 'verifying'; tripId: string; candidate: string }
+  | { status: 'verified'; tripId: string; assignment: OffloadingAssignment;
+      trip: OpenTripSummary; capture: PreparedOffloadingCapture }
+  | { status: 'mismatch'; tripId: string; candidate: string }
+  | { status: 'error'; tripId: string }
+  | { status: 'site_unavailable' }
+  | { status: 'access_unavailable' };
+
+export function normalizeOffloadingPlate(value: string) {
+  // Mirrors public.normalize_plate: uppercase, then remove whitespace and hyphens.
+  return value.toUpperCase().replace(/[ \t\n\v\f\r-]+/g, '');
+}
+
 export type OpenTripSummary = {
   id: string; tripNumber: string; truckId: string; registrationNumber: string;
   normalizedRegistration: string; driverId: string; driverName: string;
@@ -32,15 +73,9 @@ export type PreparedOffloadingCapture = {
   imagePath: string | null;
 };
 
-export type OffloadingLookupState =
-  | { status: 'idle' }
-  | { status: 'looking_up'; plate: string }
-  | { status: 'invalid_plate' }
-  | { status: 'no_open_trip'; plate: string }
-  | { status: 'site_unavailable' }
-  | { status: 'access_unavailable' }
-  | { status: 'lookup_error'; plate: string }
-  | { status: 'found'; assignment: OffloadingAssignment; trip: OpenTripSummary; capture: PreparedOffloadingCapture };
+export type OffloadingLookupState = {
+  status: 'found'; assignment: OffloadingAssignment; trip: OpenTripSummary; capture: PreparedOffloadingCapture;
+};
 
 export type ClosureReview = {
   assignment: OffloadingAssignment; trip: OpenTripSummary;
@@ -68,9 +103,9 @@ export type ClosureResult = ClosureSuccess | { kind: 'business_failure'; code: C
 
 export function preparedCapture(plate: string, evidence: PlateCaptureEvidence | null,
   capturedAt: string): PreparedOffloadingCapture {
-  const normalize = (value: string) => value.replace(/[\t\n\v\f\r -]+/g, '').toUpperCase();
   return {
-    method: evidence ? normalize(plate) === normalize(evidence.candidate) ? 'OCR' : 'OCR_CORRECTED' : 'MANUAL',
+    method: evidence ? normalizeOffloadingPlate(plate) === normalizeOffloadingPlate(evidence.candidate)
+      ? 'OCR' : 'OCR_CORRECTED' : 'MANUAL',
     confirmedPlate: plate,
     capturedAt: evidence?.capturedAt ?? capturedAt,
     ocrDetectedPlate: evidence?.candidate ?? null,

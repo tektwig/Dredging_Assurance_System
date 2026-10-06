@@ -4,7 +4,6 @@ import { StatCard } from '../common/StatCard';
 import { StatusBadge } from '../common/StatusBadge';
 import { PlateDisplay } from '../common/PlateDisplay';
 import { ExceptionTriageModal } from './ExceptionTriageModal';
-import { TripClosureInvoiceModal } from './TripClosureInvoiceModal';
 import { Trip, TripException } from '../../types';
 import {
   Truck,
@@ -15,13 +14,12 @@ import {
   FileSpreadsheet,
   Layers,
   X,
-  ExternalLink,
   ChevronRight,
 } from 'lucide-react';
 import '../../features/operations/trips/trips.css';
 
 export const OperationsDashboard: React.FC = () => {
-  const { trips, tripInvoices, resolveTripException } = useAppState();
+  const { trips, resolveTripException } = useAppState();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -29,7 +27,6 @@ export const OperationsDashboard: React.FC = () => {
   const [dateTo, setDateTo] = useState('');
   const [inspectingTrip, setInspectingTrip] = useState<Trip | null>(null);
   const [triagingItem, setTriagingItem] = useState<{ trip: Trip; exception: TripException } | null>(null);
-  const [selectedClosureInvoiceId, setSelectedClosureInvoiceId] = useState<string | null>(null);
 
   // Derived Metrics
   const openCount = trips.filter((t) => t.status === 'open').length;
@@ -466,22 +463,6 @@ export const OperationsDashboard: React.FC = () => {
                             </button>
                           )}
 
-                          {trip.status === 'closed' && (
-                            <button
-                              type="button"
-                              className="btn btn-secondary"
-                              onClick={() => setSelectedClosureInvoiceId(trip.id)}
-                              style={{
-                                minHeight: '30px',
-                                padding: '0.2rem 0.55rem',
-                                fontSize: '0.74rem',
-                                color: '#125B59',
-                                borderColor: '#CBDDE0',
-                              }}
-                            >
-                              Invoice
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>
@@ -666,21 +647,6 @@ export const OperationsDashboard: React.FC = () => {
 
             {/* Modal Bottom Actions */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.65rem', marginTop: '1.25rem' }}>
-              {inspectingTrip.status === 'closed' && (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => {
-                    const id = inspectingTrip.id;
-                    setInspectingTrip(null);
-                    setSelectedClosureInvoiceId(id);
-                  }}
-                >
-                  <ExternalLink size={14} />
-                  <span>Generate / View Commercial Invoice</span>
-                </button>
-              )}
-
               {inspectingTrip.status === 'exception' && (
                 <button
                   type="button"
@@ -731,11 +697,6 @@ export const OperationsDashboard: React.FC = () => {
         />
       )}
 
-      {/* Commercial Invoice Modal */}
-      <TripClosureInvoiceModal
-        invoice={tripInvoices.find((inv) => inv.trip_id === selectedClosureInvoiceId) || null}
-        onClose={() => setSelectedClosureInvoiceId(null)}
-      />
     </div>
   );
 };

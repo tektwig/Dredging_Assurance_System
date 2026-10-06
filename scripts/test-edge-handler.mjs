@@ -1,17 +1,18 @@
 // Tests the real handler/authentication with an in-memory Deno host and stubbed
 // worker dispatch. No provider, Supabase, or remote network requests are made.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import ts from 'typescript';
 
 const values = new Map();
 let handler;
 globalThis.Deno = { env: { get: name => values.get(name) }, serve: callback => { handler = callback; } };
 const original = readFileSync('supabase/functions/process-trip-notifications/index.ts', 'utf8');
-const importPattern = /import \{ isDevelopmentProjectUrl, processNotifications, type WorkerConfig \} from '\.\/worker\.ts';/;
+const importPattern = /import \{ isDevelopmentProjectUrl, isValidEmailAddress, processNotifications, type WorkerConfig \} from '\.\/worker\.ts';/;
 assert(importPattern.test(original), 'Expected worker import for isolated handler test');
 const source = original.replace(importPattern,
-  'type WorkerConfig = any; const isDevelopmentProjectUrl = (value: string) => value === "https://pidxlopbxlapfmakmtjt.supabase.co"; const processNotifications = async (_config: WorkerConfig, _batchLimit: number) => { globalThis.__workerDispatchCount = (globalThis.__workerDispatchCount ?? 0) + 1; globalThis.__capturedWorkerConfig = _config; globalThis.__capturedBatchLimit = _batchLimit; return {mocked:true}; };');
+  'type WorkerConfig = any; const isDevelopmentProjectUrl = (value: string) => value === "https://pidxlopbxlapfmakmtjt.supabase.co"; const isValidEmailAddress = (value: string) => /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value); const processNotifications = async (_config: WorkerConfig, _batchLimit: number) => { globalThis.__workerDispatchCount = (globalThis.__workerDispatchCount ?? 0) + 1; globalThis.__capturedWorkerConfig = _config; globalThis.__capturedBatchLimit = _batchLimit; return {mocked:true}; };');
 const compiled = ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
 }).outputText;
@@ -34,14 +35,26 @@ console.log('PASS handler incomplete-config rejection');
 for (const name of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'RESEND_API_KEY', 'TRIP_NOTIFICATION_FROM', 'TRIP_NOTIFICATION_FINANCE_EMAILS']) {
   values.set(name, 'test-only');
 }
-const response = await handler(request('POST', testSecret));
+let response = await handler(request('POST', testSecret));
 assert.equal(response.status, 200);
-assert.deepEqual(await response.json(), { mocked: true });
-assert.deepEqual(globalThis.__capturedWorkerConfig.waybillInternalRecipients, []);
+assert.equal(globalThis.__capturedWorkerConfig.waybillClientEmail, null);
+console.log('PASS missing target-company configuration leaves delivery pending without blocking the worker');
+values.set('WAYBILL_CLIENT_EMAIL', 'not-an-email');
+assert.equal((await handler(request('POST', testSecret))).status, 200);
+assert.equal(globalThis.__capturedWorkerConfig.waybillClientEmail, null);
+console.log('PASS malformed target-company configuration is ignored safely without blocking the worker');
+const targetAddress = 'target-company@example.invalid';
+values.set('WAYBILL_CLIENT_EMAIL', targetAddress);
+response = await handler(request('POST', testSecret));
+assert.equal(response.status, 200);
+const responseBody = await response.json();
+assert.deepEqual(responseBody, { mocked: true });
+assert.equal(globalThis.__capturedWorkerConfig.waybillClientEmail, targetAddress);
+assert(!('waybillInternalRecipients' in globalThis.__capturedWorkerConfig));
 assert.equal(globalThis.__capturedBatchLimit, 5);
 values.set('WAYBILL_INTERNAL_RECIPIENTS', ' ops@example.invalid, finance@example.invalid,ops@example.invalid ');
 assert.equal((await handler(request('POST', testSecret))).status, 200);
-assert.deepEqual(globalThis.__capturedWorkerConfig.waybillInternalRecipients, ['ops@example.invalid', 'finance@example.invalid']);
+assert(!('waybillInternalRecipients' in globalThis.__capturedWorkerConfig));
 assert.equal(globalThis.__capturedBatchLimit, 5);
 assert(!JSON.stringify(globalThis.__capturedWorkerConfig).includes('SERVICE_ROLE'));
 assert.equal((await handler(request('POST', testSecret, '{}'))).status, 200);
@@ -66,6 +79,16 @@ assert.equal((await handler(request('POST', testSecret))).status, 503);
 assert.equal(globalThis.__workerDispatchCount, dispatchCountBeforeInvalidLimits + 1);
 assert.equal(globalThis.__capturedWorkerConfig.recipientSinkEnabled, true);
 console.log('PASS handler authorized dispatch');
+
+const frontendSource = (directory) => readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+  const path = join(directory, entry.name);
+  return entry.isDirectory() ? frontendSource(path) : [readFileSync(path, 'utf8')];
+});
+for (const fileSource of frontendSource('src')) {
+  assert(!fileSource.includes('WAYBILL_CLIENT_EMAIL'), 'Target email configuration must stay out of frontend source');
+  assert(!fileSource.includes(targetAddress), 'Target-company email value must not appear in frontend source');
+}
+assert(!JSON.stringify(responseBody).includes(targetAddress));
 delete globalThis.__capturedWorkerConfig;
 delete globalThis.__workerDispatchCount;
 delete globalThis.__capturedBatchLimit;

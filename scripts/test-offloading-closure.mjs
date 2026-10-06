@@ -82,6 +82,9 @@ const parsedSuccess = await service.closeOffloadingTrip(request);
 assert.equal(parsedSuccess.kind, 'success');
 assert.deepEqual(parsedSuccess.waybill, { invoiceNumber: 'INV-2026-000007' });
 assert.equal(JSON.stringify(parsedSuccess).includes('account_number'), false);
+rpcResult = { ...serverSuccess, waybill: { invoice_number: 'WB-2026-000007' } };
+const parsedNewNumber = await service.closeOffloadingTrip(request);
+assert.deepEqual(parsedNewNumber.waybill, { invoiceNumber: 'WB-2026-000007' });
 assert.equal(uploads.length, 1);
 assert.deepEqual(uploads[0].options, { contentType: 'image/jpeg', upsert: false });
 assert.deepEqual(rpcCalls[0], { name: 'close_trip_v2', args: {
@@ -189,6 +192,14 @@ authController.beginReview();
 await authController.submit();
 assert.equal(authController.current.status, 'authorization');
 assert.equal(authRefreshed, 1);
+const unavailableController = new ClosureController(async () => ({ kind: 'business_failure',
+  code: 'TRIP_NOT_OPEN', tripNumber: 'TRP-0000000006' }), value => outcomes.push(value),
+() => assert.fail('Concurrent closure is not an authorization failure'), () => 'unavailable-request');
+unavailableController.setInput(manualReview);
+unavailableController.beginReview();
+await unavailableController.submit();
+assert.deepEqual(unavailableController.current, { status: 'trip_unavailable', tripNumber: 'TRP-0000000006' });
+assert.equal(unavailableController.frozenRequest, null, 'A trip closed elsewhere returns to the refreshed list');
 
 const { ClosurePanel } = load('src/features/offloading/components/ClosurePanel.tsx');
 const panel = props => renderToStaticMarkup(React.createElement(ClosurePanel, {
@@ -209,11 +220,12 @@ const successHtml = panel({ state: { status: 'success', result: {
   capture: { confirmedPlate: 'ABC-123' }, waybill: { invoiceNumber: 'INV-2026-000007' },
   notificationQueued: true,
 } } });
-assert(successHtml.includes('Notification queued successfully.'));
-assert(successHtml.includes('<dt>Waybill</dt><dd>INV-2026-000007</dd>'));
-assert(successHtml.includes('TRP-0000000006') && successHtml.includes('ABC-123')
-  && successHtml.includes('12.50 tonnes') && successHtml.includes('Closed'));
-assert(!successHtml.includes('account_number') && !successHtml.includes('bank_name'));
+assert(successHtml.includes('Trip closed successfully'));
+assert(successHtml.includes('TRP-0000000006'));
+for (const removed of ['Commercial Invoice', 'View &amp; Print', 'Waybill', 'Invoice', 'PDF',
+  'Print', 'Download', 'Share', 'mailto:', 'Payout', 'Bank', 'account_number']) {
+  assert(!successHtml.includes(removed), `Offloading success must not expose ${removed}`);
+}
 assert(panel({ state: { status: 'business_failure', review: manualReview,
   code: 'TRIP_NOT_OPEN', tripNumber: 'TRP-0000000006' } }).includes('Contact Operations'));
 const captureFailure = panel({ state: { status: 'business_failure', review: manualReview,

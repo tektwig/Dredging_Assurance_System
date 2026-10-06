@@ -28,7 +28,6 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { SiteAgentModeSheet } from './SiteAgentModeSheet';
-import { TripClosureInvoiceModal } from '../operations/TripClosureInvoiceModal';
 import { QuantityUnit, ExceptionType, Trip } from '../../types';
 import { recognizeLicensePlate, OCRProgress } from '../../services/ocrService';
 import { formatOperationalError } from '../../services/liveOperations';
@@ -63,7 +62,6 @@ export const SiteAgentTerminal: React.FC = () => {
     trucks,
     drivers,
     trips,
-    tripInvoices,
     openTrips,
     closedTrips,
     exceptionTrips,
@@ -102,8 +100,6 @@ export const SiteAgentTerminal: React.FC = () => {
   const [pickupSaved, setPickupSaved] = useState(false);
   const [isDeliverySaving, setIsDeliverySaving] = useState(false);
   const [deliverySaved, setDeliverySaved] = useState(false);
-  const [selectedClosureInvoiceId, setSelectedClosureInvoiceId] = useState<string | null>(null);
-  const [lastClosedTripForInvoice, setLastClosedTripForInvoice] = useState<any | null>(null);
   const [isLedgerExpanded, setIsLedgerExpanded] = useState(false);
   const [isRegisteringParticipant, setIsRegisteringParticipant] = useState(false);
   const [isLiveCameraActive, setIsLiveCameraActive] = useState(false);
@@ -867,7 +863,6 @@ export const SiteAgentTerminal: React.FC = () => {
 
     const closedTripId = matchingOpenTrip.id;
     const closedTripNumber = matchingOpenTrip.trip_number;
-    const closedTripSnapshot = { ...matchingOpenTrip };
     const effectiveTicketNumber = scaleTicketNumber.trim() || `WB-${Math.floor(1000 + Math.random() * 9000)}`;
 
     deliverySaveLockRef.current = true;
@@ -888,8 +883,6 @@ export const SiteAgentTerminal: React.FC = () => {
     setIsDeliverySaving(false);
 
     if (result.success) {
-      setLastClosedTripForInvoice(closedTripSnapshot);
-      setSelectedClosureInvoiceId(closedTripId);
       setToastMessage({
         text: `Trip ${closedTripNumber} successfully verified and closed!`,
         type: result.varianceAlert ? 'warning' : 'success',
@@ -2621,16 +2614,10 @@ export const SiteAgentTerminal: React.FC = () => {
             </div>
           ) : (
             (isLedgerExpanded ? filteredRecentTrips : filteredRecentTrips.slice(0, 2)).map((trip) => {
-              const closureInvoice = tripInvoices.find((invoice) => invoice.trip_id === trip.id);
               return (
               <div
                 key={trip.id}
                 className="movement-card"
-                onClick={() => closureInvoice && setSelectedClosureInvoiceId(trip.id)}
-                style={{
-                  cursor: closureInvoice ? 'pointer' : undefined,
-                }}
-                title={closureInvoice ? 'Click to review the closure invoice' : undefined}
               >
                 <div className="movement-card-top">
                   <PlateDisplay plate={trip.truck?.registration_number || 'UNKNOWN'} size="sm" />
@@ -2646,20 +2633,6 @@ export const SiteAgentTerminal: React.FC = () => {
 
                 <div className="movement-card-bottom">
                   <StatusBadge status={trip.status} />
-                  {trip.status === 'closed' && closureInvoice && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ minHeight: '30px', padding: '0.25rem 0.55rem', fontSize: '0.7rem', whiteSpace: 'nowrap' }}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setSelectedClosureInvoiceId(trip.id);
-                      }}
-                      title="View trip closure invoice"
-                    >
-                      <FileText size={12} /> View Invoice
-                    </button>
-                  )}
                 </div>
               </div>
               );
@@ -2703,83 +2676,6 @@ export const SiteAgentTerminal: React.FC = () => {
           )}
         </div>
       </div>
-
-      <TripClosureInvoiceModal
-        invoice={
-          tripInvoices.find((invoice) => invoice.trip_id === selectedClosureInvoiceId) ||
-          (selectedClosureInvoiceId && lastClosedTripForInvoice?.id === selectedClosureInvoiceId
-            ? {
-                id: `closure-invoice-${selectedClosureInvoiceId}`,
-                invoice_number: `INV-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`,
-                trip_id: selectedClosureInvoiceId,
-                trip_number: lastClosedTripForInvoice.trip_number,
-                truck_id: lastClosedTripForInvoice.truck_id || lastClosedTripForInvoice.truck?.id || '',
-                truck_registration:
-                  lastClosedTripForInvoice.truck?.registration_number ||
-                  lastClosedTripForInvoice.registration_number ||
-                  lastClosedTripForInvoice.truck_registration_at_loading ||
-                  confirmedPlate ||
-                  'TRUCK',
-                truck_type:
-                  lastClosedTripForInvoice.truck?.truck_type ||
-                  lastClosedTripForInvoice.truck_type ||
-                  'Tipper / Heavy Dump',
-                truck_capacity_tonnes:
-                  lastClosedTripForInvoice.truck?.capacity_tonnes ||
-                  lastClosedTripForInvoice.capacity_tonnes ||
-                  30,
-                truck_owner_name:
-                  lastClosedTripForInvoice.truck?.owner_name ||
-                  lastClosedTripForInvoice.owner_name ||
-                  'Fleet Haulier',
-                driver_id: lastClosedTripForInvoice.driver_id || lastClosedTripForInvoice.driver?.id || '',
-                driver_name:
-                  lastClosedTripForInvoice.driver?.full_name ||
-                  lastClosedTripForInvoice.driver_name ||
-                  'Assigned Driver',
-                driver_phone:
-                  lastClosedTripForInvoice.driver?.phone ||
-                  lastClosedTripForInvoice.driver_phone ||
-                  undefined,
-                driver_license:
-                  lastClosedTripForInvoice.driver?.license_number ||
-                  lastClosedTripForInvoice.driver_license ||
-                  '',
-                driver_email:
-                  lastClosedTripForInvoice.driver?.email ||
-                  (lastClosedTripForInvoice as any).driver_email ||
-                  undefined,
-                loading_site_id:
-                  lastClosedTripForInvoice.loading_site_id ||
-                  lastClosedTripForInvoice.loading_site?.id ||
-                  '',
-                loading_site_name:
-                  lastClosedTripForInvoice.loading_site?.name ||
-                  lastClosedTripForInvoice.loading_site_name ||
-                  'Loading Dredging Terminal',
-                offloading_site_id:
-                  lastClosedTripForInvoice.offloading_site_id ||
-                  activeSite?.id ||
-                  '',
-                offloading_site_name: activeSite?.name || 'Gate 2 Delivery Weighbridge',
-                quantity_tonnes: deliveredTonnes || 30,
-                opened_at:
-                  lastClosedTripForInvoice.opened_at ||
-                  lastClosedTripForInvoice.loaded_at ||
-                  new Date().toISOString(),
-                closed_at: new Date().toISOString(),
-                issued_at: new Date().toISOString(),
-                bank_name: (lastClosedTripForInvoice.driver as any)?.bank_name || (lastClosedTripForInvoice as any).bank_name || undefined,
-                account_name: (lastClosedTripForInvoice.driver as any)?.account_name || (lastClosedTripForInvoice as any).account_name || undefined,
-                account_number: (lastClosedTripForInvoice.driver as any)?.account_number || (lastClosedTripForInvoice as any).account_number || undefined,
-              }
-            : null)
-        }
-        onClose={() => {
-          setSelectedClosureInvoiceId(null);
-          setLastClosedTripForInvoice(null);
-        }}
-      />
 
       {/* ONBOARDING MODAL: UNREGISTERED TRUCK & DRIVER ENROLLMENT */}
       {isUnregisteredModalOpen && (

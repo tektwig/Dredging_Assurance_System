@@ -69,7 +69,7 @@ export type OperationsTripDetailRecord = {
 };
 export type OperationsTripDetail = {
   trip: OperationsTripDetailRecord;
-  waybill: { invoice_number: string; issued_at: string; pdf_status: typeof pdfStatuses[number] | null } | null;
+  waybill: { waybill_number: string; issued_at: string; pdf_status: typeof pdfStatuses[number] | null } | null;
   payout: {
     status: 'payment_details_required' | 'pending' | 'paid';
     created_at: string;
@@ -191,7 +191,9 @@ export function parseOperationsTripDetail(value: unknown): OperationsTripDetail 
       || (value.waybill.pdf_status !== null && !pdfStatuses.includes(value.waybill.pdf_status as typeof pdfStatuses[number]))) {
       throw new Error('Invalid Operations Trips response');
     }
-    waybill = value.waybill as OperationsTripDetail['waybill'];
+    waybill = { waybill_number: value.waybill.invoice_number as string,
+      issued_at: value.waybill.issued_at as string,
+      pdf_status: value.waybill.pdf_status as typeof pdfStatuses[number] | null };
   }
 
   let payout: OperationsTripDetail['payout'] = null;

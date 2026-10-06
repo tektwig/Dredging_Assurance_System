@@ -33,14 +33,14 @@ select pg_temp.waybill_assert((select count(*)=2 from pg_trigger
     and tgname in ('create_trip_closure_invoice','snapshot_closed_trip')),
   'both closure triggers remain enabled');
 select pg_temp.waybill_assert('create_trip_closure_invoice' < 'snapshot_closed_trip',
-  'invoice trigger executes before notification snapshot by trigger name');
+  'Waybill trigger executes before notification snapshot by trigger name');
 -- An absent bank row cannot be locked. Payment must consume the immutable
--- invoice snapshot, not query driver_payment_details a second time.
+-- Waybill snapshot, not query driver_payment_details a second time.
 select pg_temp.waybill_assert(
   position('driver_payment_details' in pg_get_functiondef('private.snapshot_closed_trip()'::regprocedure))=0
   and position('from public.trip_closure_invoices' in
     pg_get_functiondef('private.snapshot_closed_trip()'::regprocedure))>0,
-  'payment trigger consumes the invoice bank snapshot without a second live-bank read');
+  'payment trigger consumes the Waybill bank snapshot without a second live-bank read');
 select pg_temp.waybill_assert(
   not has_table_privilege('anon','public.trip_closure_invoices','SELECT')
   and has_table_privilege('authenticated','public.trip_closure_invoices','SELECT')
@@ -104,9 +104,9 @@ insert into waybill_state values('closed_missing',public.close_trip_v2(
  10.25,'MANUAL',clock_timestamp()));
 select pg_temp.waybill_assert((select count(*)=2 from waybill_state
   where k like 'closed_%' and v->>'ok'='true' and v#>>'{trip,status}'='closed'
-    and v#>>'{waybill,invoice_number}' ~ '^INV-[0-9]{4}-[0-9]{6}$'
+    and v#>>'{waybill,invoice_number}' ~ '^WB-[0-9]{4}-[0-9]{6,}$'
     and v::text !~ '0123456789|Waybill Bank|Waybill Account|account_number|bank_name|account_name'),
-  'both narrow closure responses include invoice number but no banking');
+  'both narrow closure responses include Waybill number but no banking');
 insert into waybill_state values('counts_before_replay',pg_temp.waybill_counts());
 select pg_temp.waybill_assert(public.close_trip_v2(
  'f9500000-0000-0000-0000-000000000001',
@@ -114,7 +114,7 @@ select pg_temp.waybill_assert(public.close_trip_v2(
  'CHANGED-PAYLOAD',null,99,'OCR',clock_timestamp())=(select v from waybill_state where k='closed_bank'),
  'successful request ID replays the original response and Waybill number');
 select pg_temp.waybill_assert((select v=pg_temp.waybill_counts() from waybill_state where k='counts_before_replay'),
- 'replay creates no second invoice, payment, evidence, outbox item or receipt');
+ 'replay creates no second Waybill, payment, evidence, outbox item or receipt');
 select pg_temp.waybill_assert((select count(*)=0 from public.trip_closure_invoices),
  'offloading officer cannot directly read bank-bearing Waybill rows');
 select set_config('request.jwt.claim.sub','f9000000-0000-0000-0000-000000000002',true);
@@ -151,7 +151,7 @@ select pg_temp.waybill_assert((select count(*)=2 from public.trip_closure_invoic
     and i.bank_name is not distinct from p.bank_name
     and i.account_name is not distinct from p.account_name
     and i.account_number is not distinct from p.account_number),
-  'banked and missing-bank closures produce identical initial invoice/payment bank snapshots');
+  'banked and missing-bank closures produce identical initial Waybill/payment bank snapshots');
 select pg_temp.waybill_assert((select count(*)=1 from public.notification_outbox n
  where n.trip_id=(select (v#>>'{trip,id}')::uuid from waybill_state where k='opened_bank')
    and n.audience='finance' and n.payload->>'invoice_number'=(select v#>>'{waybill,invoice_number}'
@@ -164,7 +164,7 @@ select pg_temp.waybill_assert((select count(*)=1 from public.notification_outbox
    and n.payload->>'payment_status'='payment_details_required'),
  'missing-bank closure still queues Waybill notification');
 select pg_temp.waybill_assert((select private.trip_email(n.payload,array['finance@example.invalid'],'sender@example.invalid')->>'text'
-  like '%Waybill Number: INV-%' and private.trip_email(n.payload,array['finance@example.invalid'],
+  like ('%Waybill Number: ' || (n.payload->>'invoice_number') || '%') and private.trip_email(n.payload,array['finance@example.invalid'],
     'sender@example.invalid')->>'text' like '%payment could not be processed%'
   from public.notification_outbox n where n.trip_id=(select (v#>>'{trip,id}')::uuid
     from waybill_state where k='opened_missing') and n.audience='finance'),
@@ -199,15 +199,26 @@ select pg_temp.waybill_mutation_denied('delete from public.trip_closure_invoices
   (select (v#>>'{trip,id}')::uuid from waybill_state where k='opened_bank')||'''');
 
 -- A hostile permissive policy cannot bypass the restrictive role fence.
+update public.trip_closure_invoice_documents set status='ready',ready_at=clock_timestamp()
+where trip_id in (select (v#>>'{trip,id}')::uuid from waybill_state where k in ('opened_bank','opened_missing'));
 create policy test_waybill_broad_read on public.trip_closure_invoices for select to authenticated using (true);
 set local role authenticated;
 select set_config('request.jwt.claim.sub','f9000000-0000-0000-0000-000000000003',true);
 select pg_temp.waybill_assert((select count(*)=0 from public.trip_closure_invoices),
-  'restrictive policy resists another permissive invoice policy');
+  'restrictive policy resists another permissive Waybill policy');
 select set_config('request.jwt.claim.sub','f9000000-0000-0000-0000-000000000004',true);
 select pg_temp.waybill_assert((select count(*)=2 from public.trip_closure_invoices
   where trip_id in (select (v#>>'{trip,id}')::uuid from waybill_state where k like 'opened_%')),
   'operations reads authorized Waybills');
+select pg_temp.waybill_assert((public.get_operations_waybill_detail((select id from public.trip_closure_invoices
+  where trip_id=(select (v#>>'{trip,id}')::uuid from waybill_state where k='opened_bank')))
+  #>>'{invoice,invoice_number}') ~ '^WB-2026-[0-9]{6,}$'
+  and (public.get_operations_waybill_detail((select id from public.trip_closure_invoices
+    where trip_id=(select (v#>>'{trip,id}')::uuid from waybill_state where k='opened_bank')))
+    #>>'{document,storage_path}') = (select private.waybill_storage_path(invoice_number)
+      from public.trip_closure_invoices where trip_id=(select (v#>>'{trip,id}')::uuid
+        from waybill_state where k='opened_bank')),
+  'Operations can display a newly generated WB number and its ready PDF path');
 select set_config('request.jwt.claim.sub','f9000000-0000-0000-0000-000000000005',true);
 select pg_temp.waybill_assert((select count(*)=2 from public.trip_closure_invoices
   where trip_id in (select (v#>>'{trip,id}')::uuid from waybill_state where k like 'opened_%')),

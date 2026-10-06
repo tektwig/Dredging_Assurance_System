@@ -4,13 +4,14 @@ export interface WorkerConfig {
   resendApiKey: string;
   sender: string;
   financeRecipients: string[];
-  waybillInternalRecipients: string[];
+  waybillClientEmail: string | null;
   recipientSinkEnabled: boolean;
 }
 
 interface Job {
   id: string;
   event_type: 'trip_closed' | 'waybill_ready';
+  audience?: 'driver' | 'finance' | 'client';
   lease_token: string;
   email_request: Record<string, unknown>;
   payload: Record<string, unknown>;
@@ -45,6 +46,10 @@ function applyRecipientSink(emailRequest: Record<string, unknown>): Record<strin
   return routed;
 }
 
+export function isValidEmailAddress(value: string): boolean {
+  return value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
 function encodeBase64(bytes: Uint8Array): string {
   const chunkSize = 24 * 576;
   const chunks: string[] = [];
@@ -55,11 +60,13 @@ function encodeBase64(bytes: Uint8Array): string {
 }
 
 function expectedPath(invoiceNumber: string): string | null {
-  const match = /^INV-(\d{4})-\d{6,}$/.exec(invoiceNumber);
+  const match = /^(?:INV|WB)-(\d{4})-\d{6,}$/.exec(invoiceNumber);
   return match ? `${match[1]}/${invoiceNumber}.pdf` : null;
 }
 
 export async function processNotifications(config: WorkerConfig, batchLimit = 5, http: typeof fetch = fetch) {
+  const waybillClientEmail = config.waybillClientEmail && isValidEmailAddress(config.waybillClientEmail)
+    ? config.waybillClientEmail : null;
   if (config.recipientSinkEnabled && !isDevelopmentProjectUrl(config.supabaseUrl)) {
     throw new Error('Recipient sink is restricted to the DEVELOPMENT project');
   }
@@ -81,9 +88,7 @@ export async function processNotifications(config: WorkerConfig, batchLimit = 5,
 
   let reconciliationFailed = false;
   try {
-    await rpc<number>('enqueue_waybill_ready_notifications', {
-      p_internal_recipients: config.waybillInternalRecipients,
-    });
+    await rpc<number>('enqueue_waybill_ready_notifications', {});
   } catch {
     reconciliationFailed = true;
   }
@@ -93,7 +98,7 @@ export async function processNotifications(config: WorkerConfig, batchLimit = 5,
     p_sender: config.sender,
     p_limit: batchLimit,
     p_include_waybill_ready: true,
-    p_waybill_internal_recipients: config.waybillInternalRecipients,
+    p_include_waybill_client: waybillClientEmail !== null,
   });
   let sent = 0, deferred = 0, unacknowledged = 0;
   for (const job of jobs) {
@@ -102,6 +107,15 @@ export async function processNotifications(config: WorkerConfig, batchLimit = 5,
     try {
       let emailRequest = job.email_request;
       if (job.event_type === 'waybill_ready') {
+        if (job.audience === 'finance') {
+          throw new Error('Internal Waybill email delivery is disabled');
+        }
+        if (job.audience !== 'driver' && job.audience !== 'client') {
+          throw new Error('Unsupported Waybill audience');
+        }
+        if (job.audience === 'client' && !waybillClientEmail) {
+          throw new Error('Target company recipient is not configured');
+        }
         const rows = await rpc<WaybillPdfMetadata[]>('get_waybill_ready_pdf', {
           p_notification_id: job.id,
           p_lease_token: job.lease_token,
@@ -137,6 +151,11 @@ export async function processNotifications(config: WorkerConfig, batchLimit = 5,
         }
         emailRequest = {
           ...job.email_request,
+          ...(job.audience === 'client' ? {
+            to: [waybillClientEmail!],
+            subject: `Waybill ${invoiceNumber} for trip ${String(job.payload.trip_number ?? '')}`,
+            text: `The issued Waybill PDF is attached.\nWaybill Number: ${invoiceNumber}\nTrip Number: ${String(job.payload.trip_number ?? '')}`,
+          } : {}),
           attachments: [{ filename: `${invoiceNumber}.pdf`, content: encodeBase64(pdf) }],
         };
       } else if (job.event_type !== 'trip_closed') {
@@ -162,7 +181,7 @@ export async function processNotifications(config: WorkerConfig, batchLimit = 5,
       }
     } catch {
       failure = job.event_type === 'waybill_ready'
-        ? 'Waybill PDF attachment unavailable'
+        ? job.audience === 'finance' ? 'Internal Waybill email delivery is disabled' : 'Waybill PDF attachment unavailable'
         : 'Email provider unavailable or acceptance uncertain';
     }
     try {
@@ -181,5 +200,6 @@ export async function processNotifications(config: WorkerConfig, batchLimit = 5,
       unacknowledged++;
     }
   }
-  return { claimed: jobs.length, sent, deferred, unacknowledged, reconciliationFailed };
+  return { claimed: jobs.length, sent, deferred, unacknowledged, reconciliationFailed,
+    targetCompanyConfigured: waybillClientEmail !== null };
 }

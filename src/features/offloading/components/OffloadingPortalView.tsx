@@ -1,18 +1,30 @@
 import type { ReactNode } from 'react';
 import { operationalDateLabel } from '../../loading/utils/operationalDate';
-import type { OffloadingLookupSnapshot } from '../utils/offloadingLookupController';
 import type { ClosureState } from '../utils/closureController';
-import type { OffloadingStatisticsState } from '../types';
+import type { OffloadingOpenTripsState, OffloadingOpenTripListItem,
+  OffloadingStatisticsState, OffloadingVerificationState } from '../types';
 
-type Props = { officerName: string; lookup: OffloadingLookupSnapshot;
-  closure: ClosureState; closurePanel: ReactNode; capturePanel: ReactNode;
-  statistics: OffloadingStatisticsState; now: Date; onRetryStatistics: () => void;
-  onLookup: () => void; onReset: () => void };
+type Props = {
+  officerName: string;
+  openTrips: OffloadingOpenTripsState;
+  selectedTrip: OffloadingOpenTripListItem | null;
+  verification: OffloadingVerificationState;
+  closure: ClosureState;
+  capturePanel: ReactNode;
+  closurePanel: ReactNode;
+  statistics: OffloadingStatisticsState;
+  now: Date;
+  onSelectTrip: (trip: OffloadingOpenTripListItem) => void;
+  onRetryOpenTrips: () => void;
+  onRetryStatistics: () => void;
+  onRescan: () => void;
+  onReturnToOpenTrips: () => void;
+};
 
 export function OffloadingStatistics({ state, retry }: { state: OffloadingStatisticsState; retry: () => void }) {
   if (state.status === 'loading') return <p className="loading-note" role="status">Loading today's figures…</p>;
   if (state.status === 'error') return <div className="loading-note" role="status">
-    <p>Today's figures are unavailable. Trip lookup remains available. Try again shortly.</p>
+    <p>Today's figures are unavailable. Open Trips remains available. Try again shortly.</p>
     <button className="button secondary" type="button" onClick={retry}>Retry figures</button>
   </div>;
   const cards = [
@@ -30,63 +42,124 @@ export function OffloadingStatistics({ state, retry }: { state: OffloadingStatis
   </div>;
 }
 
-export function OffloadingPortalView({ officerName, lookup, capturePanel,
-  closure, closurePanel, statistics, now, onRetryStatistics, onLookup, onReset }: Props) {
-  const state = lookup.state;
-  const locked = closure.status !== 'idle';
-  const showCapture = closure.status === 'idle' && state.status !== 'found';
+function openedLabel(value: string) {
+  return new Date(value).toLocaleString('en-NG', { timeZone: 'Africa/Lagos' });
+}
+
+function OpenTripsList({ state, onSelect, onRetry }: {
+  state: OffloadingOpenTripsState;
+  onSelect: (trip: OffloadingOpenTripListItem) => void;
+  onRetry: () => void;
+}) {
+  if (state.status === 'loading') return <p className="loading-note" role="status">Loading Open Trips…</p>;
+  if (state.status === 'site_unavailable') return <div className="loading-result loading-result-warning" role="alert">
+    <h3>Offloading site unavailable</h3>
+    <p>Your current Offloading Site assignment is missing or unavailable. Contact an administrator.</p>
+  </div>;
+  if (state.status === 'access_unavailable') return <div className="loading-result loading-result-warning" role="alert">
+    <h3>Offloading access unavailable</h3>
+    <p>Your account cannot read Open Trips. Sign in again or contact an administrator.</p>
+  </div>;
+  if (state.status === 'error') return <div className="loading-result loading-result-warning" role="alert">
+    <h3>Open Trips unavailable</h3><p>No trip has been changed. Check your connection and retry.</p>
+    <button className="button secondary" type="button" onClick={onRetry}>Retry Open Trips</button>
+  </div>;
+  if (state.value.trips.length === 0) return <p className="loading-note" role="status">There are no OPEN trips available.</p>;
+  return <ol className="offloading-open-trips" aria-label="Currently open trips">
+    {state.value.trips.map(trip => <li key={trip.id}>
+      <div className="offloading-open-trip-details">
+        <strong className="offloading-open-trip-plate">{trip.registrationNumber}</strong>
+        <dl>
+          <div><dt>Trip Number</dt><dd>{trip.tripNumber}</dd></div>
+          <div><dt>Loading Site</dt><dd>{trip.loadingSiteName}</dd></div>
+          <div><dt>Opened</dt><dd>{openedLabel(trip.openedAt)}</dd></div>
+        </dl>
+      </div>
+      <button className="button" type="button" onClick={() => onSelect(trip)}
+        aria-label={`Select trip ${trip.tripNumber}, truck ${trip.registrationNumber}`}>
+        Select Trip
+      </button>
+    </li>)}
+  </ol>;
+}
+
+export function OffloadingPortalView({ officerName, openTrips, selectedTrip, verification,
+  capturePanel, closure, closurePanel, statistics, now, onSelectTrip, onRetryOpenTrips,
+  onRetryStatistics, onRescan, onReturnToOpenTrips }: Props) {
+  const assignment = openTrips.status === 'ready' ? openTrips.value.assignment : null;
+  const canReturn = selectedTrip !== null && closure.status !== 'submitting' && closure.status !== 'ambiguous';
+  const showCapture = selectedTrip !== null && verification.status !== 'verified'
+    && verification.status !== 'site_unavailable' && verification.status !== 'access_unavailable'
+    && closure.status === 'idle';
   return <div className="loading-portal offloading-portal">
     <header className="loading-heading">
       <div><p className="eyebrow">Truck Revenue Tracking System</p><h1>Offloading Portal</h1>
         <p className="muted">{officerName}</p>
         <p className="loading-site-summary"><span>Assigned Offloading Site</span>
-          <strong>{state.status === 'found' ? state.assignment.siteName : 'Will be verified when you find a trip'}</strong></p>
+          <strong>{assignment?.siteName ?? 'Checking current assignment'}</strong></p>
       </div>
       <div className="loading-date"><span>Operational date · Africa/Lagos</span>
         <strong>{operationalDateLabel(now)}</strong></div>
     </header>
-    <section className="loading-work-card" aria-label="Scan plate and find open trip">
-      {showCapture && <><div className="loading-section-heading"><h2>Scan Plate</h2>
-        <p>Scan the vehicle plate to find its open trip.</p></div>{capturePanel}</>}
-      {state.status === 'looking_up' && <div className="loading-result" role="status">
-        <h3>Finding open trip…</h3><p>Checking the confirmed plate.</p></div>}
-      {state.status === 'invalid_plate' && <div className="loading-result loading-result-warning" role="alert">
-        <h3>Plate not recognized</h3><p>Rescan the plate or try again.</p></div>}
-      {state.status === 'no_open_trip' && <div className="loading-result loading-result-warning" role="alert">
-        <h3>No open trip</h3><p>No OPEN trip was found for {state.plate}. Contact Operations before offloading.</p>
-      </div>}
-      {state.status === 'site_unavailable' && <div className="loading-result loading-result-warning" role="alert">
-        <h3>Offloading site unavailable</h3><p>Your current offloading assignment is missing or unavailable. Contact an administrator.</p>
-      </div>}
-      {state.status === 'access_unavailable' && <div className="loading-result loading-result-warning" role="alert">
-        <h3>Offloading access unavailable</h3><p>Your account cannot use this lookup. Sign in again or contact an administrator.</p>
-      </div>}
-      {state.status === 'lookup_error' && <div className="loading-result loading-result-warning" role="alert">
-        <h3>Trip lookup unavailable</h3><p>Check your connection and retry. No trip has been changed.</p>
-        <button className="button secondary" type="button" onClick={onLookup}>Retry lookup</button>
-      </div>}
-      {state.status === 'found' && !locked && <div className="loading-result loading-result-ready" role="status">
-        <p className="eyebrow">Open trip found</p><h3>{state.trip.tripNumber}</h3>
-        <dl className="loading-details">
-          <div><dt>Confirmed plate</dt><dd>{state.capture.confirmedPlate}</dd></div>
-          <div><dt>Truck plate</dt><dd>{state.trip.registrationNumber}</dd></div>
-          <div><dt>Driver</dt><dd>{state.trip.driverName}</dd></div>
-          <div><dt>Loading site</dt><dd>{state.trip.loadingSiteName}</dd></div>
-          <div><dt>Opened</dt><dd>{new Date(state.trip.openedAt).toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}</dd></div>
-          <div><dt>Offloading site</dt><dd>{state.assignment.siteName}</dd></div>
-          <div><dt>Estimated Tonnage</dt><dd>{state.trip.estimatedQuantityTonnes === null
-            ? 'Estimate not recorded for this trip' : `${state.trip.estimatedQuantityTonnes.toFixed(2)} tonnes`}</dd></div>
-        </dl>
-      </div>}
-      {closurePanel}
-      {(state.status !== 'idle' || closure.status !== 'idle')
-        && closure.status !== 'submitting' && closure.status !== 'ambiguous'
-        && <button className="button secondary offloading-next" type="button"
-        onClick={onReset}>{closure.status === 'success' ? 'Scan Next Truck' : 'Cancel & Scan Next Truck'}</button>}
+    <section className="loading-work-card" aria-label="Offloading work">
+      {!selectedTrip && <>
+        {closurePanel}
+        <div className="loading-section-heading"><h2>Open Trips</h2>
+          <p>Select the trip that matches the truck you are receiving. Selection does not begin trip processing.</p></div>
+        <OpenTripsList state={openTrips} onSelect={onSelectTrip} onRetry={onRetryOpenTrips} />
+      </>}
+      {selectedTrip && <>
+        <div className="loading-result loading-result-ready" aria-label="Selected trip">
+          <p className="eyebrow">Selected trip — scan required</p>
+          <h2>{selectedTrip.tripNumber}</h2>
+          <dl className="loading-details">
+            <div><dt>Expected Truck Plate</dt><dd>{selectedTrip.registrationNumber}</dd></div>
+            <div><dt>Loading Site</dt><dd>{selectedTrip.loadingSiteName}</dd></div>
+            <div><dt>Opened</dt><dd>{openedLabel(selectedTrip.openedAt)}</dd></div>
+          </dl>
+        </div>
+        {verification.status === 'verifying' && <p className="loading-note" role="status">
+          Checking the scanned plate against the selected open trip…
+        </p>}
+        {verification.status === 'mismatch' && <div className="loading-result loading-result-warning" role="alert">
+          <h3>Scanned truck does not match the selected trip</h3>
+          <p>Scanned plate {verification.candidate} does not match {selectedTrip.registrationNumber} for {selectedTrip.tripNumber}.</p>
+          <div className="offloading-review-actions">
+            <button className="button" type="button" onClick={onRescan}>Rescan</button>
+            <button className="button secondary" type="button" onClick={onReturnToOpenTrips}>Return to Open Trips</button>
+          </div>
+        </div>}
+        {verification.status === 'error' && <div className="loading-result loading-result-warning" role="alert">
+          <h3>Plate verification unavailable</h3><p>Retry the camera scan. Tonnage entry remains locked.</p>
+          <div className="offloading-review-actions">
+            <button className="button" type="button" onClick={onRescan}>Rescan</button>
+            <button className="button secondary" type="button" onClick={onReturnToOpenTrips}>Return to Open Trips</button>
+          </div>
+        </div>}
+        {verification.status === 'site_unavailable' && <div className="loading-result loading-result-warning" role="alert">
+          <h3>Offloading site unavailable</h3><p>Your current assignment could not be validated. Contact an administrator.</p>
+        </div>}
+        {verification.status === 'access_unavailable' && <div className="loading-result loading-result-warning" role="alert">
+          <h3>Offloading access unavailable</h3><p>Sign in again or contact an administrator.</p>
+        </div>}
+        {showCapture && <div className="offloading-scan-step" aria-label="Mandatory truck plate verification">
+          <div className="loading-section-heading"><h3>Verify Physical Truck</h3>
+            <p>Scan the truck plate with the camera. Tonnage entry unlocks only when it matches this trip.</p></div>
+          {capturePanel}
+        </div>}
+        {verification.status === 'verified' && <div className="loading-result loading-result-ready" role="status">
+          <p className="eyebrow">Truck verified</p>
+          <p>{verification.capture.confirmedPlate}</p>
+        </div>}
+        {closurePanel}
+        {canReturn && verification.status !== 'mismatch' && verification.status !== 'error'
+          && <button className="button secondary offloading-next" type="button"
+            onClick={onReturnToOpenTrips}>Return to Open Trips</button>}
+      </>}
     </section>
     <section className="loading-stat-section" aria-label="Today's Offloading activity">
-      <div className="loading-section-heading"><h2>Today’s activity</h2>
-        <p>Figures reflect your closures. Open Trips counts all currently open trips available for lookup.</p></div>
+      <div className="loading-section-heading"><h2>Today's activity</h2>
+        <p>Figures reflect your closures. Open Trips shows the currently processable in-transit trip pool.</p></div>
       <OffloadingStatistics state={statistics} retry={onRetryStatistics} />
     </section>
   </div>;

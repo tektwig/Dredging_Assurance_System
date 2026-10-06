@@ -90,7 +90,7 @@ export default function App() {
                 <Route path="trucks-drivers/drivers" element={<OperationsDriversList />} />
                 <Route path="trucks-drivers/drivers/:driverId" element={<OperationsDriverDetail />} />
                 <Route path="waybills-payouts" element={<OperationsWaybillsRegister />} />
-                <Route path="waybills-payouts/:invoiceId" element={<OperationsWaybillDetail />} />
+                <Route path="waybills-payouts/:waybillId" element={<OperationsWaybillDetail />} />
                 <Route path="exceptions" element={<OperationsExceptionsRegister />} />
                 <Route path="exceptions/:exceptionId" element={<OperationsExceptionDetail />} />
                 <Route path="reports" element={<OperationsReports />} />

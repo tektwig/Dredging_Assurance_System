@@ -45,7 +45,7 @@ export type PdfFailureCode =
 export type PdfGenerator = (snapshot: WaybillSnapshot) => Promise<Uint8Array>;
 
 const expectedStoragePath = (invoiceNumber: string): string | null => {
-  const match = /^INV-(\d{4})-\d{6,}$/.exec(invoiceNumber);
+  const match = /^(?:INV|WB)-(\d{4})-\d{6,}$/.exec(invoiceNumber);
   return match ? `${match[1]}/${invoiceNumber}.pdf` : null;
 };
 

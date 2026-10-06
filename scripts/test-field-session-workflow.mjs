@@ -78,12 +78,13 @@ const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 
 for (const wake of ['focus', 'pageshow', 'visibilitychange']) {
   const browser = fakeBrowser();
-  let status = { status: 'valid', expiresInMs: 86_400_000, operationalDate: '2026-10-02' };
+  let status = { status: 'valid', expiresInMs: 2_345_678, operationalDate: '2026-10-02' };
   let calls = 0;
   const ended = [];
   const stop = watchFieldSession(async () => { calls++; return status; }, value => ended.push(value), browser);
   await flush();
-  assert.equal(browser.window.timeouts[0].delay, 86_400_000, 'Timer comes from the server boundary response');
+  assert.equal(browser.window.timeouts[0].delay, 2_345_678,
+    'Timer uses the server-provided Lagos-midnight boundary, not a fixed 24-hour duration');
   assert.equal(browser.window.intervals[0].delay, 60_000, 'Visible-tab polling covers suspended timers');
   status = { status: 'expired' };
   if (wake === 'visibilitychange') {
@@ -149,28 +150,28 @@ assert.equal(store.getLoading(loadingScope), null, 'Cancel/reset/success clears 
 const offloadingScope = { actorId: 'offloader-1', role: 'offloading_officer', operationalDate: '2026-10-02' };
 store.setScope(offloadingScope);
 store.saveOffloading(offloadingScope, {
-  assignmentId: 'offload-assignment-1', tripId: 'trip-1', plate: 'ABC-123', quantity: '13.5',
+  assignmentId: 'offload-assignment-1', tripId: 'trip-1', quantity: '13.5',
+  plate: 'OCR candidate', verification: 'verified',
   requestId: 'must-not-persist', image: new Blob(['private']), driverName: 'unneeded PII',
 });
 const afterOffloadingRouteUnmount = store.getOffloading(offloadingScope);
 assert.deepEqual(afterOffloadingRouteUnmount, {
-  assignmentId: 'offload-assignment-1', tripId: 'trip-1', plate: 'ABC-123', quantity: '13.5',
-}, 'Offloading stores only IDs and editable workflow values');
-const currentOffloading = { status: 'found',
+  assignmentId: 'offload-assignment-1', tripId: 'trip-1', quantity: '13.5',
+}, 'Offloading stores only the assignment, trip ID and quantity; OCR/verification/request/PII are discarded');
+const currentOffloadingList = { status: 'ready', value: {
   assignment: { assignmentId: 'offload-assignment-1', siteId: 'site-1', siteName: 'Site' },
-  trip: { id: 'trip-1', tripNumber: 'TRP-1', truckId: 'truck-1', registrationNumber: 'ABC-123',
-    normalizedRegistration: 'ABC123', driverId: 'driver-1', driverName: 'Driver', openedAt: '2026-10-02T10:00:00Z',
-    loadingSiteName: 'Loading', estimatedQuantityTonnes: 12 },
-  capture: { method: 'MANUAL', confirmedPlate: 'ABC-123', capturedAt: '2026-10-02T10:00:00Z',
-    ocrDetectedPlate: null, ocrConfidence: null, image: null, imagePath: null } };
-assert.equal(checkOffloadingRestore(afterOffloadingRouteUnmount, { status: 'lookup_error', plate: 'ABC-123' }), 'pending');
-assert.equal(checkOffloadingRestore(afterOffloadingRouteUnmount, currentOffloading), 'ready');
-assert.equal(checkOffloadingRestore(afterOffloadingRouteUnmount, { ...currentOffloading,
-  assignment: { ...currentOffloading.assignment, assignmentId: 'assignment-changed' } }), 'stale');
-assert.equal(checkOffloadingRestore(afterOffloadingRouteUnmount, { ...currentOffloading,
-  trip: { ...currentOffloading.trip, id: 'already-closed-trip' } }), 'stale',
+  trips: [{ id: 'trip-1', tripNumber: 'TRP-1', truckId: 'truck-1', registrationNumber: 'ABC-123',
+    normalizedRegistration: 'ABC123', openedAt: '2026-10-02T10:00:00Z', loadingSiteName: 'Loading' }],
+} };
+assert.equal(checkOffloadingRestore(afterOffloadingRouteUnmount, { status: 'loading' }), 'pending');
+assert.equal(checkOffloadingRestore(afterOffloadingRouteUnmount, currentOffloadingList), 'ready');
+assert.equal(checkOffloadingRestore(afterOffloadingRouteUnmount, { ...currentOffloadingList,
+  value: { ...currentOffloadingList.value,
+    assignment: { ...currentOffloadingList.value.assignment, assignmentId: 'assignment-changed' } } }), 'stale');
+assert.equal(checkOffloadingRestore(afterOffloadingRouteUnmount, { ...currentOffloadingList,
+  value: { ...currentOffloadingList.value, trips: [] } }), 'stale',
   'A closed or replaced trip cannot resume old closure work');
-assert.equal(checkOffloadingRestore(afterOffloadingRouteUnmount, { status: 'no_open_trip', plate: 'ABC-123' }), 'stale');
+assert.equal(checkOffloadingRestore(afterOffloadingRouteUnmount, { status: 'site_unavailable' }), 'stale');
 store.clearOffloading(offloadingScope);
 assert.equal(store.getOffloading(offloadingScope), null, 'Cancel/reset/success clears Offloading state');
 
@@ -199,10 +200,10 @@ function WorkflowRoute({ kind }) {
   React.useEffect(() => {
     if (kind === 'loading') value.saveLoading(scope, { assignmentId: 'assignment-1', plate: 'ROUTE-1',
       estimatedTonnage: '8', truckId: null, driverId: null, makeRegular: false });
-    else value.saveOffloading(scope, { assignmentId: 'assignment-2', tripId: 'trip-2', plate: 'ROUTE-2', quantity: '9' });
+    else value.saveOffloading(scope, { assignmentId: 'assignment-2', tripId: 'trip-2', quantity: '9' });
   }, [kind, value]);
   return React.createElement('p', null, kind === 'loading'
-    ? value.getLoading(scope)?.plate ?? 'empty' : value.getOffloading(scope)?.plate ?? 'empty');
+    ? value.getLoading(scope)?.plate ?? 'empty' : value.getOffloading(scope)?.tripId ?? 'empty');
 }
 async function renderWorkflowRoute(kind) {
   await act(async () => providerRoot.render(React.createElement(FieldWorkflowProvider, null,
@@ -220,14 +221,14 @@ assert.equal(document.getElementById('root').textContent, 'ROUTE-1', 'Loading ro
 providerAccount = { status: 'active', fieldOperationalDate: '2026-10-02',
   session: { user: { id: 'offloader-1' } }, profile: { id: 'offloader-1', role: 'offloading_officer' } };
 await renderWorkflowRoute('offloading');
-assert.equal(providerStore.getOffloading(offloadingScope)?.plate, 'ROUTE-2');
+assert.equal(providerStore.getOffloading(offloadingScope)?.tripId, 'trip-2');
 await renderWorkflowRoute(null);
-assert.equal(providerStore.getOffloading(offloadingScope)?.plate, 'ROUTE-2', 'Offloading state survives child route unmount');
+assert.equal(providerStore.getOffloading(offloadingScope)?.tripId, 'trip-2', 'Offloading state survives child route unmount');
 await renderWorkflowRoute('offloading');
-assert.equal(document.getElementById('root').textContent, 'ROUTE-2', 'Offloading route re-reads its saved values');
+assert.equal(document.getElementById('root').textContent, 'trip-2', 'Offloading route re-reads its safe selected trip ID');
 providerAccount = { status: 'loading-profile', session: { user: { id: 'offloader-1' } } };
 await renderWorkflowRoute(null);
-assert.equal(providerStore.getOffloading(offloadingScope)?.plate, 'ROUTE-2', 'Token refresh profile read preserves the same officer draft');
+assert.equal(providerStore.getOffloading(offloadingScope)?.tripId, 'trip-2', 'Token refresh profile read preserves the same officer draft');
 providerAccount = { status: 'unauthenticated' };
 await renderWorkflowRoute(null);
 assert.equal(providerStore.getOffloading(offloadingScope), null, 'Provider clears both workflows on logout');

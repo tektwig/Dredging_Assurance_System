@@ -63,6 +63,25 @@ rpcError = { code: '42501', message: 'private server detail' };
 await assert.rejects(service.lookupOffloadingOpenTrip('ABC-123'), service.OffloadingAuthorizationError);
 rpcError = null;
 
+response = { ok: true, assignment, trips: [{ id: trip.id, trip_number: trip.trip_number,
+  truck_id: trip.truck_id, registration_number: trip.registration_number,
+  normalized_registration: trip.normalized_registration, opened_at: trip.opened_at,
+  loading_site_name: trip.loading_site_name }] };
+const listed = await service.loadOffloadingOpenTrips();
+assert.equal(calls.at(-1).name, 'get_offloading_open_trips');
+assert.equal(calls.at(-1).args, undefined, 'Open Trips read derives officer and site from auth');
+assert.equal(listed.kind, 'ready');
+assert.equal(listed.value.trips[0].registrationNumber, 'ABC-123');
+assert.equal(listed.value.assignment.siteName, 'Offloading Site');
+assert(!JSON.stringify(listed).includes('John Driver') && !JSON.stringify(listed).includes('account_number'));
+response = { ok: true, assignment, trips: [{ id: trip.id, trip_number: trip.trip_number,
+  truck_id: trip.truck_id, registration_number: trip.registration_number,
+  normalized_registration: 'WRONG', opened_at: trip.opened_at,
+  loading_site_name: trip.loading_site_name }] };
+await assert.rejects(service.loadOffloadingOpenTrips(), /Invalid Offloading Open Trips response/);
+response = { ok: false, code: 'SITE_ASSIGNMENT_REQUIRED' };
+assert.deepEqual(await service.loadOffloadingOpenTrips(), { kind: 'business_failure', code: 'SITE_ASSIGNMENT_REQUIRED' });
+
 const { preparedCapture } = load('src/features/offloading/types.ts');
 const image = new Blob(['jpeg'], { type: 'image/jpeg' });
 const evidence = { id: 'capture-a', imagePath: 'actor-a/capture-a.jpg', image,
@@ -78,43 +97,6 @@ assert.equal(corrected.ocrDetectedPlate, 'ABC-123');
 assert.equal(corrected.capturedAt, evidence.capturedAt);
 assert.equal(corrected.image, image);
 
-const { OffloadingLookupController } = load('src/features/offloading/utils/offloadingLookupController.ts');
-let snapshot;
-const requests = [];
-const controller = new OffloadingLookupController(() => new Promise(resolve => requests.push(resolve)),
-  value => { snapshot = value; }, () => '2026-09-25T09:00:00Z');
-assert.equal(requests.length, 0, 'Lookup controller is invoked by the OCR workflow after capture publication');
-const first = controller.submit('ABC-123', evidence);
-assert.equal(snapshot.state.status, 'looking_up');
-assert.equal(await controller.submit('ABC-123', evidence), false, 'Duplicate submit blocked');
-requests[0](found);
-await first;
-assert.equal(snapshot.state.status, 'found');
-assert.equal(snapshot.state.capture.method, 'OCR');
-assert.equal(snapshot.state.capture.image, image);
-controller.reset();
-assert.deepEqual(snapshot, { state: { status: 'idle' }, pending: false });
-const correctedRequest = controller.submit('XYZ-999', evidence);
-requests[1](found);
-await correctedRequest;
-assert.equal(snapshot.state.capture.method, 'OCR_CORRECTED');
-controller.reset();
-const noTrip = controller.submit('ABC-123', null);
-requests[2]({ kind: 'business_failure', code: 'NO_OPEN_TRIP' });
-await noTrip;
-assert.equal(snapshot.state.status, 'no_open_trip');
-controller.reset();
-const stale = controller.submit('OLD-111', null);
-controller.reset();
-requests[3](found);
-await stale;
-assert.equal(snapshot.state.status, 'idle', 'Late lookup cannot publish an old trip');
-const failing = new OffloadingLookupController(async () => { throw new Error('private db detail'); },
-  value => { snapshot = value; });
-await failing.submit('ABC-123', null);
-assert.equal(snapshot.state.status, 'lookup_error');
-
-const { OffloadingPortalView } = load('src/features/offloading/components/OffloadingPortalView.tsx');
 const { PlateCapture } = load('src/features/loading/components/PlateCapture.tsx');
 const scanMarkup = renderToStaticMarkup(React.createElement(PlateCapture, {
   state: { status: 'detected', evidence }, disabled: false,
@@ -131,45 +113,16 @@ assert(failedScanMarkup.includes('Rescan or try again'));
 assert(failedScanMarkup.includes('Try Again'));
 assert(!failedScanMarkup.includes('Manual Entry') && !failedScanMarkup.includes('Correct plate'));
 assert(!failedScanMarkup.includes('Choose Photo') && !failedScanMarkup.includes('type="file"'));
-const view = (state, closure = { status: 'idle' }) => renderToStaticMarkup(React.createElement(OffloadingPortalView, {
-  officerName: 'Officer A', lookup: { state, pending: false },
-  closure, closurePanel: null,
-  statistics: { status: 'loading' }, now: new Date('2026-09-27T12:00:00Z'), onRetryStatistics() {},
-  capturePanel: React.createElement('span', null, 'shared scanner'),
-  onLookup() {}, onReset() {},
-}));
-assert(view({ status: 'idle' }).includes('Scan Plate'));
-assert(!view({ status: 'idle' }).includes('name="plate"'));
-assert(!view({ status: 'idle' }).includes('Find Open Trip'));
-assert(!view({ status: 'invalid_plate', plate: 'ABC-123' }).includes('another photo'));
-assert(!view({ status: 'invalid_plate', plate: 'ABC-123' }).includes('Choose Photo'));
-assert(view({ status: 'idle' }).includes('shared scanner'));
-assert(view({ status: 'no_open_trip', plate: 'ABC-123' }).includes('Contact Operations'));
-assert(view({ status: 'lookup_error', plate: 'ABC-123' }).includes('Retry lookup'));
-const rendered = view({ status: 'found', assignment: found.assignment,
-  trip: found.trip, capture: preparedCapture('ABC-123', evidence, 'later') });
-assert(rendered.includes('TRP-0000000001'));
-assert(rendered.includes('John Driver'));
-assert(rendered.includes('20.25 tonnes'));
-assert(rendered.includes('Cancel &amp; Scan Next Truck'));
-assert(!rendered.includes('shared scanner') && !rendered.includes('Scan Plate'),
-  'found OPEN trip unmounts the scanner section before tonnage/review/closure');
-assert(!rendered.includes('account_number'));
-assert(!rendered.includes('Close Trip'));
-assert(view({ status: 'found', assignment: found.assignment, trip: found.trip,
-  capture: preparedCapture('ABC-123', evidence, 'later') }, { status: 'success', result: {} }).includes('Scan Next Truck'),
-  'scanner next-trip reset remains available after successful closure');
-assert(view({ status: 'idle' }).includes('shared scanner'), 'scanner returns after reset for the next trip');
 
 const portalSource = readFileSync(resolve('src/features/offloading/OffloadingPortal.tsx'), 'utf8');
 assert(portalSource.includes('PlateCaptureController') && portalSource.includes('createPlateOcrService'));
 assert(!portalSource.includes('close_trip_v2') && !portalSource.includes('.storage.')
   && !portalSource.includes(".from('trips')"));
-console.log('PASS Offloading OCR lookup, NO_OPEN_TRIP, error, reset, stale result and safe rendering');
-assert(portalSource.includes('void lookupController.submit(capture.evidence.candidate, capture.evidence)'));
-assert(portalSource.includes("lookup.state.status === 'found' ? undefined : <PlateCapture"));
-assert(portalSource.includes('if (selectedTripRef.current) return'));
-assert(portalSource.includes("if (lookup.state.status === 'found') captureController.clear()"));
+assert(portalSource.includes('get_offloading_open_trips') || portalSource.includes('loadOffloadingOpenTrips'));
+assert(portalSource.includes('verificationController.verify(capture.evidence)'));
 assert(portalSource.includes('autoLookupEvidence.current === capture.evidence.id'));
-assert(!portalSource.includes('confirmCorrection'));
-console.log('PASS OCR auto-lookup, no plate correction/manual entry, estimate display and stale evidence fencing');
+assert(!portalSource.includes('lookupController.submit') && !portalSource.includes('confirmCorrection'));
+const captureSource = readFileSync(resolve('src/features/loading/components/PlateCapture.tsx'), 'utf8');
+assert(captureSource.includes('navigator.mediaDevices?.getUserMedia'));
+assert(!captureSource.includes('type="file"') && !captureSource.includes('accept="image/'));
+console.log('PASS Offloading retains camera OCR, candidate lookup, and no manual/gallery bypass');

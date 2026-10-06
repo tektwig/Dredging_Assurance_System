@@ -126,6 +126,7 @@ export interface Database {
         p_make_default_driver?: boolean;
       }; Returns: unknown };
       lookup_offloading_open_trip: { Args: { p_plate: string }; Returns: unknown };
+      get_offloading_open_trips: { Args: Record<string, never>; Returns: unknown };
       get_offloading_statistics: { Args: Record<string, never>; Returns: unknown };
       close_trip_v2: { Args: {
         p_request_id: string; p_trip_id: string; p_plate: string; p_expected_assignment_id: string;
