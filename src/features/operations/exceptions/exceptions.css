@@ -4,7 +4,7 @@
 .exception-filters input, .exception-filters select, .exception-resolve-actions select { width: 100%; min-width: 0; min-height: 2.8rem; padding: .65rem .8rem; border: 1px solid #c7d1d8; border-radius: .5rem; background: #fbfcfd; color: #172b3a; font: inherit; }
 .exception-filters label:first-child { grid-column: span 2; }
 .exception-filters button { align-self: end; }
-.operations-exceptions-page a { color: #125b59; font-weight: 800; }
+.operations-exceptions-page a { color: var(--brand-navy); font-weight: 800; }
 .exception-detail-section { padding: clamp(1rem, 2.5vw, 2rem); }
 .exception-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
 .exception-detail-grid dt { color: #60717e; font-size: .77rem; font-weight: 700; }

@@ -28,12 +28,10 @@ export function LoginPage() {
   }
 
   return <main className="login-page">
-    <section className="login-intro" aria-label="Dredging Assurance">
-      <div className="brand-mark" aria-hidden="true">DA</div>
-      <p className="eyebrow">Truck Revenue Tracking System</p>
-      <h1>Every movement.<br />Accounted for.</h1>
-      <p className="intro-copy">A shared foundation for clear records and accountable operations.</p>
-      <p className="intro-footer">Dredging Assurance</p>
+    <section className="login-intro" aria-label="TRAKFLIT — Know Every Move.">
+      <img className="brand-logo" src="/trakflit-logo.jpg" alt="TRAKFLIT — Know Every Move." />
+      <h1>Total Fleet Visibility</h1>
+      <p className="intro-copy">A clear system for records and accountable operations.</p>
     </section>
     <section className="login-panel">
       <div className="login-form-container">

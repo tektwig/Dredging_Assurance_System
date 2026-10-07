@@ -150,7 +150,7 @@ export function LoadingPortalView(props: Props) {
     && !['submitting', 'ambiguous', 'success'].includes(props.tripStage ?? '');
   return <div className="loading-portal">
     <header className="loading-heading">
-      <div><p className="eyebrow">Truck Revenue Tracking System</p><h1>Loading Portal</h1>
+      <div><p className="eyebrow">TRAKFLIT</p><h1>Loading Portal</h1>
         <p className="muted">{props.officerName}</p>
         <p className="loading-site-summary"><span>Assigned Loading Site</span>
           <strong>{props.site.status === 'ready' ? props.site.site.siteName : 'Unavailable'}</strong></p></div>

@@ -1,25 +1,30 @@
 .offloading-portal .loading-work-card { max-width: 58rem; }
 .offloading-next { margin-top: 1.25rem; min-height: 3rem; }
 .offloading-tonnage { display: grid; gap: .7rem; margin-top: 1.4rem; padding-top: 1.2rem;
-  border-top: 1px solid #cbd9d6; max-width: 24rem; }
+  border-top: 1px solid #dce4e9; max-width: 24rem; }
 .offloading-tonnage h3 { margin: 0; }
 .offloading-tonnage label { font-weight: 700; }
 .offloading-tonnage input { min-height: 3.4rem; font-size: 1.2rem; padding: .55rem .7rem;
-  border: 1px solid #879d98; border-radius: .45rem; }
+  border: 1px solid #c7d1d8; border-radius: .45rem; }
 .offloading-tonnage p { margin: 0; color: #8b3a24; }
 .offloading-review-actions { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 1.2rem; }
 .offloading-review-actions .button { min-height: 3rem; }
 .offloading-open-trips { display: grid; gap: .8rem; list-style: none; margin: 1rem 0 0; padding: 0; }
 .offloading-open-trips > li { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-  padding: 1rem; border: 1px solid #cbd9d6; border-radius: .55rem; background: #fff; }
+  padding: 1rem; border: 1px solid #dce4e9; border-radius: .55rem; background: #fff; }
 .offloading-open-trip-details { min-width: 0; }
 .offloading-open-trip-plate { font-size: 1.25rem; letter-spacing: .04em; }
 .offloading-open-trip-details dl { display: flex; flex-wrap: wrap; gap: .55rem 1.25rem; margin: .65rem 0 0; }
 .offloading-open-trip-details dl > div { display: grid; gap: .15rem; }
-.offloading-open-trip-details dt { color: #50645f; font-size: .78rem; }
+.offloading-open-trip-details dt { color: #60717e; font-size: .78rem; }
 .offloading-open-trip-details dd { margin: 0; font-weight: 600; }
 .offloading-open-trips .button { flex: 0 0 auto; min-height: 3rem; }
-.offloading-scan-step { margin-top: 1.2rem; padding-top: 1rem; border-top: 1px solid #cbd9d6; }
+.offloading-open-trips-controls { display: grid; gap: .55rem; margin-top: 1rem; }
+.offloading-open-trips-search { display: grid; gap: .35rem; max-width: 28rem; font-weight: 650; }
+.offloading-open-trips-search input { width: 100%; min-height: 2.9rem; padding: .55rem .7rem; border: 1px solid #c7d1d8; border-radius: .45rem; background: #fff; font: inherit; }
+.offloading-open-trips-status { margin: 0; color: #506477; }
+.offloading-open-trips-show-more { margin-top: 1rem; min-height: 3rem; }
+.offloading-scan-step { margin-top: 1.2rem; padding-top: 1rem; border-top: 1px solid #dce4e9; }
 .offloading-portal .loading-work-card > .loading-result-ready h2 { margin: .2rem 0 .75rem; }
 @media (max-width: 600px) {
   .offloading-open-trips > li { align-items: stretch; flex-direction: column; }

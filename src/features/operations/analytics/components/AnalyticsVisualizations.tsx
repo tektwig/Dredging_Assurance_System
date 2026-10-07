@@ -7,7 +7,7 @@ import type {
   AnalyticsPeriodSummary, AnalyticsStatus, OperationsAnalyticsData, PerformanceDimension, PerformanceMetric,
 } from '../../services/operationsAnalytics';
 
-const COLORS = ['#125b59', '#d39e42', '#4978a4', '#8a6795', '#5a8b67', '#bf735b'];
+const COLORS = ['var(--brand-navy)', '#d39e42', '#4978a4', '#8a6795', '#5a8b67', '#bf735b'];
 const varianceColor = '#4978a4';
 
 function tonnes(value: number | null): string {
@@ -74,7 +74,7 @@ export function AnalyticsTrends({ data }: { data: OperationsAnalyticsData }) {
               <YAxis allowDecimals={false} />
               <Tooltip labelFormatter={value => typeof value === 'string' ? dateLabel(value) : String(value ?? '')} />
               <Legend />
-              <Line type="linear" dataKey="opened" name="Opened" stroke="#125b59" strokeWidth={2} dot={false} />
+              <Line type="linear" dataKey="opened" name="Opened" stroke="var(--brand-navy)" strokeWidth={2} dot={false} />
               <Line type="linear" dataKey="closed" name="Closed" stroke="#d39e42" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -102,7 +102,7 @@ export function AnalyticsTrends({ data }: { data: OperationsAnalyticsData }) {
                 formatter={value => typeof value === 'number' ? tonnes(value)
                   : value === null ? 'Estimate unavailable' : 'Unavailable'} />
               <Legend />
-              <Line type="linear" dataKey="estimated_tonnage_tonnes" name="Estimated" stroke="#125b59" strokeWidth={2} dot={false} connectNulls={false} />
+              <Line type="linear" dataKey="estimated_tonnage_tonnes" name="Estimated" stroke="var(--brand-navy)" strokeWidth={2} dot={false} connectNulls={false} />
               <Line type="linear" dataKey="actual_tonnage_tonnes" name="Actual" stroke="#d39e42" strokeWidth={2} dot={false} connectNulls={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -166,7 +166,7 @@ export function AnalyticsDriverPerformance({ data, driverLabel }: {
               <YAxis tickFormatter={formatAxis} allowDecimals={option.unit !== 'count'} />
               <Tooltip labelFormatter={value => typeof value === 'string' ? dateLabel(value) : String(value ?? '')}
                 formatter={value => driverMetricValue(metric, typeof value === 'number' ? value : null)} />
-              <Line type="linear" dataKey={metric} name={option.label} stroke="#125b59" strokeWidth={2} dot={false} connectNulls={false} />
+              <Line type="linear" dataKey={metric} name={option.label} stroke="var(--brand-navy)" strokeWidth={2} dot={false} connectNulls={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -253,7 +253,7 @@ export function AnalyticsPeriodSummaries({ data, granularity, onGranularity }: {
               const row = rows.find(item => item.period_start === value);
               return row ? periodSpan(row) : String(value ?? '');
             }} formatter={value => summaryMetricValue(metric, typeof value === 'number' ? value : null)} />
-            <Bar dataKey={metric} name={option.label} fill="#125b59" radius={[4, 4, 0, 0]} />
+            <Bar dataKey={metric} name={option.label} fill="var(--brand-navy)" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -329,7 +329,7 @@ export function AnalyticsPerformance({ data, dimension, metric, onDimension, onM
               <XAxis type="number" tickFormatter={formatAxis} />
               <YAxis type="category" dataKey="label" width={140} />
               <Tooltip formatter={value => metricValue(metric, typeof value === 'number' ? value : null)} />
-              <Bar dataKey={valueKey} name={metricLabels[metric]} fill="#125b59" radius={[0, 4, 4, 0]} />
+              <Bar dataKey={valueKey} name={metricLabels[metric]} fill="var(--brand-navy)" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

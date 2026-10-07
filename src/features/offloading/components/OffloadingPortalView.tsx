@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { operationalDateLabel } from '../../loading/utils/operationalDate';
 import type { ClosureState } from '../utils/closureController';
 import type { OffloadingOpenTripsState, OffloadingOpenTripListItem,
@@ -29,7 +29,6 @@ export function OffloadingStatistics({ state, retry }: { state: OffloadingStatis
   </div>;
   const cards = [
     ['Trips Closed Today', state.statistics.tripsClosedToday.toLocaleString('en-NG')],
-    ['Open Trips', state.statistics.openTrips.toLocaleString('en-NG')],
     ['Tonnage Processed Today', state.statistics.tonnageProcessedToday.toLocaleString('en-NG', {
       minimumFractionDigits: 2, maximumFractionDigits: 2,
     })],
@@ -51,6 +50,30 @@ function OpenTripsList({ state, onSelect, onRetry }: {
   onSelect: (trip: OffloadingOpenTripListItem) => void;
   onRetry: () => void;
 }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [pagination, setPagination] = useState({ trips: null as OffloadingOpenTripListItem[] | null, visibleCount: 6 });
+  const sourceTrips = state.status === 'ready' ? state.value.trips : null;
+  const orderedTrips = sourceTrips ? [...sourceTrips].sort((first, second) =>
+    new Date(first.openedAt).getTime() - new Date(second.openedAt).getTime()) : [];
+  const visibleCount = sourceTrips && pagination.trips === sourceTrips
+    ? Math.min(pagination.visibleCount, orderedTrips.length) : Math.min(6, orderedTrips.length);
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const matchingTrips = normalizedSearch
+    ? orderedTrips.filter(trip => trip.registrationNumber.toLowerCase().includes(normalizedSearch)
+      || trip.tripNumber.toLowerCase().includes(normalizedSearch))
+    : orderedTrips;
+  const searching = normalizedSearch.length > 0;
+  const visibleTrips = searching ? matchingTrips : orderedTrips.slice(0, visibleCount);
+  const hasMore = visibleTrips.length !== orderedTrips.length;
+  const fitsFirstPage = orderedTrips.length === Math.min(6, orderedTrips.length);
+  let statusText = 'Showing all ' + orderedTrips.length + ' open trips';
+  const noMatches = matchingTrips.length === 0;
+  if (searching && noMatches) statusText = 'No open trips match your search.';
+  if (searching && !noMatches) statusText = 'Showing ' + matchingTrips.length
+    + ' matching open trip' + (matchingTrips.length === 1 ? '' : 's');
+  if (!searching && (hasMore || fitsFirstPage)) {
+    statusText = 'Showing ' + visibleTrips.length + ' of ' + orderedTrips.length + ' open trips';
+  }
   if (state.status === 'loading') return <p className="loading-note" role="status">Loading Open Trips…</p>;
   if (state.status === 'site_unavailable') return <div className="loading-result loading-result-warning" role="alert">
     <h3>Offloading site unavailable</h3>
@@ -65,8 +88,19 @@ function OpenTripsList({ state, onSelect, onRetry }: {
     <button className="button secondary" type="button" onClick={onRetry}>Retry Open Trips</button>
   </div>;
   if (state.value.trips.length === 0) return <p className="loading-note" role="status">There are no OPEN trips available.</p>;
-  return <ol className="offloading-open-trips" aria-label="Currently open trips">
-    {state.value.trips.map(trip => <li key={trip.id}>
+  return <>
+    <div className={'offloading-open-trips-controls'}>
+      <label className={'offloading-open-trips-search'}>
+        <span>Search open trips by registration number or trip number</span>
+        <input type={'search'} value={searchTerm} onChange={event => {
+          setSearchTerm(event.currentTarget.value);
+          setPagination({ trips: state.value.trips, visibleCount: 6 });
+        }} />
+      </label>
+      <p className={'offloading-open-trips-status'} role={'status'}>{statusText}</p>
+    </div>
+    {visibleTrips.length !== 0 && <ol className={'offloading-open-trips'} aria-label={'Currently open trips'}>
+    {visibleTrips.map(trip => <li key={trip.id}>
       <div className="offloading-open-trip-details">
         <strong className="offloading-open-trip-plate">{trip.registrationNumber}</strong>
         <dl>
@@ -80,7 +114,13 @@ function OpenTripsList({ state, onSelect, onRetry }: {
         Select Trip
       </button>
     </li>)}
-  </ol>;
+    </ol>}
+    {!searching && hasMore && <button className={'button secondary offloading-open-trips-show-more'}
+      type={'button'} onClick={() => setPagination({ trips: state.value.trips,
+        visibleCount: Math.min(visibleCount + 6, orderedTrips.length) })}>
+      Show more
+    </button>}
+  </>;
 }
 
 export function OffloadingPortalView({ officerName, openTrips, selectedTrip, verification,
@@ -93,7 +133,7 @@ export function OffloadingPortalView({ officerName, openTrips, selectedTrip, ver
     && closure.status === 'idle';
   return <div className="loading-portal offloading-portal">
     <header className="loading-heading">
-      <div><p className="eyebrow">Truck Revenue Tracking System</p><h1>Offloading Portal</h1>
+      <div><p className="eyebrow">TRAKFLIT</p><h1>Offloading Portal</h1>
         <p className="muted">{officerName}</p>
         <p className="loading-site-summary"><span>Assigned Offloading Site</span>
           <strong>{assignment?.siteName ?? 'Checking current assignment'}</strong></p>
@@ -104,7 +144,8 @@ export function OffloadingPortalView({ officerName, openTrips, selectedTrip, ver
     <section className="loading-work-card" aria-label="Offloading work">
       {!selectedTrip && <>
         {closurePanel}
-        <div className="loading-section-heading"><h2>Open Trips</h2>
+        <div className="loading-section-heading"><h2>{openTrips.status === 'ready'
+          ? 'Open Trips (' + openTrips.value.trips.length + ')' : 'Open Trips'}</h2>
           <p>Select the trip that matches the truck you are receiving. Selection does not begin trip processing.</p></div>
         <OpenTripsList state={openTrips} onSelect={onSelectTrip} onRetry={onRetryOpenTrips} />
       </>}

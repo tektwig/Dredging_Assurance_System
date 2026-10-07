@@ -31,7 +31,7 @@ export async function generateWaybillPdf(snapshot: WaybillSnapshot): Promise<Uin
   const issuedDate = new Date(snapshot.issued_at);
   document.setTitle(`Waybill ${snapshot.invoice_number}`);
   document.setSubject(`Trip ${snapshot.trip_number}`);
-  document.setAuthor('Dredging Assurance System');
+  document.setAuthor('TRAKFLIT');
   document.setCreationDate(issuedDate);
   document.setModificationDate(issuedDate);
 

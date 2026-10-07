@@ -1,9 +1,9 @@
 .asset-page { display: grid; gap: 1.2rem; }
 .asset-page header h1 { margin-bottom: 0; }
-.asset-page a { color: #125b59; font-weight: 700; }
+.asset-page a { color: var(--brand-navy); font-weight: 700; }
 .asset-tabs { display: flex; flex-wrap: wrap; gap: .4rem; border-bottom: 1px solid #dce4e9; }
 .asset-tab { padding: .7rem 1rem; border-bottom: 3px solid transparent; text-decoration: none; }
-.asset-tab.active { border-color: #125b59; background: #eaf3f2; }
+.asset-tab.active { border-color: var(--brand-blue); background: var(--brand-blue-soft); }
 .asset-filters, .asset-form { display: grid; gap: .85rem; padding: 1rem; }
 .asset-filters { grid-template-columns: minmax(12rem, 2fr) minmax(10rem, 1fr) auto; align-items: end; }
 .asset-filters label, .asset-form label { display: grid; gap: .35rem; font-size: .85rem; font-weight: 700; }

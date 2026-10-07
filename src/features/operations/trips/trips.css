@@ -12,7 +12,7 @@
 .trip-register-table { padding: .5rem; }
 .trip-register-table .operations-table td { min-width: 7rem; }
 .trip-register-table .operations-table td:first-child { min-width: 9rem; }
-.trip-register-table a, .trip-breadcrumb a { color: #125b59; font-weight: 800; }
+.trip-register-table a, .trip-breadcrumb a { color: var(--brand-navy); font-weight: 800; }
 .trip-status-badge { display: inline-block; padding: .3rem .65rem; border-radius: 2rem; font-size: .75rem; font-weight: 800; text-transform: capitalize; white-space: nowrap; }
 .trip-status-open { background: #e7f3ee; color: #28674e; }
 .trip-status-closed { background: #e8f0f8; color: #26557a; }
