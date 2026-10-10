@@ -12,7 +12,10 @@ export function AuthenticatedLayout({ navigation, accountAction }: { navigation?
   if (account.status !== 'active') return null;
   return <div className="app-shell">
     <header className="app-header">
-      <div><p className="brand">Dredging Assurance</p><p className="muted small">Truck Revenue Tracking System</p></div>
+      <div className="app-brand">
+        <img className="app-brand-mark" src="/trakflit-mark.png" alt="" aria-hidden="true" />
+        <div><p className="brand">TRAKFLIT</p><p className="muted small">Total Fleet Visibility</p></div>
+      </div>
       <div className="account-summary">
         <div><p className="user-name">{account.profile.display_name.trim() || 'Signed-in user'}</p>
           <p className="muted small">{account.profile.role && ROLE_LABELS[account.profile.role]}</p></div>

@@ -2,7 +2,7 @@
 .operations-reports-page > header h1 { margin: 0; }
 .report-tabs { display: flex; flex-wrap: wrap; gap: .5rem; border-bottom: 1px solid var(--border, #d6dce2); }
 .report-tabs button { min-height: 2.75rem; padding: .55rem .9rem; border: 0; border-bottom: 3px solid transparent; background: transparent; color: inherit; cursor: pointer; }
-.report-tabs button[aria-selected="true"] { border-bottom-color: var(--accent, #167c72); font-weight: 700; }
+.report-tabs button[aria-selected="true"] { border-bottom-color: var(--brand-blue); font-weight: 700; }
 .operations-report-filters { display: flex; flex-wrap: wrap; align-items: end; gap: .8rem; padding: 1rem; }
 .operations-report-filters label { display: grid; gap: .3rem; min-width: 10rem; }
 .operations-report-filters input, .operations-report-filters select { min-height: 2.5rem; max-width: 100%; }

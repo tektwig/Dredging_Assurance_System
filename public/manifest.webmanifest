@@ -1,12 +1,12 @@
 {
-  "name": "DredgeOps — Sand Dredging Assurance & Revenue System",
-  "short_name": "DredgeOps",
-  "description": "Operational Assurance, Real-time Field Verification, OCR Gate Capture, and Financial Reconciliation System for Sand Dredging and Haulage Operations.",
+  "name": "TRAKFLIT — Total Fleet Visibility",
+  "short_name": "TRAKFLIT",
+  "description": "Know Every Move. Total Fleet Visibility for connected operations and fleet movement.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#090D16",
-  "theme_color": "#F59E0B",
+  "theme_color": "#073B82",
   "orientation": "any",
   "categories": ["business", "productivity", "utilities"],
   "icons": [
@@ -27,12 +27,6 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
-    },
-    {
-      "src": "/icons/icon.svg",
-      "sizes": "512x512",
-      "type": "image/svg+xml",
-      "purpose": "any"
     }
   ],
   "shortcuts": [

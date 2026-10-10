@@ -93,7 +93,7 @@ export function OffloadingPortalView({ officerName, openTrips, selectedTrip, ver
     && closure.status === 'idle';
   return <div className="loading-portal offloading-portal">
     <header className="loading-heading">
-      <div><p className="eyebrow">Truck Revenue Tracking System</p><h1>Offloading Portal</h1>
+      <div><p className="eyebrow">TRAKFLIT</p><h1>Offloading Portal</h1>
         <p className="muted">{officerName}</p>
         <p className="loading-site-summary"><span>Assigned Offloading Site</span>
           <strong>{assignment?.siteName ?? 'Checking current assignment'}</strong></p>
