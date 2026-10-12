@@ -4,9 +4,8 @@ import { Link, useParams } from 'react-router-dom';
 import { ListResultState } from '../../../components/data/ListResultState';
 import { PaginationControls } from '../../../components/data/PaginationControls';
 import {
-  completeOperationsPayment, downloadWaybill, loadDeliveryHistory, loadWaybillDetail,
-  markOperationsPaymentPaid, resendWaybill, retryWaybillDelivery,
-  type DeliveryAttempt, type Page, type WaybillDetail,
+  downloadWaybill, loadDeliveryHistory, loadWaybillDetail, resendWaybill, retryWaybillDelivery,
+  type DeliveryAttempt, type DeliveryStatus, type Page, type WaybillDetail,
 } from '../services/operationsWaybills';
 import { formatLagosDate } from './OperationsWaybillsRegister';
 import './waybills.css';
@@ -16,112 +15,74 @@ function DetailField({ label, children }: { label: string; children: ReactNode }
   return <div><dt>{label}</dt><dd>{children ?? '—'}</dd></div>;
 }
 
-function ResendForm({ detail, onDone, onError }: { detail: WaybillDetail; onDone: () => void; onError: (message: string) => void }) {
-  const [reason, setReason] = useState(detail.delivery.driver === 'failed' ? 'DELIVERY_UNCONFIRMED' : 'DRIVER_REQUEST');
+function DeliveryRecovery({ detail, audience, status, onDone, onError }: {
+  detail: WaybillDetail; audience: 'driver' | 'client'; status: DeliveryStatus;
+  onDone: () => void; onError: (message: string) => void;
+}) {
+  const [reason, setReason] = useState('DELIVERY_UNCONFIRMED');
   const [duplicateConfirmed, setDuplicateConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
   const requestId = useRef(crypto.randomUUID());
-  const currentStatus = detail.delivery.driver;
-  const risk = currentStatus === 'failed';
-  const eligible = detail.document.status === 'ready' && detail.waybill.driver_email_available;
-  const resetRequest = () => { requestId.current = crypto.randomUUID(); setDuplicateConfirmed(false); setError(''); };
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (busy || !eligible || risk && !duplicateConfirmed) return;
-    setBusy(true); setError('');
-    try {
-      await resendWaybill(detail.waybill.id, 'driver', requestId.current, reason, duplicateConfirmed);
-      requestId.current = crypto.randomUUID(); onDone();
-    } catch (failure) {
-      const message = failure instanceof Error ? failure.message : 'Unable to resend Waybill';
-      setError(message); onError(message);
-      if (message.includes('changed') || message.includes('conflicts')) onDone();
-    }
-    finally { setBusy(false); }
-  };
-  const retry = async () => {
+  const [error, setError] = useState('');
+  const blockedEmail = audience === 'driver' && status === 'blocked_missing_email';
+  const blockedConfiguration = audience === 'client' && status === 'blocked_configuration';
+  const isFailed = status === 'failed';
+  const canResend = detail.document.status === 'ready' && isFailed;
+
+  async function run(action: () => Promise<void>) {
     if (busy) return;
     setBusy(true); setError('');
-    try { await retryWaybillDelivery(detail.waybill.id, 'driver', 'DELIVERY_UNCONFIRMED'); onDone(); }
-    catch (failure) { const message = failure instanceof Error ? failure.message : 'Unable to retry delivery';
-      setError(message); onError(message); }
-    finally { setBusy(false); }
-  };
-  return <form className="waybill-action-form" onSubmit={event => void submit(event)}>
-    <h3>Controlled driver resend</h3>
-    <p className="muted">Creates a separate audited driver delivery using the existing PDF and immutable recipient snapshot.
-      Operations and Finance access the Waybill through this portal.</p>
-    <label>Reason code<select value={reason} onChange={event => { setReason(event.currentTarget.value); resetRequest(); }}>
-      {risk ? <><option value="DELIVERY_UNCONFIRMED">Delivery unconfirmed</option>
-        <option value="CORRECTIVE_RESEND">Corrective resend</option></>
-        : <><option value="DRIVER_REQUEST">Driver request</option><option value="CORRECTIVE_RESEND">Corrective resend</option></>}
-    </select></label>
-    {risk && <><p className="waybill-warning">A previous delivery failed. Provider acceptance may be uncertain.
-      Try the same delivery within its safe retry window. Outside that window, a new resend may duplicate delivery.</p>
-      <label className="waybill-checkbox"><input type="checkbox" checked={duplicateConfirmed}
-        onChange={event => setDuplicateConfirmed(event.currentTarget.checked)} />
-        I understand a new delivery could duplicate a message already accepted by the provider.</label>
-      <button className="button secondary" type="button" disabled={busy} onClick={() => void retry()}>Retry existing attempt safely</button>
-    </>}
-    {!eligible && <p role="status">{detail.document.status !== 'ready' ? 'Ready PDF required.' : 'Driver email not available in the Waybill snapshot.'}</p>}
-    {detail.document.status === 'ready' && currentStatus === null &&
-      <p role="status">Initial delivery not queued. Resend becomes available after the initial delivery is processed.</p>}
-    {currentStatus === 'pending' &&
-      <p role="status">Delivery pending. Resend becomes available after this delivery is processed.</p>}
-    {currentStatus === 'processing' &&
-      <p role="status">Delivery processing. Resend becomes available after this delivery is processed.</p>}
-    {error && <p role="alert">{error}</p>}
-    <button className="button" type="submit" disabled={busy || !eligible || risk && !duplicateConfirmed
-      || currentStatus === 'pending' || currentStatus === 'processing' || currentStatus === null}>
-      {busy ? 'Submitting…' : 'Create resend attempt'}</button>
-  </form>;
-}
-
-function PayoutForm({ detail, onDone, onError }: { detail: WaybillDetail; onDone: () => void; onError: (message: string) => void }) {
-  const [accountName, setAccountName] = useState('');
-  const [accountNumber, setAccountNumber] = useState('');
-  const [bankName, setBankName] = useState('');
-  const [reference, setReference] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const payment = detail.payment;
-  const submit = async (event: FormEvent) => {
-    event.preventDefault(); if (busy) return;
-    if (payment.status === 'pending' && !window.confirm('Confirm this payout was paid? This cannot be reversed.')) return;
-    setBusy(true); setError('');
-    try {
-      if (payment.status === 'payment_details_required') {
-        await completeOperationsPayment(payment.id, payment.updated_at, accountName, accountNumber, bankName);
-        setAccountName(''); setAccountNumber(''); setBankName('');
-      } else if (payment.status === 'pending') {
-        await markOperationsPaymentPaid(payment.id, payment.updated_at, reference);
-        setReference('');
-      }
-      onDone();
-    } catch (failure) {
-      const message = failure instanceof Error ? failure.message : 'Unable to update payout';
-      setError(message); onError(message);
-      onDone();
+    try { await action(); onDone(); }
+    catch (failure) {
+      const message = failure instanceof Error ? failure.message : 'Unable to update this delivery.';
+      setError(message); onError(message); onDone();
     } finally { setBusy(false); }
+  }
+
+  const retry = () => run(() => retryWaybillDelivery(detail.waybill.id, audience, 'DELIVERY_UNCONFIRMED'));
+  const submitResend = (event: FormEvent) => {
+    event.preventDefault();
+    if (!canResend || !duplicateConfirmed) return;
+    void run(async () => {
+      await resendWaybill(detail.waybill.id, audience, requestId.current, reason, true);
+      requestId.current = crypto.randomUUID(); setDuplicateConfirmed(false);
+    });
   };
-  if (payment.status === 'paid') return null;
-  return <form className="waybill-action-form" onSubmit={event => void submit(event)}>
-    {payment.status === 'payment_details_required' ? <>
-      <h3>Complete payment details</h3><p className="muted">Only this payout is updated. Driver master banking and Waybill remain unchanged.</p>
-      <label>Account name<input required maxLength={200} autoComplete="off" value={accountName}
-        onChange={event => setAccountName(event.currentTarget.value)} /></label>
-      <label>Account number<input required pattern="[0-9]{10}" inputMode="numeric" maxLength={10}
-        autoComplete="off" value={accountNumber} onChange={event => setAccountNumber(event.currentTarget.value)} /></label>
-      <label>Bank name<input required maxLength={200} autoComplete="off" value={bankName}
-        onChange={event => setBankName(event.currentTarget.value)} /></label>
-      <button className="button" type="submit" disabled={busy}>Complete payout details</button>
-    </> : <><h3>Mark payout paid</h3>
-      <label>Payment reference<input required maxLength={200} value={reference}
-        onChange={event => setReference(event.currentTarget.value)} /></label>
-      <button className="button" type="submit" disabled={busy}>Confirm paid</button></>}
+
+  return <section className="waybill-delivery-card">
+    <h3>{audience === 'driver' ? 'Driver delivery' : 'Parent company delivery'}</h3>
+    <p>Status: <strong>{status?.replace(/_/g, ' ') ?? 'not queued'}</strong></p>
+    {status === 'sent' && <p className="muted">The email provider accepted the message. This does not confirm mailbox delivery.</p>}
+    {blockedEmail && <>
+      <p role="status">The driver delivery is blocked because no email address was recorded at closure. The original Waybill and delivery record are preserved.</p>
+      <Link to={`/operations/trucks-drivers/drivers/${detail.waybill.driver_id}`}>Correct the driver email</Link>
+      <button className="button secondary" type="button" disabled={busy || !detail.waybill.driver_email_available}
+        onClick={() => void retry()}>{busy ? 'Saving…' : 'Retry original driver delivery'}</button>
+      {!detail.waybill.driver_email_available && <p className="muted">Add an email to the driver master record first.</p>}
+    </>}
+    {blockedConfiguration && <p role="status">Company delivery is blocked until the parent company email recipient is configured. No Finance Officer mailbox is used as a fallback.</p>}
+    {status === 'pending' && <p role="status">Delivery is waiting for processing.</p>}
+    {status === 'processing' && <p role="status">Delivery is currently processing.</p>}
+    {isFailed && <>
+      <p className="muted">Failure details are available to authorized service staff. Provider acceptance may be uncertain.</p>
+      <button className="button secondary" type="button" disabled={busy || detail.document.status !== 'ready'}
+        onClick={() => void retry()}>{busy ? 'Submitting…' : 'Retry existing delivery'}</button>
+      <form className="waybill-action-form" onSubmit={submitResend}>
+        <h4>Audited resend</h4>
+        <label>Reason<select value={reason} onChange={event => setReason(event.currentTarget.value)}>
+          <option value="DELIVERY_UNCONFIRMED">Delivery unconfirmed</option>
+          <option value="CORRECTIVE_RESEND">Corrective resend</option>
+        </select></label>
+        <label className="waybill-checkbox"><input type="checkbox" checked={duplicateConfirmed}
+          onChange={event => setDuplicateConfirmed(event.currentTarget.checked)} />
+          I understand a new message could duplicate one already accepted by the provider.</label>
+        <button className="button" type="submit" disabled={busy || !canResend || !duplicateConfirmed}>
+          {busy ? 'Submitting…' : 'Create audited resend'}</button>
+      </form>
+    </>}
+    {status === null && <p className="muted">No delivery record is available.</p>}
     {error && <p role="alert">{error}</p>}
-  </form>;
+  </section>;
 }
 
 export function OperationsWaybillDetailView({ state, history, historyError, historyPage, onHistoryPageChange, onRetry, onDownload, onRefresh, onActionError }: {
@@ -132,10 +93,10 @@ export function OperationsWaybillDetailView({ state, history, historyError, hist
   if (state.status === 'loading') return <ListResultState status="loading" />;
   if (state.status === 'error') return <ListResultState status="error" message="Unable to load Waybill detail." onRetry={onRetry} />;
   if (state.status === 'not-found') return <section className="card"><h1>Waybill not found</h1>
-    <Link to="/operations/waybills-payouts">Back to Waybills</Link></section>;
-  const { waybill, document, payment, delivery } = state.data;
+    <Link to="/operations/waybills">Back to Waybills</Link></section>;
+  const { waybill, document, delivery } = state.data;
   return <div className="operations-waybills-page">
-    <header><Link to="/operations/waybills-payouts">← Waybills &amp; Payouts</Link>
+    <header><Link to="/operations/waybills">← Back to Waybills</Link>
       <p className="eyebrow">Immutable Waybill</p><h1>{waybill.waybill_number}</h1>
       <p>Trip <Link to={`/operations/trips/${waybill.trip_id}`}>{waybill.trip_number}</Link> · Issued {formatLagosDate(waybill.issued_at)}</p></header>
     <section className="card waybill-section"><h2>Waybill snapshot</h2><dl className="waybill-detail-grid">
@@ -150,40 +111,29 @@ export function OperationsWaybillDetailView({ state, history, historyError, hist
       <DetailField label="Offloading officer">{waybill.offloading_officer_name}</DetailField>
       <DetailField label="Closed">{formatLagosDate(waybill.closed_at)}</DetailField>
       <DetailField label="Tonnage">{waybill.quantity_tonnes.toFixed(2)} t</DetailField>
-      <DetailField label="Closure account name">{waybill.closure_account_name}</DetailField>
-      <DetailField label="Closure account number">{waybill.closure_account_number}</DetailField>
-      <DetailField label="Closure bank">{waybill.closure_bank_name}</DetailField>
     </dl></section>
     <section className="card waybill-section"><h2>PDF</h2><p>Status: {document.status}</p>
       {document.ready_at && <p>Ready: {formatLagosDate(document.ready_at)}</p>}
       <button className="button secondary" type="button" disabled={document.status !== 'ready'}
         onClick={() => onDownload(state.data)}>Download private PDF</button></section>
     <section className="card waybill-section"><h2>Delivery</h2>
-      <p>Driver email: {delivery.driver ?? 'not queued'} · Operations / Finance: portal access and download only.</p>
-      <ResendForm detail={state.data} onDone={onRefresh} onError={onActionError} />
+      <p className="muted">Company and driver deliveries are tracked independently.</p>
+      <DeliveryRecovery detail={state.data} audience="driver" status={delivery.driver} onDone={onRefresh} onError={onActionError} />
+      <DeliveryRecovery detail={state.data} audience="client" status={delivery.company} onDone={onRefresh} onError={onActionError} />
       <h3>Delivery history</h3>
       {!history && (historyError ? <ListResultState status="error" message="Unable to load delivery history." onRetry={onRetry} />
         : <p role="status">Loading delivery history…</p>)}
       {history && !history.items.length && <p>No delivery attempts yet.</p>}
       {history && history.items.length > 0 && <><div className="operations-table-scroll"><table className="operations-table">
-        <thead><tr><th>Created</th><th>Audience</th><th>Sequence</th><th>Status</th><th>Attempts</th><th>Sent</th><th>Reason</th></tr></thead>
+        <thead><tr><th>Created</th><th>Audience</th><th>Sequence</th><th>Status</th><th>Attempts</th><th>Accepted</th><th>Reason</th></tr></thead>
         <tbody>{history.items.map(attempt => <tr key={attempt.notification_id}>
-          <td>{formatLagosDate(attempt.created_at)}</td><td>{attempt.audience === 'finance' ? 'Internal'
-            : attempt.audience === 'client' ? 'Target company' : 'Driver'}</td>
-          <td>{attempt.sequence}</td><td>{attempt.status}</td><td>{attempt.attempts}</td>
-          <td>{formatLagosDate(attempt.sent_at)}</td><td>{attempt.requested_reason_code ?? 'Original delivery'}</td>
+          <td>{formatLagosDate(attempt.created_at)}</td><td>{attempt.audience === 'client' ? 'Parent company' : 'Driver'}</td>
+          <td>{attempt.sequence}</td><td>{attempt.status.replace(/_/g, ' ')}</td><td>{attempt.attempts}</td>
+          <td>{formatLagosDate(attempt.sent_at)}</td><td>{attempt.blocked_reason_code ?? attempt.requested_reason_code ?? 'Initial delivery'}</td>
         </tr>)}</tbody></table></div>
         <PaginationControls page={historyPage} pageSize={history.pageSize} totalCount={history.totalCount} onPageChange={onHistoryPageChange} />
       </>}
     </section>
-    <section className="card waybill-section"><h2>Payout</h2><p>Status: {payment.status.replace(/_/g,' ')}</p>
-      <dl className="waybill-detail-grid"><DetailField label="Account name">{payment.account_name}</DetailField>
-        <DetailField label="Account number">{payment.account_number}</DetailField>
-        <DetailField label="Bank">{payment.bank_name}</DetailField>
-        <DetailField label="Ready">{formatLagosDate(payment.payment_ready_at)}</DetailField>
-        <DetailField label="Paid">{formatLagosDate(payment.paid_at)}</DetailField>
-        <DetailField label="Payment reference">{payment.payment_reference}</DetailField></dl>
-      <PayoutForm detail={state.data} onDone={onRefresh} onError={onActionError} /></section>
   </div>;
 }
 
@@ -209,8 +159,7 @@ export function OperationsWaybillDetail() {
   }, [waybillId, historyPage, revision]);
   return <>{message && <p role="alert">{message}</p>}
     <OperationsWaybillDetailView state={state} history={history} historyError={historyError} historyPage={historyPage}
-      onHistoryPageChange={setHistoryPage} onRetry={refresh} onRefresh={refresh}
-      onActionError={setMessage}
+      onHistoryPageChange={setHistoryPage} onRetry={refresh} onRefresh={refresh} onActionError={setMessage}
       onDownload={detail => { setMessage(''); void downloadWaybill(detail)
         .catch(() => setMessage('Unable to download private Waybill PDF.')); }} /></>;
 }

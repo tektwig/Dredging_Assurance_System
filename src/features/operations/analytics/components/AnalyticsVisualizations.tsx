@@ -355,12 +355,10 @@ function Donut({ title, data, selected, onSelect }: {
 }
 
 export function AnalyticsStatusDistribution({ data }: { data: OperationsAnalyticsData }) {
-  const [selected, setSelected] = useState<'trip' | 'payout' | 'exception'>('trip');
+  const [selected, setSelected] = useState<'trip' | 'exception'>('trip');
   const configs = {
     trip: { label: 'Trip Status', data: data.status_distributions.trip,
       note: 'Current status of trips opened during the selected period.' },
-    payout: { label: 'Payout Status', data: data.status_distributions.payout,
-      note: 'Current status of payout records for trips closed during the selected period.' },
     exception: { label: 'Exception Status', data: data.status_distributions.exception,
       note: 'Current status of exceptions created during the selected period. Site and driver filters require a linked trip.' },
   } as const;

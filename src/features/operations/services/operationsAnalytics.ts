@@ -89,7 +89,6 @@ export type OperationsAnalyticsData = {
   };
   status_distributions: {
     trip: AnalyticsStatus;
-    payout: AnalyticsStatus;
     exception: AnalyticsStatus;
   };
   variance: {
@@ -324,9 +323,8 @@ export function parseOperationsAnalytics(value: unknown): OperationsAnalyticsDat
   });
 
   const statusDistributions = value.status_distributions;
-  if (!isRecord(statusDistributions) || !exactKeys(statusDistributions, ['trip', 'payout', 'exception'])) invalid();
+  if (!isRecord(statusDistributions) || !exactKeys(statusDistributions, ['trip', 'exception'])) invalid();
   const tripStatus = parseStatus(statusDistributions.trip, ['open', 'closed', 'cancelled']);
-  const payoutStatus = parseStatus(statusDistributions.payout, ['payment_details_required', 'pending', 'paid']);
   const exceptionStatus = parseStatus(statusDistributions.exception, ['open', 'in_review', 'resolved']);
 
   const variance = value.variance;
@@ -382,7 +380,7 @@ export function parseOperationsAnalytics(value: unknown): OperationsAnalyticsDat
     performance: { dimension: performance.dimension as PerformanceDimension,
       metric: performance.metric as PerformanceMetric, entity_count: performance.entity_count,
       items: performanceItems },
-    status_distributions: { trip: tripStatus, payout: payoutStatus, exception: exceptionStatus },
+    status_distributions: { trip: tripStatus, exception: exceptionStatus },
     variance: {
       total_variance_tonnes: variance.total_variance_tonnes,
       average_variance_tonnes: variance.average_variance_tonnes,

@@ -18,7 +18,7 @@ export const OPERATIONS_NAVIGATION = [
   { label: 'Dashboard', route: '', title: 'Operations Dashboard' },
   { label: 'Trips', route: 'trips', title: 'Trips' },
   { label: 'Trucks & Drivers', route: 'trucks-drivers', title: 'Trucks & Drivers' },
-  { label: 'Waybills & Payouts', route: 'waybills-payouts', title: 'Waybills & Payouts' },
+  { label: 'Waybills', route: 'waybills', title: 'Waybills' },
   { label: 'Exceptions', route: 'exceptions', title: 'Exceptions' },
   { label: 'Reports', route: 'reports', title: 'Reports' },
   { label: 'Analytics', route: 'analytics', title: 'Analytics Centre' },

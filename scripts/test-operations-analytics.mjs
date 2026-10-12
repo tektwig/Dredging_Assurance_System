@@ -74,10 +74,6 @@ const response = {
       { status: 'open', count: 2, share: 0.1 }, { status: 'closed', count: 15, share: 0.75 },
       { status: 'cancelled', count: 3, share: 0.15 },
     ] },
-    payout: { denominator: 12, slices: [
-      { status: 'payment_details_required', count: 2, share: 2 / 12 },
-      { status: 'pending', count: 5, share: 5 / 12 }, { status: 'paid', count: 5, share: 5 / 12 },
-    ] },
     exception: { denominator: 4, slices: [
       { status: 'open', count: 2, share: 0.5 }, { status: 'in_review', count: 1, share: 0.25 },
       { status: 'resolved', count: 1, share: 0.25 },
@@ -135,7 +131,7 @@ assert.equal(parsed.driver_performance_daily.days[1].average_tonnage_trip_count,
 assert.equal(parsed.period_summaries.weekly[0].period_start, '2026-09-26');
 assert.equal(parsed.period_summaries.weekly[1].period_end, '2026-10-02');
 assert.equal(parsed.period_summaries.monthly[0].period_end, '2026-09-30');
-assert.equal(parsed.status_distributions.payout.denominator, 12);
+assert(!('payout' in parsed.status_distributions));
 const noSelectedDriver = service.parseOperationsAnalytics({ ...response,
   driver_performance_daily: { selected_driver_id: null, days: [] },
 });
@@ -247,7 +243,7 @@ console.log('PASS Analytics loading/error states, driver daily panel, weekly/mon
 
 const navigation = load('src/routing/roleRoutes.ts');
 assert.deepEqual(navigation.OPERATIONS_NAVIGATION.map(item => item.label), [
-  'Dashboard', 'Trips', 'Trucks & Drivers', 'Waybills & Payouts', 'Exceptions', 'Reports', 'Analytics',
+  'Dashboard', 'Trips', 'Trucks & Drivers', 'Waybills', 'Exceptions', 'Reports', 'Analytics',
 ]);
 const app = readFileSync('src/App.tsx', 'utf8');
 assert.match(app, /lazy\(\(\) => import\('\.\/features\/operations\/analytics\/OperationsAnalytics'\)/);

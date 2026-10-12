@@ -25,7 +25,6 @@ const summaryResponse = {
     unresolved_exceptions: emptyCategory,
     failed_waybill_pdfs: emptyCategory,
     failed_waybill_emails: emptyCategory,
-    payment_details_required: emptyCategory,
   },
 };
 const openTripsResponse = {
@@ -39,16 +38,27 @@ const activityResponse = {
   items: [
     { event_id: 'trip-opened:trip-1', event_type: 'trip_opened', occurred_at: '2026-09-27T09:00:00.000Z',
       trip_number: 'TRP-1', truck_registration: 'ABC-123', officer_id: 'officer-1',
-      officer_name: 'Officer One', officer_role: 'operations_manager', site_name: 'Loading Site', payment_status: null },
+      officer_name: 'Officer One', officer_role: 'operations_manager', site_name: 'Loading Site' },
     { event_id: 'waybill-issued:waybill-1', event_type: 'waybill_issued', occurred_at: '2026-09-27T09:30:00.000Z',
       trip_number: 'TRP-1', truck_registration: 'ABC-123', officer_id: 'officer-1',
-      officer_name: 'Officer One', officer_role: 'offloading_officer', site_name: 'Offloading Site', payment_status: null },
+      officer_name: 'Officer One', officer_role: 'offloading_officer', site_name: 'Offloading Site' },
   ],
+};
+const queueHealthResponse = {
+  as_of: '2026-09-27T10:00:00.000Z',
+  pdf: { pending_total: 4, due_pending: 3, processing_total: 2, active_processing: 1,
+    expired_processing_leases: 1, failed: 1, ready: 12, unexpected_status: 0,
+    latest_status: 'failed', latest_updated_at: '2026-09-27T09:59:00.000Z' },
+  notifications: { pending_total: 5, due_pending: 2, processing_total: 2, active_processing: 1,
+    expired_processing_leases: 1, failed: 2, provider_accepted: 6,
+    blocked_missing_email: 0, blocked_configuration: 0, unexpected_status: 0,
+    latest_status: 'provider_accepted', latest_updated_at: '2026-09-27T09:58:00.000Z' },
 };
 const rpcData = {
   get_operations_dashboard_summary: summaryResponse,
   get_operations_dashboard_open_trips: openTripsResponse,
   get_operations_dashboard_activity: activityResponse,
+  get_operations_dashboard_queue_health: queueHealthResponse,
 };
 
 overrides.set(resolve('src/lib/supabase.ts'), {
@@ -83,8 +93,9 @@ function load(path) {
 
 const service = load('src/features/operations/services/operationsDashboard.ts');
 const dashboard = load('src/features/operations/dashboard/OperationsDashboard.tsx');
-const renderView = state => renderToStaticMarkup(React.createElement(router.MemoryRouter, null,
-  React.createElement(dashboard.OperationsDashboardView, { state, onRetry() {} })));
+const renderView = (state, queueHealthState = { status: 'ready', data: queueHealthResponse }) => renderToStaticMarkup(
+  React.createElement(router.MemoryRouter, null,
+    React.createElement(dashboard.OperationsDashboardView, { state, onRetry() {}, queueHealthState, onQueueHealthRetry() {} })));
 const summary = service.parseOperationsDashboardSummary(summaryResponse);
 assert.equal(summary.tripsOpenedToday, 3);
 assert.equal(summary.tonnageToday, 12.5);
@@ -111,10 +122,41 @@ assert.deepEqual(rpcCalls.map(call => call.name), [
 ]);
 assert.deepEqual(rpcCalls[1].args, { p_limit: 10 });
 assert.deepEqual(rpcCalls[2].args, { p_limit: 20 });
+rpcCalls = [];
+const queueHealth = await service.loadOperationsDashboardQueueHealth();
+assert.deepEqual(rpcCalls.map(call => call.name), ['get_operations_dashboard_queue_health']);
+assert.equal(queueHealth.pdf.due_pending, 3);
+assert.equal(queueHealth.pdf.expired_processing_leases, 1);
+assert.equal(queueHealth.notifications.completed, 6);
+assert.equal(queueHealth.notifications.latest_status, 'provider_accepted');
+assert.throws(() => service.parseOperationsDashboardQueueHealth({ ...queueHealthResponse, storage_path: 'private/path' }), /Invalid/);
+assert.throws(() => service.parseOperationsDashboardQueueHealth({ ...queueHealthResponse,
+  pdf: { ...queueHealthResponse.pdf, recipient: 'private@example.invalid' } }), /Invalid/);
+assert.throws(() => service.parseOperationsDashboardQueueHealth({ ...queueHealthResponse,
+  pdf: { ...queueHealthResponse.pdf, due_pending: 5 } }), /Invalid/);
+assert.throws(() => service.parseOperationsDashboardQueueHealth({ ...queueHealthResponse,
+  notifications: { ...queueHealthResponse.notifications, active_processing: 2 } }), /Invalid/);
+assert.throws(() => service.parseOperationsDashboardQueueHealth({ ...queueHealthResponse,
+  notifications: { ...queueHealthResponse.notifications, latest_status: 'ready' } }), /Invalid/);
+const unrecognizedQueueHealth = service.parseOperationsDashboardQueueHealth({ ...queueHealthResponse,
+  pdf: { ...queueHealthResponse.pdf, unexpected_status: 1, latest_status: 'unknown' } });
+assert.equal(unrecognizedQueueHealth.pdf.latest_status, 'unknown');
+const emptyQueueHealth = {
+  as_of: queueHealthResponse.as_of,
+  pdf: { pending_total: 0, due_pending: 0, processing_total: 0, active_processing: 0,
+    expired_processing_leases: 0, failed: 0, ready: 0, unexpected_status: 0,
+    latest_status: null, latest_updated_at: null },
+  notifications: { pending_total: 0, due_pending: 0, processing_total: 0, active_processing: 0,
+    expired_processing_leases: 0, failed: 0, provider_accepted: 0,
+    blocked_missing_email: 0, blocked_configuration: 0, unexpected_status: 0,
+    latest_status: null, latest_updated_at: null },
+};
+assert.equal(service.parseOperationsDashboardQueueHealth(emptyQueueHealth).pdf.pending_total, 0);
 rpcFailure = { data: null, error: { code: '42501' } };
 await assert.rejects(service.loadOperationsDashboard(), /access denied/i);
+await assert.rejects(service.loadOperationsDashboardQueueHealth(), /access denied/i);
 rpcFailure = null;
-console.log('PASS strict response validation, safe authorization errors and fixed bounded RPC request limits');
+console.log('PASS strict dashboard and queue response validation, sensitive-field exclusion, safe authorization errors and fixed RPC requests');
 
 const loadingHtml = renderView({ status: 'loading' });
 assert.match(loadingHtml, /role="status"/);
@@ -133,16 +175,30 @@ const emptyData = {
   openTrips: { as_of: openTripsResponse.as_of, items: [] },
   activity: { as_of: activityResponse.as_of, items: [] },
 };
-const emptyHtml = renderView({ status: 'ready', data: emptyData });
+const emptyHtml = renderView({ status: 'ready', data: emptyData }, { status: 'ready', data: emptyQueueHealth });
 assert.match(emptyHtml, /There are no open trips/);
 assert.match(emptyHtml, /No recent operational activity/);
 assert.match(emptyHtml, /No items requiring attention/);
+assert.match(emptyHtml, /No pending, processing, or failed jobs are currently recorded/);
 const readyHtml = renderView({ status: 'ready', data });
 for (const label of ['Trips Opened Today', 'Trips Closed Today', 'Open Trips', 'Tonnage Today',
   'Trucks Processed Today', 'Exceptions Requiring Attention', 'Open Trips Requiring Attention',
-  'Action Required', 'Recent Activity', 'Waybill Issued', 'TRP-1']) assert(readyHtml.includes(label), label);
+  'Action Required', 'Waybill Queue Health', 'PDF generation', 'Notifications', 'Pending', 'Due pending',
+  'Processing total', 'Currently processing', 'Expired or missing lease', 'Failed', 'Completed',
+  'Provider accepted', 'Unrecognized status', 'Latest current job status',
+  'Recent Activity', 'Waybill Issued', 'TRP-1']) assert(readyHtml.includes(label), label);
 assert(readyHtml.includes('12.50'));
 assert(readyHtml.includes('href="/operations/trips"'));
-assert(readyHtml.includes('href="/operations/waybills-payouts"'));
-assert(!readyHtml.includes('<button'));
-console.log('PASS loading, error, empty and ready dashboard states; read-only cards, previews and module links');
+assert(readyHtml.includes('href="/operations/waybills"'));
+assert(readyHtml.includes('Server snapshot observed'));
+assert(readyHtml.includes('Queue status does not establish whether a worker is running or healthy'));
+assert(readyHtml.includes('not confirmed email delivery'));
+assert(readyHtml.includes('Refresh queue status'));
+assert(!readyHtml.includes('private@example.invalid'));
+assert(!readyHtml.includes('Retry PDF'));
+const unrecognizedQueueHtml = renderView({ status: 'ready', data }, { status: 'ready', data: unrecognizedQueueHealth });
+assert(unrecognizedQueueHtml.includes('Latest current job status: <strong>Unrecognized status</strong>'));
+const queueErrorHtml = renderView({ status: 'ready', data }, { status: 'error' });
+assert(queueErrorHtml.includes('Unable to load queue health'));
+assert(queueErrorHtml.includes('Recent Activity'));
+console.log('PASS existing dashboard compatibility, queue classifications, empty/error states, refresh controls and safe drill-down');

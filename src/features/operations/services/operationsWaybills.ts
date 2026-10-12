@@ -2,8 +2,8 @@ import { supabase } from '../../../lib/supabase';
 import { normalizePageRequest } from '../../../types/listQuery';
 
 export type PdfStatus = 'pending' | 'processing' | 'ready' | 'failed';
-export type DeliveryStatus = 'pending' | 'processing' | 'sent' | 'failed' | null;
-export type PayoutStatus = 'payment_details_required' | 'pending' | 'paid';
+export type DeliveryStatus = 'pending' | 'processing' | 'sent' | 'failed'
+  | 'blocked_missing_email' | 'blocked_configuration' | null;
 export type WaybillFilters = {
   search: string;
   quickFilter: string;
@@ -11,7 +11,6 @@ export type WaybillFilters = {
   dateTo: string;
   pdfStatus: string;
   deliveryStatus: string;
-  payoutStatus: string;
 };
 export type WaybillRow = {
   waybill_id: string;
@@ -23,39 +22,33 @@ export type WaybillRow = {
   quantity_tonnes: number;
   closed_at: string;
   pdf_status: PdfStatus;
-  payout_status: PayoutStatus;
   driver_delivery_status: DeliveryStatus;
-  internal_delivery_status: DeliveryStatus;
+  company_delivery_status: DeliveryStatus;
 };
 export type Page<T> = { items: T[]; page: number; pageSize: number; totalCount: number; hasNext: boolean };
 export type WaybillDetail = {
   waybill: {
-    id: string; waybill_number: string; trip_id: string; trip_number: string;
+    id: string; waybill_number: string; trip_id: string; trip_number: string; driver_id: string;
     truck_registration: string; truck_type: string | null; truck_capacity_tonnes: number | null;
     truck_owner_name: string | null; driver_name: string; driver_phone: string | null;
     driver_email_available: boolean; driver_license: string | null;
     loading_site_name: string; offloading_site_name: string;
     loading_officer_name: string | null; offloading_officer_name: string | null;
     opened_at: string; closed_at: string; issued_at: string; quantity_tonnes: number;
-    closure_account_name: string | null; closure_account_number: string | null; closure_bank_name: string | null;
   };
   document: { status: PdfStatus; storage_path: string | null; ready_at: string | null };
-  payment: { id: string; status: PayoutStatus; updated_at: string;
-    account_name: string | null; account_number: string | null; bank_name: string | null;
-    payment_ready_at: string | null; paid_at: string | null; payment_reference: string | null };
-  delivery: { driver: DeliveryStatus; internal: DeliveryStatus };
+  delivery: { driver: DeliveryStatus; company: DeliveryStatus };
 };
 export type DeliveryAttempt = {
-  notification_id: string; audience: 'driver' | 'finance' | 'client'; sequence: number;
+  notification_id: string; audience: 'driver' | 'client'; sequence: number;
   status: Exclude<DeliveryStatus, null>; attempts: number; created_at: string;
-  sent_at: string | null; requested_reason_code: string | null;
+  sent_at: string | null; requested_reason_code: string | null; blocked_reason_code: string | null;
 };
 
 function client() {
   if (!supabase) throw new Error('Waybills unavailable');
   return supabase;
 }
-
 function safeError(error: { code?: string } | null, operation: string): never {
   if (error?.code === '42501') throw new Error('Operations Waybills access denied');
   if (error?.code === 'P4091') throw new Error('Record changed or delivery state conflicts. Refresh and review before retrying.');
@@ -76,11 +69,9 @@ function nullableTimestamp(value: unknown): value is string | null { return valu
 function pdfStatus(value: unknown): value is PdfStatus {
   return value === 'pending' || value === 'processing' || value === 'ready' || value === 'failed';
 }
-function payoutStatus(value: unknown): value is PayoutStatus {
-  return value === 'payment_details_required' || value === 'pending' || value === 'paid';
-}
 function deliveryStatus(value: unknown): value is DeliveryStatus {
-  return value === null || value === 'pending' || value === 'processing' || value === 'sent' || value === 'failed';
+  return value === null || value === 'pending' || value === 'processing' || value === 'sent'
+    || value === 'failed' || value === 'blocked_missing_email' || value === 'blocked_configuration';
 }
 function number(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value); }
 function waybillStoragePath(number: string): string | null {
@@ -90,13 +81,13 @@ function waybillStoragePath(number: string): string | null {
 
 export function parseWaybillRow(value: unknown): WaybillRow {
   if (!record(value) || !exactKeys(value, ['invoice_id','invoice_number','trip_id','trip_number',
-    'truck_registration','driver_name','quantity_tonnes','closed_at','pdf_status','payout_status',
-    'driver_delivery_status','internal_delivery_status'])
+    'truck_registration','driver_name','quantity_tonnes','closed_at','pdf_status',
+    'driver_delivery_status','company_delivery_status'])
     || !text(value.invoice_id) || !text(value.invoice_number) || !waybillStoragePath(value.invoice_number)
     || !text(value.trip_id) || !text(value.trip_number) || !text(value.truck_registration)
     || !text(value.driver_name) || !number(value.quantity_tonnes) || !timestamp(value.closed_at)
-    || !pdfStatus(value.pdf_status) || !payoutStatus(value.payout_status)
-    || !deliveryStatus(value.driver_delivery_status) || !deliveryStatus(value.internal_delivery_status)) {
+    || !pdfStatus(value.pdf_status)
+    || !deliveryStatus(value.driver_delivery_status) || !deliveryStatus(value.company_delivery_status)) {
     throw new Error('Invalid Waybill register response');
   }
   const { invoice_id, invoice_number, ...row } = value;
@@ -116,21 +107,17 @@ function parsePage<T>(value: unknown, page: number, pageSize: number, parseItem:
 
 export function parseWaybillDetail(value: unknown): WaybillDetail | null {
   if (value === null) return null;
-  if (!record(value) || !record(value.invoice) || !record(value.document)
-    || !record(value.payment) || !record(value.delivery)
-    || !exactKeys(value, ['invoice','document','payment','delivery'])) throw new Error('Invalid Waybill detail response');
+  if (!record(value) || !record(value.invoice) || !record(value.document) || !record(value.delivery)
+    || !exactKeys(value, ['invoice','document','delivery'])) throw new Error('Invalid Waybill detail response');
   const rawWaybill = value.invoice; const document = value.document;
-  const payment = value.payment; const delivery = value.delivery;
-  if (!exactKeys(rawWaybill, ['id','invoice_number','trip_id','trip_number','truck_registration','truck_type',
+  const delivery = value.delivery;
+  if (!exactKeys(rawWaybill, ['id','invoice_number','trip_id','trip_number','driver_id','truck_registration','truck_type',
     'truck_capacity_tonnes','truck_owner_name','driver_name','driver_phone','driver_email_available',
     'driver_license','loading_site_name','offloading_site_name','loading_officer_name',
-    'offloading_officer_name','opened_at','closed_at','issued_at','quantity_tonnes',
-    'closure_account_name','closure_account_number','closure_bank_name'])
+    'offloading_officer_name','opened_at','closed_at','issued_at','quantity_tonnes'])
     || !exactKeys(document, ['status','storage_path','ready_at'])
-    || !exactKeys(payment, ['id','status','updated_at','account_name','account_number','bank_name',
-      'payment_ready_at','paid_at','payment_reference'])
-    || !exactKeys(delivery, ['driver','internal'])) throw new Error('Invalid Waybill detail response');
-  for (const key of ['id','invoice_number','trip_id','trip_number','truck_registration','driver_name',
+    || !exactKeys(delivery, ['driver','company'])) throw new Error('Invalid Waybill detail response');
+  for (const key of ['id','invoice_number','trip_id','trip_number','driver_id','truck_registration','driver_name',
     'loading_site_name','offloading_site_name'] as const) {
     if (!text(rawWaybill[key])) throw new Error('Invalid Waybill detail response');
   }
@@ -140,15 +127,9 @@ export function parseWaybillDetail(value: unknown): WaybillDetail | null {
   }
   if (!number(rawWaybill.quantity_tonnes) || !(rawWaybill.truck_capacity_tonnes === null || number(rawWaybill.truck_capacity_tonnes))
     || typeof rawWaybill.driver_email_available !== 'boolean'
-    || !nullableText(rawWaybill.closure_account_name) || !nullableText(rawWaybill.closure_account_number)
-    || !nullableText(rawWaybill.closure_bank_name)
     || !timestamp(rawWaybill.opened_at) || !timestamp(rawWaybill.closed_at) || !timestamp(rawWaybill.issued_at)
     || !pdfStatus(document.status) || !nullableText(document.storage_path) || !nullableTimestamp(document.ready_at)
-    || !text(payment.id) || !payoutStatus(payment.status) || !timestamp(payment.updated_at)
-    || !nullableText(payment.account_name) || !nullableText(payment.account_number)
-    || !nullableText(payment.bank_name) || !nullableText(payment.payment_reference)
-    || !nullableTimestamp(payment.payment_ready_at) || !nullableTimestamp(payment.paid_at)
-    || !deliveryStatus(delivery.driver) || !deliveryStatus(delivery.internal)) {
+    || !deliveryStatus(delivery.driver) || !deliveryStatus(delivery.company)) {
     throw new Error('Invalid Waybill detail response');
   }
   if (document.status === 'ready') {
@@ -158,19 +139,19 @@ export function parseWaybillDetail(value: unknown): WaybillDetail | null {
   }
   const { invoice_number, ...waybillFields } = rawWaybill;
   return { waybill: { ...waybillFields, waybill_number: invoice_number as string } as WaybillDetail['waybill'],
-    document: document as WaybillDetail['document'], payment: payment as WaybillDetail['payment'],
+    document: document as WaybillDetail['document'],
     delivery: delivery as WaybillDetail['delivery'] };
 }
 
 function parseAttempt(value: unknown): DeliveryAttempt {
   if (!record(value) || !exactKeys(value, ['notification_id','audience','sequence','status','attempts',
-    'created_at','sent_at','requested_reason_code'])
-    || !text(value.notification_id) || !['driver','finance','client'].includes(value.audience as string)
+    'created_at','sent_at','requested_reason_code','blocked_reason_code'])
+    || !text(value.notification_id) || !['driver','client'].includes(value.audience as string)
     || !Number.isSafeInteger(value.sequence) || (value.sequence as number) < 0
     || !deliveryStatus(value.status) || value.status === null
     || !Number.isSafeInteger(value.attempts) || (value.attempts as number) < 0
     || !timestamp(value.created_at) || !nullableTimestamp(value.sent_at)
-    || !nullableText(value.requested_reason_code)) throw new Error('Invalid delivery history response');
+    || !nullableText(value.requested_reason_code) || !nullableText(value.blocked_reason_code)) throw new Error('Invalid delivery history response');
   return value as DeliveryAttempt;
 }
 
@@ -181,7 +162,6 @@ export async function loadWaybills(filters: WaybillFilters, page: number): Promi
     p_search: filters.search.trim() || null, p_quick_filter: filters.quickFilter || null,
     p_date_from: filters.dateFrom || null, p_date_to: filters.dateTo || null,
     p_pdf_status: filters.pdfStatus || null, p_delivery_status: filters.deliveryStatus || null,
-    p_payout_status: filters.payoutStatus || null,
   });
   if (result.error) safeError(result.error, 'load');
   return parsePage(result.data, request.page, request.pageSize, parseWaybillRow);
@@ -217,7 +197,7 @@ export async function downloadWaybill(detail: WaybillDetail): Promise<void> {
   } finally { URL.revokeObjectURL(objectUrl); }
 }
 
-export async function resendWaybill(waybillId: string, audience: 'driver',
+export async function resendWaybill(waybillId: string, audience: 'driver' | 'client',
   requestId: string, reasonCode: string, duplicateRiskConfirmed: boolean): Promise<void> {
   const result = await client().rpc('resend_operations_waybill', {
     p_invoice_id: waybillId, p_audience: audience, p_request_id: requestId,
@@ -226,27 +206,9 @@ export async function resendWaybill(waybillId: string, audience: 'driver',
   if (result.error) safeError(result.error, 'resend');
 }
 
-export async function retryWaybillDelivery(waybillId: string, audience: 'driver', reasonCode: string): Promise<void> {
+export async function retryWaybillDelivery(waybillId: string, audience: 'driver' | 'client', reasonCode: string): Promise<void> {
   const result = await client().rpc('retry_operations_waybill_delivery', {
     p_invoice_id: waybillId, p_audience: audience, p_reason_code: reasonCode,
   });
   if (result.error) safeError(result.error, 'retry delivery for');
-}
-
-export async function completeOperationsPayment(paymentId: string, expectedUpdatedAt: string,
-  accountName: string, accountNumber: string, bankName: string): Promise<void> {
-  const result = await client().rpc('complete_operations_payment_details', {
-    p_payment_id: paymentId, p_expected_updated_at: expectedUpdatedAt,
-    p_account_name: accountName.trim(), p_account_number: accountNumber.trim(), p_bank_name: bankName.trim(),
-  });
-  if (result.error) safeError(result.error, 'complete payment details for');
-}
-
-export async function markOperationsPaymentPaid(paymentId: string, expectedUpdatedAt: string,
-  paymentReference: string): Promise<void> {
-  const result = await client().rpc('mark_operations_payment_paid', {
-    p_payment_id: paymentId, p_expected_updated_at: expectedUpdatedAt,
-    p_payment_reference: paymentReference.trim(),
-  });
-  if (result.error) safeError(result.error, 'mark payment paid for');
 }

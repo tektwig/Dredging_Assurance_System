@@ -3,10 +3,13 @@ import { Link } from 'react-router-dom';
 import { ListResultState } from '../../../components/data/ListResultState';
 import {
   loadOperationsDashboard,
+  loadOperationsDashboardQueueHealth,
   type DashboardActionCategory,
   type DashboardPreview,
   type OperationsDashboardActivity,
   type OperationsDashboardData,
+  type OperationsDashboardQueueHealth,
+  type OperationsQueueMetrics,
 } from '../services/operationsDashboard';
 import { useRealtimeTrips } from '../../../hooks/useRealtimeTrips';
 import { NotificationToastContainer } from '../../../components/common/NotificationToast';
@@ -14,6 +17,8 @@ import './dashboard.css';
 
 export type OperationsDashboardLoadState =
   | { status: 'loading' } | { status: 'error' } | { status: 'ready'; data: OperationsDashboardData };
+export type OperationsDashboardQueueHealthLoadState =
+  | { status: 'loading' } | { status: 'error' } | { status: 'ready'; data: OperationsDashboardQueueHealth };
 
 const activityLabels: Record<OperationsDashboardActivity['event_type'], string> = {
   trip_opened: 'Trip Opened',
@@ -23,7 +28,6 @@ const activityLabels: Record<OperationsDashboardActivity['event_type'], string> 
   exception_resolved: 'Exception Resolved',
   waybill_issued: 'Waybill Issued',
   pdf_ready: 'PDF Ready',
-  payment_status_changed: 'Payment Status Changed',
 };
 
 function formatDate(value: string): string {
@@ -47,12 +51,11 @@ function value(item: DashboardPreview, key: string): string {
 
 function categoryItem(category: string, item: DashboardPreview): string {
   if (category === 'exception') return `${value(item, 'exception_type').replace(/_/g, ' ')}${value(item, 'trip_number') ? ` · ${value(item, 'trip_number')}` : ''}${value(item, 'truck_registration') ? ` · ${value(item, 'truck_registration')}` : ''}`;
-  if (category === 'payment') return `${value(item, 'trip_number')} · ${value(item, 'truck_registration')} · ${value(item, 'driver_name')}`;
   return `${value(item, 'waybill_number')} · ${value(item, 'trip_number')}`;
 }
 
 function ActionCard({ title, target, category, kind }: {
-  title: string; target: string; category: DashboardActionCategory; kind: 'exception' | 'pdf' | 'email' | 'payment';
+  title: string; target: string; category: DashboardActionCategory; kind: 'exception' | 'pdf' | 'email';
 }) {
   return <article className="operations-action-card">
     <div className="operations-action-heading">
@@ -61,7 +64,7 @@ function ActionCard({ title, target, category, kind }: {
     {category.items.length === 0 ? <p className="muted small">No items requiring attention.</p> :
       <ul className="operations-preview-list">{category.items.map(item => {
         const key = value(item, 'exception_id') || value(item, 'document_id')
-          || value(item, 'notification_id') || value(item, 'payment_id');
+          || value(item, 'notification_id');
         const timestamp = value(item, 'created_at') || value(item, 'failed_at');
         return <li key={key}>
           <span>{categoryItem(kind, item)}</span>
@@ -72,7 +75,83 @@ function ActionCard({ title, target, category, kind }: {
   </article>;
 }
 
-function DashboardContent({ data }: { data: OperationsDashboardData }) {
+function queueStatusLabel(status: OperationsQueueMetrics['latest_status']): string {
+  if (status === null) return 'No recorded job status';
+  if (status === 'ready') return 'Completed';
+  if (status === 'provider_accepted') return 'Provider accepted';
+  if (status === 'unknown') return 'Unrecognized status';
+  return status.replace(/_/g, ' ');
+}
+
+function QueueMetricsCard({ title, metrics, completedLabel }: {
+  title: string; metrics: OperationsQueueMetrics; completedLabel: string;
+}) {
+  const rows = [
+    ['Pending', metrics.pending_total, 'pending'],
+    ['Due pending', metrics.due_pending, 'due'],
+    ['Processing total', metrics.processing_total, 'processing'],
+    ['Currently processing', metrics.active_processing, 'active'],
+    ['Expired or missing lease', metrics.expired_processing_leases, 'expired'],
+    ['Failed', metrics.failed, 'failed'],
+    ...(title === 'Notifications' ? [
+      ['Blocked: missing driver email', metrics.blocked_missing_email, 'blocked'] as const,
+      ['Blocked: company recipient configuration', metrics.blocked_configuration, 'blocked'] as const,
+    ] : []),
+    [completedLabel, metrics.completed, 'completed'],
+    ['Unrecognized status', metrics.unexpected_status, 'unknown'],
+  ] as const;
+  return <article className="operations-queue-card">
+    <h3>{title}</h3>
+    <dl className="operations-queue-metrics">
+      {rows.map(([label, count, status]) => <div className={`operations-queue-metric queue-status--${status}`} key={label}>
+        <dt>{label}</dt><dd>{count}</dd>
+      </div>)}
+    </dl>
+    <p className="operations-queue-latest">
+      Latest current job status: <strong>{queueStatusLabel(metrics.latest_status)}</strong>
+      {metrics.latest_updated_at && <> · <time dateTime={metrics.latest_updated_at}>{formatDate(metrics.latest_updated_at)}</time></>}
+    </p>
+  </article>;
+}
+
+function QueueHealthSection({ state, onRetry }: {
+  state: OperationsDashboardQueueHealthLoadState; onRetry: () => void;
+}) {
+  return <section className="card operations-dashboard-section" aria-labelledby="operations-queue-health-title">
+    <div className="operations-section-heading">
+      <div><p className="eyebrow">Pipeline snapshot</p><h2 id="operations-queue-health-title">Waybill Queue Health</h2></div>
+      <div className="operations-queue-actions">
+        <Link className="operations-module-link" to="/operations/waybills">View Waybills <span aria-hidden="true">→</span></Link>
+        <button className="operations-queue-refresh" type="button" onClick={onRetry} disabled={state.status === 'loading'}>
+          {state.status === 'loading' ? 'Refreshing…' : 'Refresh queue status'}
+        </button>
+      </div>
+    </div>
+    {state.status === 'loading' ? <ListResultState status="loading" /> :
+      state.status === 'error' ? <ListResultState status="error" message="Unable to load queue health." onRetry={onRetry} /> : <>
+        <p className="muted small operations-queue-observed">Server snapshot observed <time dateTime={state.data.as_of}>{formatDate(state.data.as_of)}</time>.</p>
+        <div className="operations-queue-grid">
+          <QueueMetricsCard title="PDF generation" metrics={state.data.pdf} completedLabel="Completed" />
+          <QueueMetricsCard title="Notifications" metrics={state.data.notifications} completedLabel="Provider accepted" />
+        </div>
+        {state.data.pdf.pending_total === 0 && state.data.pdf.processing_total === 0 && state.data.pdf.failed === 0
+          && state.data.notifications.pending_total === 0 && state.data.notifications.processing_total === 0
+          && state.data.notifications.failed === 0
+          ? <p className="operations-queue-empty">No pending, processing, or failed jobs are currently recorded.</p> : null}
+        <p className="muted small operations-queue-explanation">
+          Due pending is included in Pending. Expired or missing leases are included in Processing; active and expired leases partition that total.
+          “Provider accepted” is the persisted provider acceptance state, not confirmed email delivery.
+        </p>
+        <p className="operations-queue-worker-note">Queue status does not establish whether a worker is running or healthy. An empty queue alone is not evidence of worker health.</p>
+      </>}
+  </section>;
+}
+
+function DashboardContent({ data, queueHealthState, onQueueHealthRetry }: {
+  data: OperationsDashboardData;
+  queueHealthState: OperationsDashboardQueueHealthLoadState;
+  onQueueHealthRetry: () => void;
+}) {
   const summary = data.summary;
   const kpis = [
     ['Trips Opened Today', summary.tripsOpenedToday],
@@ -116,11 +195,12 @@ function DashboardContent({ data }: { data: OperationsDashboardData }) {
       <div className="operations-section-heading"><div><p className="eyebrow">Safe operational queues</p><h2>Action Required</h2></div></div>
       <div className="operations-action-grid">
         <ActionCard title="Unresolved Exceptions" target="/operations/exceptions" kind="exception" category={actions.unresolvedExceptions} />
-        <ActionCard title="Failed Waybill PDFs" target="/operations/waybills-payouts" kind="pdf" category={actions.failedWaybillPdfs} />
-        <ActionCard title="Failed Waybill Email Delivery" target="/operations/waybills-payouts" kind="email" category={actions.failedWaybillEmails} />
-        <ActionCard title="Payment Details Required" target="/operations/waybills-payouts" kind="payment" category={actions.paymentDetailsRequired} />
+        <ActionCard title="Failed Waybill PDFs" target="/operations/waybills" kind="pdf" category={actions.failedWaybillPdfs} />
+        <ActionCard title="Failed Waybill Email Delivery" target="/operations/waybills" kind="email" category={actions.failedWaybillEmails} />
       </div>
     </section>
+
+    <QueueHealthSection state={queueHealthState} onRetry={onQueueHealthRetry} />
 
     <section className="card operations-dashboard-section">
       <div className="operations-section-heading"><div><p className="eyebrow">Chronological feed</p><h2>Recent Activity</h2></div></div>
@@ -131,7 +211,7 @@ function DashboardContent({ data }: { data: OperationsDashboardData }) {
             <th scope="col">Truck</th><th scope="col">Officer / Site</th></tr></thead>
           <tbody>{data.activity.items.map(event => <tr key={event.event_id}>
             <td><time dateTime={event.occurred_at}>{formatDate(event.occurred_at)}</time></td>
-            <td>{activityLabels[event.event_type]}{event.payment_status ? ` · ${event.payment_status.replace(/_/g, ' ')}` : ''}</td>
+            <td>{activityLabels[event.event_type]}</td>
             <td>{event.trip_number ?? '—'}</td><td>{event.truck_registration ?? '—'}</td>
             <td>{event.officer_name || 'System'}{event.site_name ? ` · ${event.site_name}` : ''}</td>
           </tr>)}</tbody>
@@ -140,18 +220,24 @@ function DashboardContent({ data }: { data: OperationsDashboardData }) {
   </div>;
 }
 
-export function OperationsDashboardView({ state, onRetry }: {
+export function OperationsDashboardView({ state, onRetry,
+  queueHealthState = { status: 'loading' }, onQueueHealthRetry = () => undefined }: {
   state: OperationsDashboardLoadState;
   onRetry: () => void;
+  queueHealthState?: OperationsDashboardQueueHealthLoadState;
+  onQueueHealthRetry?: () => void;
 }) {
   if (state.status === 'loading') return <ListResultState status="loading" />;
   if (state.status === 'error') return <ListResultState status="error" message="Unable to load the Operations dashboard." onRetry={onRetry} />;
-  return <DashboardContent data={state.data} />;
+  return <DashboardContent data={state.data} queueHealthState={queueHealthState}
+    onQueueHealthRetry={onQueueHealthRetry} />;
 }
 
 export function OperationsDashboard() {
   const [revision, setRevision] = useState(0);
+  const [queueRevision, setQueueRevision] = useState(0);
   const [state, setState] = useState<OperationsDashboardLoadState>({ status: 'loading' });
+  const [queueHealthState, setQueueHealthState] = useState<OperationsDashboardQueueHealthLoadState>({ status: 'loading' });
 
   const { toasts, dismissToast } = useRealtimeTrips({
     channelName: 'operations-dashboard-trips-realtime',
@@ -170,9 +256,21 @@ export function OperationsDashboard() {
     return () => { current = false; };
   }, [revision]);
 
+  useEffect(() => {
+    let current = true;
+    setQueueHealthState({ status: 'loading' });
+    void loadOperationsDashboardQueueHealth().then(data => {
+      if (current) setQueueHealthState({ status: 'ready', data });
+    }).catch(() => {
+      if (current) setQueueHealthState({ status: 'error' });
+    });
+    return () => { current = false; };
+  }, [revision, queueRevision]);
+
   return (
     <>
-      <OperationsDashboardView state={state} onRetry={() => setRevision(value => value + 1)} />
+      <OperationsDashboardView state={state} onRetry={() => setRevision(value => value + 1)}
+        queueHealthState={queueHealthState} onQueueHealthRetry={() => setQueueRevision(value => value + 1)} />
       <NotificationToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );
