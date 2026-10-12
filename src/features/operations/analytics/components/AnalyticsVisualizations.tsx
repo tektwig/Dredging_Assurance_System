@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ReferenceLine,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -6,6 +5,10 @@ import {
 import type {
   AnalyticsPeriodSummary, AnalyticsStatus, OperationsAnalyticsData, PerformanceDimension, PerformanceMetric,
 } from '../../services/operationsAnalytics';
+import {
+  DRIVER_METRIC_OPTIONS, SUMMARY_METRIC_OPTIONS,
+  type DriverMetricKey, type StatusCohort, type SummaryMetricKey,
+} from '../analyticsExportModel';
 
 const COLORS = ['var(--brand-navy)', '#d39e42', '#4978a4', '#8a6795', '#5a8b67', '#bf735b'];
 const varianceColor = '#4978a4';
@@ -61,7 +64,7 @@ export function AnalyticsKpiGrid({ data }: { data: OperationsAnalyticsData }) {
 
 export function AnalyticsTrends({ data }: { data: OperationsAnalyticsData }) {
   return <section className="analytics-panel-grid" aria-label="Operational trends">
-    <article className="card analytics-panel">
+    <article className="card analytics-panel" data-analytics-chart-export="trips-trend">
       <header><p className="eyebrow">Line chart · event counts</p><h2>Trips Opened vs Closed</h2>
         <p className="muted small">Each series is counted on its own event date: opened_at or closed_at.</p></header>
       <figure aria-labelledby="analytics-trips-trend-title">
@@ -87,7 +90,7 @@ export function AnalyticsTrends({ data }: { data: OperationsAnalyticsData }) {
       </table></TableDetails>
     </article>
 
-    <article className="card analytics-panel">
+    <article className="card analytics-panel" data-analytics-chart-export="tonnage-trend">
       <header><p className="eyebrow">Line chart · paired trip cohort</p><h2>Estimated vs Actual Tonnage</h2>
         <p className="muted small">Both lines use closed trips with actual and estimated values. Paired sample: {data.variance.paired_trip_count.toLocaleString('en-NG')} of {data.kpis.actual_tonnage_closed_trip_count.toLocaleString('en-NG')} closed trips with actual tonnage ({percent(data.variance.estimate_coverage)} estimate coverage).</p></header>
       <figure aria-labelledby="analytics-tonnage-trend-title">
@@ -119,39 +122,30 @@ export function AnalyticsTrends({ data }: { data: OperationsAnalyticsData }) {
   </section>;
 }
 
-const driverMetricOptions = [
-  { key: 'trips_opened', label: 'Trips Opened', unit: 'count' },
-  { key: 'trips_closed', label: 'Trips Closed', unit: 'count' },
-  { key: 'actual_tonnage_tonnes', label: 'Actual Tonnage', unit: 'tonnes' },
-  { key: 'average_tonnage_per_trip_tonnes', label: 'Average Actual Tonnage / Trip', unit: 'tonnes' },
-  { key: 'average_turnaround_seconds', label: 'Average Turnaround Time', unit: 'seconds' },
-] as const;
-type DriverMetricKey = typeof driverMetricOptions[number]['key'];
-
 function driverMetricValue(key: DriverMetricKey, value: number | null): string {
   if (value === null) return 'No data';
   if (key === 'trips_opened' || key === 'trips_closed') return value.toLocaleString('en-NG');
   return key === 'average_turnaround_seconds' ? hours(value) : tonnes(value);
 }
 
-export function AnalyticsDriverPerformance({ data, driverLabel }: {
-  data: OperationsAnalyticsData; driverLabel?: string;
+export function AnalyticsDriverPerformance({ data, driverLabel, metric, onMetric }: {
+  data: OperationsAnalyticsData; driverLabel?: string; metric: DriverMetricKey;
+  onMetric: (metric: DriverMetricKey) => void;
 }) {
-  const [metric, setMetric] = useState<DriverMetricKey>('trips_opened');
   const selected = data.driver_performance_daily.selected_driver_id !== null;
   const days = data.driver_performance_daily.days;
-  const option = driverMetricOptions.find(item => item.key === metric) ?? driverMetricOptions[0];
+  const option = DRIVER_METRIC_OPTIONS.find(item => item.key === metric) ?? DRIVER_METRIC_OPTIONS[0];
   const formatAxis = (value: number) => option.unit === 'count'
     ? value.toLocaleString('en-NG') : option.unit === 'seconds'
       ? `${(value / 3600).toLocaleString('en-NG', { maximumFractionDigits: 1 })}h`
       : value.toLocaleString('en-NG', { maximumFractionDigits: 1 });
-  return <article className="card analytics-panel">
+  return <article className="card analytics-panel" data-analytics-chart-export="driver-daily">
     <header><p className="eyebrow">Driver Performance · daily</p><h2>{driverLabel || 'Selected Driver'}</h2>
       <p className="muted small">Daily trip counts use their event dates. Actual tonnage and averages use trips closed on each date; estimates are not used.</p></header>
     {!selected ? <p className="list-state" role="status">Select a driver in the global filters to view daily performance.</p> : <>
       <div className="analytics-chart-controls">
-        <label>Daily measure<select value={metric} onChange={event => setMetric(event.currentTarget.value as DriverMetricKey)}>
-          {driverMetricOptions.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}
+        <label>Daily measure<select value={metric} onChange={event => onMetric(event.currentTarget.value as DriverMetricKey)}>
+          {DRIVER_METRIC_OPTIONS.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}
         </select></label>
       </div>
       <figure aria-labelledby="analytics-driver-daily-title">
@@ -185,16 +179,6 @@ export function AnalyticsDriverPerformance({ data, driverLabel }: {
   </article>;
 }
 
-const summaryMetricOptions = [
-  { key: 'trips_opened', label: 'Trips Opened', unit: 'count' },
-  { key: 'trips_closed', label: 'Trips Closed', unit: 'count' },
-  { key: 'outstanding_at_period_end', label: 'Outstanding at Period End', unit: 'count' },
-  { key: 'actual_tonnage_tonnes', label: 'Actual Tonnage', unit: 'tonnes' },
-  { key: 'average_tonnage_per_trip_tonnes', label: 'Average Tonnage / Trip', unit: 'tonnes' },
-  { key: 'average_turnaround_seconds', label: 'Average Turnaround Time', unit: 'seconds' },
-] as const;
-type SummaryMetricKey = typeof summaryMetricOptions[number]['key'];
-
 function summaryMetricValue(key: SummaryMetricKey, value: number | null): string {
   if (value === null) return 'No data';
   if (key === 'trips_opened' || key === 'trips_closed' || key === 'outstanding_at_period_end') {
@@ -208,20 +192,21 @@ function periodSpan(row: AnalyticsPeriodSummary): string {
     ? dateLabel(row.period_start) : `${dateLabel(row.period_start)} – ${dateLabel(row.period_end)}`;
 }
 
-export function AnalyticsPeriodSummaries({ data, granularity, onGranularity }: {
+export function AnalyticsPeriodSummaries({ data, granularity, metric, onGranularity, onMetric }: {
   data: OperationsAnalyticsData;
   granularity: 'weekly' | 'monthly';
+  metric: SummaryMetricKey;
   onGranularity: (value: 'weekly' | 'monthly') => void;
+  onMetric: (metric: SummaryMetricKey) => void;
 }) {
-  const [metric, setMetric] = useState<SummaryMetricKey>('trips_opened');
   const rows = data.period_summaries[granularity];
-  const option = summaryMetricOptions.find(item => item.key === metric) ?? summaryMetricOptions[0];
+  const option = SUMMARY_METRIC_OPTIONS.find(item => item.key === metric) ?? SUMMARY_METRIC_OPTIONS[0];
   const showOffloadingNote = data.period_summaries.offloading_site_filter_scope === 'excludes_unassigned_at_period_end';
   const formatAxis = (value: number) => option.unit === 'count'
     ? value.toLocaleString('en-NG') : option.unit === 'seconds'
       ? `${(value / 3600).toLocaleString('en-NG', { maximumFractionDigits: 1 })}h`
       : value.toLocaleString('en-NG', { maximumFractionDigits: 1 });
-  return <article className="card analytics-panel">
+  return <article className="card analytics-panel" data-analytics-chart-export="period-summary">
     <header><p className="eyebrow">Operational summaries · Africa/Lagos</p><h2>Weekly / Monthly Summary</h2>
       <p className="muted small">Opened and closed are event counts. Outstanding is the open-trip balance at the end of the last included operational date.</p>
       {showOffloadingNote && <p className="analytics-filter-note" role="note">
@@ -235,8 +220,8 @@ export function AnalyticsPeriodSummaries({ data, granularity, onGranularity }: {
         aria-pressed={granularity === 'monthly'} onClick={() => onGranularity('monthly')}>Monthly</button>
     </div>
     <div className="analytics-chart-controls">
-      <label>Summary measure<select value={metric} onChange={event => setMetric(event.currentTarget.value as SummaryMetricKey)}>
-        {summaryMetricOptions.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}
+      <label>Summary measure<select value={metric} onChange={event => onMetric(event.currentTarget.value as SummaryMetricKey)}>
+        {SUMMARY_METRIC_OPTIONS.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}
       </select></label>
     </div>
     <figure aria-labelledby="analytics-summary-chart-title">
@@ -305,7 +290,7 @@ export function AnalyticsPerformance({ data, dimension, metric, onDimension, onM
     ? value.toLocaleString('en-NG') : metric === 'average_turnaround'
       ? `${(value / 3600).toLocaleString('en-NG', { maximumFractionDigits: 0 })}h`
       : value.toLocaleString('en-NG', { maximumFractionDigits: 1 });
-  return <article className="card analytics-panel">
+  return <article className="card analytics-panel" data-analytics-chart-export="performance">
     <header className="analytics-panel-title"><div><p className="eyebrow">Bar chart · Top 10</p><h2>Performance</h2>
       <p className="muted small">{data.performance.entity_count.toLocaleString('en-NG')} matching entities; showing up to 10.</p></div></header>
     <div className="analytics-chart-controls">
@@ -354,8 +339,9 @@ function Donut({ title, data, selected, onSelect }: {
   </button>;
 }
 
-export function AnalyticsStatusDistribution({ data }: { data: OperationsAnalyticsData }) {
-  const [selected, setSelected] = useState<'trip' | 'exception'>('trip');
+export function AnalyticsStatusDistribution({ data, selected, onSelect }: {
+  data: OperationsAnalyticsData; selected: StatusCohort; onSelect: (cohort: StatusCohort) => void;
+}) {
   const configs = {
     trip: { label: 'Trip Status', data: data.status_distributions.trip,
       note: 'Current status of trips opened during the selected period.' },
@@ -363,12 +349,12 @@ export function AnalyticsStatusDistribution({ data }: { data: OperationsAnalytic
       note: 'Current status of exceptions created during the selected period. Site and driver filters require a linked trip.' },
   } as const;
   const active = configs[selected];
-  return <article className="card analytics-panel">
+  return <article className="card analytics-panel" data-analytics-chart-export="status-distribution">
     <header><p className="eyebrow">Donut chart · current status</p><h2>Status Distribution</h2>
         <p className="muted small">{active.note} Denominator: {active.data.denominator.toLocaleString('en-NG')} matching records.</p></header>
     <div className="analytics-distribution-switcher" role="group" aria-label="Status distribution cohort">
       {(Object.keys(configs) as Array<keyof typeof configs>).map(key => <Donut key={key} title={configs[key].label}
-        data={configs[key].data} selected={selected === key} onSelect={() => setSelected(key)} />)}
+        data={configs[key].data} selected={selected === key} onSelect={() => onSelect(key)} />)}
     </div>
     {active.data.denominator === 0 ? <p className="list-state" role="status">No {active.label.toLowerCase()} records match this cohort.</p> : <>
       <figure aria-labelledby="analytics-status-title">
@@ -401,7 +387,7 @@ export function AnalyticsVariance({ data }: { data: OperationsAnalyticsData }) {
   const trucks = data.variance.trucks;
   const coverage = percent(data.variance.estimate_coverage);
   return <section className="analytics-panel-grid" aria-label="Estimated versus actual tonnage variance">
-    <article className="card analytics-panel">
+    <article className="card analytics-panel" data-analytics-chart-export="variance-daily">
       <header><p className="eyebrow">Variance = Actual − Estimated</p><h2>Signed Variance Over Time</h2>
         <p className="analytics-variance-summary">Aggregate variance: <strong>{tonnes(data.variance.total_variance_tonnes)}</strong></p>
         <p className="muted small">{data.variance.paired_trip_count.toLocaleString('en-NG')} paired trips · {coverage} estimate coverage. Positive means actual exceeded estimate; negative means actual was below estimate.</p></header>
@@ -430,7 +416,7 @@ export function AnalyticsVariance({ data }: { data: OperationsAnalyticsData }) {
         </table></TableDetails>
       </>}
     </article>
-    <article className="card analytics-panel">
+    <article className="card analytics-panel" data-analytics-chart-export="variance-trucks">
       <header><p className="eyebrow">Truck comparison · Top 10 by absolute average variance</p><h2>Average Signed Variance by Truck</h2>
         <p className="muted small">Bars show signed average tonnes per paired trip; rank uses the absolute average. No thresholds are applied.</p></header>
       {trucks.length === 0 ? <p className="list-state" role="status">No trucks have paired closed trips in this period.</p> : <>

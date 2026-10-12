@@ -195,7 +195,9 @@ console.log('PASS server RPC arguments, bounded filter options, inactive entity 
 const view = load('src/features/operations/analytics/OperationsAnalytics.tsx');
 const viewProps = {
   filters: { period: '7_days' }, options: {}, selectedOptions: {}, optionsLoading: {}, optionsError: {},
-  today: days.at(-1), dimension: 'truck', metric: 'trips', summaryGranularity: 'weekly',
+  today: days.at(-1), dimension: 'truck', metric: 'trips', driverMetric: 'trips_opened',
+  summaryGranularity: 'weekly', summaryMetric: 'trips_opened', statusCohort: 'trip',
+  exporting: false, exportError: '', onExport() {}, onDriverMetric() {}, onSummaryMetric() {}, onStatusCohort() {},
   onSummaryGranularity() {}, onChangeFilters() {}, onSearchOptions() {},
   onSelectOption() {}, onRetryOptions() {}, onResetFilters() {}, onDimension() {}, onMetric() {}, onRetry() {},
 };
