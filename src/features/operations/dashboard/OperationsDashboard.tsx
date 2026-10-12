@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { ListResultState } from '../../../components/data/ListResultState';
 import {
@@ -45,6 +45,17 @@ function formatDuration(seconds: number): string {
   return `${minutes}m`;
 }
 
+function handleTableScrollKey(event: KeyboardEvent<HTMLDivElement>): void {
+  const direction = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+  if (!direction) return;
+  const region = event.currentTarget;
+  const nextScrollLeft = Math.max(0, Math.min(region.scrollWidth - region.clientWidth,
+    region.scrollLeft + direction * 48));
+  if (nextScrollLeft === region.scrollLeft) return;
+  event.preventDefault();
+  region.scrollLeft = nextScrollLeft;
+}
+
 function value(item: DashboardPreview, key: string): string {
   return typeof item[key] === 'string' ? item[key] as string : '';
 }
@@ -57,7 +68,7 @@ function categoryItem(category: string, item: DashboardPreview): string {
 function ActionCard({ title, target, category, kind }: {
   title: string; target: string; category: DashboardActionCategory; kind: 'exception' | 'pdf' | 'email';
 }) {
-  return <article className="operations-action-card">
+  return <article className="card operations-action-card">
     <div className="operations-action-heading">
       <h3>{title}</h3><span className="operations-count" aria-label={`${category.count} items`}>{category.count}</span>
     </div>
@@ -100,7 +111,7 @@ function QueueMetricsCard({ title, metrics, completedLabel }: {
     [completedLabel, metrics.completed, 'completed'],
     ['Unrecognized status', metrics.unexpected_status, 'unknown'],
   ] as const;
-  return <article className="operations-queue-card">
+  return <article className="card operations-queue-card">
     <h3>{title}</h3>
     <dl className="operations-queue-metrics">
       {rows.map(([label, count, status]) => <div className={`operations-queue-metric queue-status--${status}`} key={label}>
@@ -180,7 +191,7 @@ function DashboardContent({ data, queueHealthState, onQueueHealthRetry }: {
       </div>
       <p className="muted small">Oldest open trips first. Durations are calculated by the server as of {formatDate(data.openTrips.as_of)}.</p>
       {data.openTrips.items.length === 0 ? <ListResultState status="empty" message="There are no open trips." /> :
-        <div className="operations-table-scroll"><table className="operations-table">
+        <div className="operations-table-scroll" role="region" aria-label="Open trips table" tabIndex={0} onKeyDown={handleTableScrollKey}><table className="operations-table">
           <thead><tr><th scope="col">Trip #</th><th scope="col">Truck</th><th scope="col">Driver</th>
             <th scope="col">Loading Site</th><th scope="col">Opened At</th><th scope="col">Duration</th><th scope="col">Status</th></tr></thead>
           <tbody>{data.openTrips.items.map(trip => <tr key={trip.trip_id}>
@@ -191,7 +202,7 @@ function DashboardContent({ data, queueHealthState, onQueueHealthRetry }: {
         </table></div>}
     </section>
 
-    <section className="operations-dashboard-section">
+    <section className="card operations-dashboard-section">
       <div className="operations-section-heading"><div><p className="eyebrow">Safe operational queues</p><h2>Action Required</h2></div></div>
       <div className="operations-action-grid">
         <ActionCard title="Unresolved Exceptions" target="/operations/exceptions" kind="exception" category={actions.unresolvedExceptions} />
@@ -206,7 +217,7 @@ function DashboardContent({ data, queueHealthState, onQueueHealthRetry }: {
       <div className="operations-section-heading"><div><p className="eyebrow">Chronological feed</p><h2>Recent Activity</h2></div></div>
       <p className="muted small">Showing up to 20 recent events as of {formatDate(data.activity.as_of)}.</p>
       {data.activity.items.length === 0 ? <ListResultState status="empty" message="No recent operational activity." /> :
-        <div className="operations-table-scroll"><table className="operations-table operations-activity-table">
+        <div className="operations-table-scroll" role="region" aria-label="Recent activity table" tabIndex={0} onKeyDown={handleTableScrollKey}><table className="operations-table operations-activity-table">
           <thead><tr><th scope="col">Time</th><th scope="col">Event</th><th scope="col">Trip</th>
             <th scope="col">Truck</th><th scope="col">Officer / Site</th></tr></thead>
           <tbody>{data.activity.items.map(event => <tr key={event.event_id}>
