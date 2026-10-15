@@ -4,8 +4,11 @@ import { Link, useParams } from 'react-router-dom';
 import { ListResultState } from '../../../components/data/ListResultState';
 import { PaginationControls } from '../../../components/data/PaginationControls';
 import {
-  downloadWaybill, loadDeliveryHistory, loadWaybillDetail, resendWaybill, retryWaybillDelivery,
-  type DeliveryAttempt, type DeliveryStatus, type Page, type WaybillDetail,
+  downloadWaybill, downloadWaybillCopy, loadDeliveryHistory, loadWaybillBankDetailAudit,
+  loadWaybillBankSubmissionForReview, loadWaybillCopyManagementState, loadWaybillDetail,
+  resendWaybill, retryWaybillDelivery, submitWaybillBankDetails, verifyWaybillBankSubmission,
+  type BankDetailAuditEvent, type BankDetailReview, type DeliveryAttempt, type DeliveryStatus,
+  type Page, type WaybillCopyManagementState, type WaybillDetail, type WaybillPdfCopyKind,
 } from '../services/operationsWaybills';
 import { formatLagosDate } from './OperationsWaybillsRegister';
 import './waybills.css';
@@ -85,6 +88,217 @@ function DeliveryRecovery({ detail, audience, status, onDone, onError }: {
   </section>;
 }
 
+type CopyManagementLoad = { status: 'loading' | 'error' }
+  | { status: 'ready'; data: WaybillCopyManagementState; audit: BankDetailAuditEvent[]; auditError: boolean };
+
+function copyStatusLabel(status: WaybillCopyManagementState['driver_pdf_status'], held: boolean): string {
+  if (held) return 'Bank Details Required';
+  if (status === 'blocked_missing_bank_details') return 'Bank Details Required';
+  if (status === 'blocked_bank_details_unverified') return 'Awaiting bank verification';
+  if (status === 'not_available') return 'Not available';
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function auditLabel(event: BankDetailAuditEvent['event_type']): string {
+  const labels: Record<BankDetailAuditEvent['event_type'], string> = {
+    submitted: 'Details submitted', correction_submitted: 'Correction submitted',
+    review_viewed: 'Submission reviewed', verified: 'Details verified',
+    correction_verified: 'Correction verified', rejected: 'Submission rejected',
+  };
+  return labels[event];
+}
+
+function WaybillCopyManagementPanel({ invoiceId, invoiceNumber, onActionError }: {
+  invoiceId: string; invoiceNumber: string; onActionError: (message: string) => void;
+}) {
+  const [load, setLoad] = useState<CopyManagementLoad>({ status: 'loading' });
+  const [revision, setRevision] = useState(0);
+  const [busy, setBusy] = useState('');
+  const [notice, setNotice] = useState('');
+  const [bankName, setBankName] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [showBankForm, setShowBankForm] = useState(false);
+  const [review, setReview] = useState<BankDetailReview | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('mismatch');
+  const reload = () => setRevision(value => value + 1);
+
+  useEffect(() => {
+    let active = true;
+    setLoad({ status: 'loading' });
+    void Promise.allSettled([
+      loadWaybillCopyManagementState(invoiceId),
+      loadWaybillBankDetailAudit(invoiceId),
+    ]).then(([management, audit]) => {
+      if (!active) return;
+      if (management.status === 'rejected') setLoad({ status: 'error' });
+      else setLoad({ status: 'ready', data: management.value,
+        audit: audit.status === 'fulfilled' ? audit.value : [], auditError: audit.status === 'rejected' });
+    });
+    return () => { active = false; };
+  }, [invoiceId, revision]);
+
+  async function downloadCopy(kind: WaybillPdfCopyKind) {
+    setBusy(`download-${kind}`); setNotice(''); onActionError('');
+    try {
+      await downloadWaybillCopy(invoiceId, invoiceNumber, kind);
+      setNotice(`${kind === 'driver' ? 'Driver' : 'Company'} PDF downloaded.`);
+    } catch {
+      const message = `Unable to download the ${kind} PDF. Refresh the status and try again.`;
+      setNotice(message); onActionError(message);
+    } finally { setBusy(''); }
+  }
+
+  async function submitDetails(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    setBusy('submit'); setNotice(''); onActionError('');
+    try {
+      await submitWaybillBankDetails(invoiceId, bankName, accountName, accountNumber);
+      setBankName(''); setAccountName(''); setAccountNumber(''); setShowBankForm(false); setReview(null);
+      setNotice('Bank details submitted for review.'); reload();
+    } catch (failure) {
+      const message = failure instanceof Error ? failure.message : 'Unable to submit bank details.';
+      setNotice(message); onActionError(message);
+    } finally { setBusy(''); }
+  }
+
+  async function openReview(submissionId: string) {
+    if (busy) return;
+    setBusy('review'); setNotice(''); setReview(null); onActionError('');
+    try {
+      const result = await loadWaybillBankSubmissionForReview(submissionId);
+      if (!result) {
+        setNotice('This submission is no longer pending. The latest status has been refreshed.');
+        reload();
+      } else if (result.invoice_number !== invoiceNumber) {
+        throw new Error('Submission does not match this Waybill');
+      } else { setReview(result); reload(); }
+    } catch {
+      const message = 'Unable to load the pending bank submission. Refresh and try again.';
+      setNotice(message); onActionError(message);
+    } finally { setBusy(''); }
+  }
+
+  async function decideSubmission(approved: boolean) {
+    if (load.status !== 'ready' || !load.data.pending_bank_submission_id || busy) return;
+    setBusy(approved ? 'verify' : 'reject'); setNotice(''); onActionError('');
+    try {
+      const result = await verifyWaybillBankSubmission(load.data.pending_bank_submission_id,
+        approved, approved ? null : rejectionReason);
+      setReview(null);
+      setNotice(result === 'corrected' ? 'Correction verified. A new Company PDF version is queued; earlier documents remain unchanged.'
+        : result === 'verified' ? 'Bank details verified. Company PDF generation is queued.' : 'Bank submission rejected.');
+      reload();
+    } catch (failure) {
+      const message = failure instanceof Error ? failure.message : 'Unable to record the bank detail decision.';
+      setNotice(message); onActionError(message);
+    } finally { setBusy(''); }
+  }
+
+  const canSubmitDetails = load.status === 'ready' && !load.data.pending_bank_submission_id
+    && ['missing', 'rejected', 'verified'].includes(load.data.bank_verification_state);
+  const pendingId = load.status === 'ready' ? load.data.pending_bank_submission_id : null;
+  const showingCorrection = load.status === 'ready' && load.data.latest_bank_snapshot_version !== null;
+
+  return <section className="card waybill-section waybill-copy-management" aria-labelledby="waybill-copy-heading">
+    <div className="waybill-copy-heading-row"><div><h2 id="waybill-copy-heading">Waybill PDF copies</h2>
+      <p className="muted">Driver and company documents are generated and managed independently.</p></div>
+      <button className="button secondary" type="button" disabled={load.status === 'loading'} onClick={reload}>
+        {load.status === 'error' ? 'Retry status' : 'Refresh copy status'}
+      </button>
+    </div>
+    {load.status === 'loading' && <p role="status" aria-live="polite">Loading PDF copy status…</p>}
+    {load.status === 'error' && <p role="alert">Unable to load secure PDF copy status or bank audit history. Retry to continue.</p>}
+    {load.status === 'ready' && <>
+      <div className="waybill-copy-grid">
+        {(['driver', 'company'] as const).map(kind => {
+          const status = kind === 'driver' ? load.data.driver_pdf_status : load.data.company_pdf_status;
+          const readyAt = kind === 'driver' ? load.data.driver_pdf_ready_at : load.data.company_pdf_ready_at;
+          const held = kind === 'company' && load.data.company_pdf_held_for_missing_bank_details;
+          const label = copyStatusLabel(status, held);
+          return <article className="waybill-copy-card" key={kind}>
+            <h3>{kind === 'driver' ? 'Driver PDF' : 'Company PDF'}</h3>
+            <p>Status: <strong>{label}</strong></p>
+            {readyAt && status === 'ready' && <p className="muted">Ready: {formatLagosDate(readyAt)}</p>}
+            {kind === 'company' && held && <p role="status">Verified bank details are required before this copy can be generated.</p>}
+            {kind === 'company' && status === 'blocked_bank_details_unverified' && <p role="status">The submission is awaiting verification; the driver copy remains independent.</p>}
+            {status === 'pending' && <p className="muted">Waiting for PDF generation.</p>}
+            {status === 'processing' && <p className="muted">PDF generation is in progress.</p>}
+            {status === 'failed' && <p role="status">Generation failed. The status will update if processing is retried.</p>}
+            <button className="button secondary" type="button" disabled={status !== 'ready' || busy !== ''}
+              onClick={() => void downloadCopy(kind)}>
+              {busy === `download-${kind}` ? 'Preparing download…' : `Download ${kind === 'driver' ? 'Driver' : 'Company'} PDF`}
+            </button>
+          </article>;
+        })}
+      </div>
+
+      <section className="waybill-bank-workflow" aria-labelledby="waybill-bank-heading">
+        <h3 id="waybill-bank-heading">Company copy bank details</h3>
+        <p>Verification and corrections are audited. Each verified correction creates a new Company PDF version; previous snapshots and files are preserved.</p>
+        <p>Verification state: <strong>{load.data.bank_verification_state.replace(/_/g, ' ')}</strong>
+          {load.data.latest_bank_snapshot_version !== null && <> · Verified version {load.data.latest_bank_snapshot_version}</>}</p>
+        {pendingId && <div className="waybill-bank-pending">
+          <p role="status">{load.data.bank_verification_state === 'correction_pending'
+            ? 'A banking correction is awaiting review.' : 'A bank detail submission is awaiting review.'}</p>
+          <button className="button secondary" type="button" disabled={busy !== ''}
+            onClick={() => void openReview(pendingId)}>{busy === 'review' ? 'Loading submission…' : 'Review pending bank details'}</button>
+        </div>}
+        {canSubmitDetails && !showBankForm && <button className="button secondary" type="button"
+          onClick={() => setShowBankForm(true)}>
+          {showingCorrection ? 'Submit bank-detail correction' : 'Enter bank details'}
+        </button>}
+        {showBankForm && canSubmitDetails && <form className="waybill-action-form waybill-bank-form" onSubmit={event => void submitDetails(event)}>
+          <h4>{showingCorrection ? 'Submit a versioned correction' : 'Submit company payment details'}</h4>
+          <label htmlFor="waybill-bank-name">Bank name<input id="waybill-bank-name" value={bankName} maxLength={200}
+            autoComplete="off" required onChange={event => setBankName(event.currentTarget.value)} /></label>
+          <label htmlFor="waybill-account-name">Account name<input id="waybill-account-name" value={accountName}
+            maxLength={200} autoComplete="off" required onChange={event => setAccountName(event.currentTarget.value)} /></label>
+          <label htmlFor="waybill-account-number">Account number<input id="waybill-account-number" value={accountNumber}
+            type="text" inputMode="numeric" maxLength={10} pattern="[0-9]{10}" autoComplete="off" required
+            onChange={event => setAccountNumber(event.currentTarget.value.replace(/\D/g, '').slice(0, 10))} /></label>
+          <div className="waybill-bank-actions">
+            <button className="button" type="submit" disabled={busy !== ''}>{busy === 'submit' ? 'Submitting…' : 'Submit for verification'}</button>
+            <button className="button secondary" type="button" disabled={busy !== ''}
+              onClick={() => { setShowBankForm(false); setBankName(''); setAccountName(''); setAccountNumber(''); }}>Cancel</button>
+          </div>
+        </form>}
+        {review && <div className="waybill-bank-review" aria-labelledby="waybill-bank-review-heading">
+          <h4 id="waybill-bank-review-heading">Authorized bank-detail review</h4>
+          <dl><div><dt>Bank name</dt><dd>{review.bank_name}</dd></div>
+            <div><dt>Account name</dt><dd>{review.account_name}</dd></div>
+            <div><dt>Account number</dt><dd>{review.account_number}</dd></div>
+            <div><dt>Submitted</dt><dd>{formatLagosDate(review.submitted_at)}</dd></div>
+            <div><dt>Submitted by</dt><dd>{review.submitted_by}</dd></div></dl>
+          <div className="waybill-bank-actions">
+            <button className="button" type="button" disabled={busy !== ''} onClick={() => void decideSubmission(true)}>
+              {busy === 'verify' ? 'Verifying…' : 'Verify bank details'}</button>
+            <label htmlFor="waybill-rejection-reason">Rejection reason<select id="waybill-rejection-reason"
+              value={rejectionReason} onChange={event => setRejectionReason(event.currentTarget.value)}>
+              <option value="mismatch">Details do not match</option><option value="invalid_account_name">Invalid account name</option>
+              <option value="invalid_account_number">Invalid account number</option><option value="unsupported_bank">Unsupported bank</option>
+            </select></label>
+            <button className="button secondary" type="button" disabled={busy !== ''} onClick={() => void decideSubmission(false)}>
+              {busy === 'reject' ? 'Rejecting…' : 'Reject submission'}</button>
+          </div>
+        </div>}
+      </section>
+
+      <section className="waybill-bank-audit" aria-labelledby="waybill-bank-audit-heading">
+        <h3 id="waybill-bank-audit-heading">Bank-detail audit history</h3>
+        {load.auditError && <p role="alert">Unable to load audit history. Refresh the page to retry.</p>}
+        {!load.auditError && load.audit.length === 0 && <p className="muted">No bank-detail events recorded.</p>}
+        {load.audit.length > 0 && <ol>{load.audit.map((event, index) => <li key={`${event.actor_id}-${event.occurred_at}-${index}`}>
+          <strong>{auditLabel(event.event_type)}</strong> · {formatLagosDate(event.occurred_at)} · Actor {event.actor_id}
+          {event.reason_code && <> · {event.reason_code}</>}
+        </li>)}</ol>}
+      </section>
+    </>}
+    {notice && <p role="status" aria-live="polite">{notice}</p>}
+  </section>;
+}
+
 export function OperationsWaybillDetailView({ state, history, historyError, historyPage, onHistoryPageChange, onRetry, onDownload, onRefresh, onActionError }: {
   state: State; history: Page<DeliveryAttempt> | null; historyError: boolean; historyPage: number;
   onHistoryPageChange: (page: number) => void; onRetry: () => void;
@@ -112,7 +326,8 @@ export function OperationsWaybillDetailView({ state, history, historyError, hist
       <DetailField label="Closed">{formatLagosDate(waybill.closed_at)}</DetailField>
       <DetailField label="Tonnage">{waybill.quantity_tonnes.toFixed(2)} t</DetailField>
     </dl></section>
-    <section className="card waybill-section"><h2>PDF</h2><p>Status: {document.status}</p>
+    <WaybillCopyManagementPanel invoiceId={waybill.id} invoiceNumber={waybill.waybill_number} onActionError={onActionError} />
+    <section className="card waybill-section"><h2>Historical Waybill PDF</h2><p>Status: {document.status}</p>
       {document.ready_at && <p>Ready: {formatLagosDate(document.ready_at)}</p>}
       <button className="button secondary" type="button" disabled={document.status !== 'ready'}
         onClick={() => onDownload(state.data)}>Download private PDF</button></section>

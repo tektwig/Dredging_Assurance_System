@@ -188,8 +188,6 @@ const mapDriver = (row: JsonObject): Driver => ({
   license_number: row.license_number || 'ON FILE',
   status: row.is_active === false ? 'inactive' : (row.status || 'active'),
   assigned_truck_id: row.assigned_truck_id,
-  bank_name: row.bank_name,
-  account_number_last4: row.account_number_last4,
 });
 
 function mapTrip(row: JsonObject, sites: Site[], trucks: Truck[], drivers: Driver[], exceptionRows: JsonObject[]): Trip {
@@ -306,9 +304,6 @@ const mapTripClosureInvoice = (row: JsonObject): TripClosureInvoice => ({
   opened_at: row.opened_at,
   closed_at: row.closed_at,
   issued_at: row.issued_at,
-  bank_name: row.bank_name ? String(row.bank_name) : undefined,
-  account_name: row.account_name ? String(row.account_name) : undefined,
-  account_number: row.account_number ? String(row.account_number) : undefined,
 });
 
 export async function fetchLiveSnapshot(_role: UserRole | null): Promise<LiveSnapshot> {
@@ -319,7 +314,9 @@ export async function fetchLiveSnapshot(_role: UserRole | null): Promise<LiveSna
     client.from('trips').select('*').order('opened_at', { ascending: false }).limit(500),
     client.from('user_site_assignments').select('site_id').is('ended_at', null).limit(1),
     client.from('exceptions').select('*').order('created_at', { ascending: false }).limit(500),
-    client.from('trip_closure_invoices').select('*').order('issued_at', { ascending: false }).limit(500),
+    client.from('trip_closure_invoices').select(
+      'id,invoice_number,trip_id,trip_number,truck_id,truck_registration,truck_type,truck_capacity_tonnes,truck_owner_name,driver_id,driver_name,driver_phone,driver_email,driver_license,loading_site_id,loading_site_name,offloading_site_id,offloading_site_name,quantity_tonnes,opened_at,closed_at,issued_at',
+    ).order('issued_at', { ascending: false }).limit(500),
   ]);
 
   // The invoice table is introduced by the closure-invoice migration. Keep

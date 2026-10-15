@@ -4,6 +4,37 @@ import { normalizePageRequest } from '../../../types/listQuery';
 export type PdfStatus = 'pending' | 'processing' | 'ready' | 'failed';
 export type DeliveryStatus = 'pending' | 'processing' | 'sent' | 'failed'
   | 'blocked_missing_email' | 'blocked_configuration' | null;
+export type WaybillPdfCopyKind = 'driver' | 'company';
+export type WaybillPdfCopyStatus = PdfStatus | 'blocked_missing_bank_details'
+  | 'blocked_bank_details_unverified' | 'not_available';
+export type BankVerificationState = 'missing' | 'pending_verification' | 'correction_pending' | 'verified' | 'rejected';
+export type WaybillCopyManagementState = {
+  invoice_id: string;
+  invoice_number: string;
+  driver_pdf_status: WaybillPdfCopyStatus;
+  driver_pdf_ready_at: string | null;
+  company_pdf_status: WaybillPdfCopyStatus;
+  company_pdf_ready_at: string | null;
+  bank_verification_state: BankVerificationState;
+  pending_bank_submission_id: string | null;
+  latest_bank_snapshot_version: number | null;
+  company_pdf_held_for_missing_bank_details: boolean;
+};
+export type BankDetailReview = {
+  invoice_number: string;
+  bank_name: string;
+  account_name: string;
+  account_number: string;
+  submitted_by: string;
+  submitted_at: string;
+};
+export type BankDetailAuditEvent = {
+  event_type: 'submitted' | 'correction_submitted' | 'review_viewed' | 'verified'
+    | 'correction_verified' | 'rejected';
+  occurred_at: string;
+  actor_id: string;
+  reason_code: string | null;
+};
 export type WaybillFilters = {
   search: string;
   quickFilter: string;
@@ -69,6 +100,10 @@ function nullableTimestamp(value: unknown): value is string | null { return valu
 function pdfStatus(value: unknown): value is PdfStatus {
   return value === 'pending' || value === 'processing' || value === 'ready' || value === 'failed';
 }
+function copyStatus(value: unknown): value is WaybillPdfCopyStatus {
+  return pdfStatus(value) || value === 'blocked_missing_bank_details'
+    || value === 'blocked_bank_details_unverified' || value === 'not_available';
+}
 function deliveryStatus(value: unknown): value is DeliveryStatus {
   return value === null || value === 'pending' || value === 'processing' || value === 'sent'
     || value === 'failed' || value === 'blocked_missing_email' || value === 'blocked_configuration';
@@ -77,6 +112,82 @@ function number(value: unknown): value is number { return typeof value === 'numb
 function waybillStoragePath(number: string): string | null {
   const match = /^(?:INV|WB)-(\d{4})-\d{6,}$/.exec(number);
   return match ? `${match[1]}/${number}.pdf` : null;
+}
+function rows(value: unknown): unknown[] {
+  if (value === null) return [];
+  if (Array.isArray(value)) return value;
+  return [value];
+}
+
+export function parseWaybillCopyManagementState(value: unknown): WaybillCopyManagementState {
+  const result = rows(value);
+  if (result.length !== 1) throw new Error('Invalid Waybill copy management response');
+  const row = result[0];
+  if (!record(row) || !exactKeys(row, ['invoice_id', 'invoice_number', 'driver_pdf_status',
+    'driver_pdf_ready_at', 'company_pdf_status', 'company_pdf_ready_at', 'bank_verification_state',
+    'pending_bank_submission_id', 'latest_bank_snapshot_version', 'company_pdf_held_for_missing_bank_details'])
+    || !text(row.invoice_id) || !text(row.invoice_number) || !waybillStoragePath(row.invoice_number)
+    || !copyStatus(row.driver_pdf_status) || !nullableTimestamp(row.driver_pdf_ready_at)
+    || !copyStatus(row.company_pdf_status) || !nullableTimestamp(row.company_pdf_ready_at)
+    || !['missing', 'pending_verification', 'correction_pending', 'verified', 'rejected'].includes(row.bank_verification_state as string)
+    || !nullableText(row.pending_bank_submission_id)
+    || !(row.latest_bank_snapshot_version === null || (Number.isSafeInteger(row.latest_bank_snapshot_version)
+      && (row.latest_bank_snapshot_version as number) > 0))
+    || typeof row.company_pdf_held_for_missing_bank_details !== 'boolean') {
+    throw new Error('Invalid Waybill copy management response');
+  }
+  return row as WaybillCopyManagementState;
+}
+
+function parseCopyDownload(value: unknown, invoiceNumber: string, kind: WaybillPdfCopyKind): {
+  bucket: string; path: string;
+} {
+  const result = rows(value);
+  if (result.length !== 1) throw new Error('Waybill PDF is not ready');
+  const row = result[0];
+  const expectedBucket = kind === 'driver' ? 'waybill-driver-copies' : 'waybill-company-copies';
+  const basePath = waybillStoragePath(invoiceNumber);
+  if (!basePath) throw new Error('Invalid Waybill PDF download response');
+  const companyVersionPrefix = `${basePath.slice(0, basePath.indexOf('/') + 1)}${invoiceNumber}-company-v`;
+  const companyVersionSuffix = record(row) && typeof row.storage_path === 'string'
+    && row.storage_path.startsWith(companyVersionPrefix) && row.storage_path.endsWith('.pdf')
+    ? row.storage_path.slice(companyVersionPrefix.length, -4) : '';
+  const validPath = kind === 'driver' ? row && record(row) && row.storage_path === basePath
+    : row && record(row) && (row.storage_path === basePath
+      || (/^\d+$/.test(companyVersionSuffix) && Number.isSafeInteger(Number(companyVersionSuffix))
+        && Number(companyVersionSuffix) >= 2));
+  if (!record(row) || !exactKeys(row, ['copy_kind', 'storage_bucket', 'storage_path', 'ready_at'])
+    || row.copy_kind !== kind || row.storage_bucket !== expectedBucket || !validPath
+    || !timestamp(row.ready_at)) throw new Error('Invalid Waybill PDF download response');
+  return { bucket: expectedBucket, path: row.storage_path as string };
+}
+
+function parseBankReview(value: unknown): BankDetailReview | null {
+  const result = rows(value);
+  if (result.length === 0) return null;
+  const row = result[0];
+  if (result.length !== 1 || !record(row)
+    || !exactKeys(row, ['invoice_number', 'bank_name', 'account_name', 'account_number', 'submitted_by', 'submitted_at'])
+    || !text(row.invoice_number) || !waybillStoragePath(row.invoice_number)
+    || !text(row.bank_name) || !text(row.account_name) || !/^\d{10}$/.test(String(row.account_number))
+    || !text(row.submitted_by) || !timestamp(row.submitted_at)) {
+    throw new Error('Invalid bank detail review response');
+  }
+  return row as BankDetailReview;
+}
+
+function parseBankAudit(value: unknown): BankDetailAuditEvent[] {
+  if (!Array.isArray(value)) throw new Error('Invalid bank detail audit response');
+  const events = value.map(item => {
+    if (!record(item) || !exactKeys(item, ['event_type', 'occurred_at', 'actor_id', 'reason_code'])
+      || !['submitted', 'correction_submitted', 'review_viewed', 'verified', 'correction_verified', 'rejected']
+        .includes(item.event_type as string)
+      || !timestamp(item.occurred_at) || !text(item.actor_id) || !nullableText(item.reason_code)) {
+      throw new Error('Invalid bank detail audit response');
+    }
+    return item as BankDetailAuditEvent;
+  });
+  return events;
 }
 
 export function parseWaybillRow(value: unknown): WaybillRow {
@@ -171,6 +282,76 @@ export async function loadWaybillDetail(waybillId: string): Promise<WaybillDetai
   const result = await client().rpc('get_operations_waybill_detail', { p_invoice_id: waybillId });
   if (result.error) safeError(result.error, 'load');
   return parseWaybillDetail(result.data);
+}
+
+export async function loadWaybillCopyManagementState(waybillId: string): Promise<WaybillCopyManagementState> {
+  const result = await client().rpc('get_operations_waybill_copy_management_state', { p_invoice_id: waybillId });
+  if (result.error) safeError(result.error, 'load Waybill copy status');
+  return parseWaybillCopyManagementState(result.data);
+}
+
+export async function downloadWaybillCopy(waybillId: string, waybillNumber: string,
+  kind: WaybillPdfCopyKind): Promise<void> {
+  const result = await client().rpc('get_operations_waybill_pdf_copy', {
+    p_invoice_id: waybillId, p_copy_kind: kind,
+  });
+  if (result.error) safeError(result.error, 'authorize Waybill PDF download');
+  const copy = parseCopyDownload(result.data, waybillNumber, kind);
+  const download = await client().storage.from(copy.bucket).download(copy.path);
+  if (download.error || !download.data) throw new Error('Unable to download Waybill PDF');
+  const objectUrl = URL.createObjectURL(download.data);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = `${waybillNumber}-${kind}-copy.pdf`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally { URL.revokeObjectURL(objectUrl); }
+}
+
+export async function submitWaybillBankDetails(invoiceId: string, bankName: string,
+  accountName: string, accountNumber: string): Promise<string> {
+  const cleanBankName = bankName.trim();
+  const cleanAccountName = accountName.trim();
+  const cleanAccountNumber = accountNumber.trim();
+  if (cleanBankName.length < 1 || cleanBankName.length > 200 || cleanAccountName.length < 1
+    || cleanAccountName.length > 200 || !/^\d{10}$/.test(cleanAccountNumber)) {
+    throw new Error('Enter a bank name, account name and 10-digit account number.');
+  }
+  const result = await client().rpc('submit_waybill_company_bank_details', {
+    p_invoice_id: invoiceId, p_bank_name: cleanBankName,
+    p_account_name: cleanAccountName, p_account_number: cleanAccountNumber,
+  });
+  if (result.error) safeError(result.error, 'submit bank details');
+  if (!text(result.data) || !result.data) throw new Error('Unable to submit bank details');
+  return result.data;
+}
+
+export async function loadWaybillBankSubmissionForReview(submissionId: string): Promise<BankDetailReview | null> {
+  const result = await client().rpc('get_waybill_company_bank_submission_for_review', {
+    p_submission_id: submissionId,
+  });
+  if (result.error) safeError(result.error, 'load bank detail review');
+  return parseBankReview(result.data);
+}
+
+export async function verifyWaybillBankSubmission(submissionId: string, approved: boolean,
+  reasonCode: string | null): Promise<'verified' | 'corrected' | 'rejected'> {
+  const result = await client().rpc('verify_waybill_company_bank_details', {
+    p_submission_id: submissionId, p_approved: approved, p_reason_code: reasonCode,
+  });
+  if (result.error) safeError(result.error, 'record bank detail decision');
+  if (result.data !== 'verified' && result.data !== 'corrected' && result.data !== 'rejected') {
+    throw new Error('Unable to record bank detail decision');
+  }
+  return result.data;
+}
+
+export async function loadWaybillBankDetailAudit(invoiceId: string): Promise<BankDetailAuditEvent[]> {
+  const result = await client().rpc('get_waybill_bank_detail_audit', { p_invoice_id: invoiceId });
+  if (result.error) safeError(result.error, 'load bank detail audit history');
+  return parseBankAudit(result.data);
 }
 
 export async function loadDeliveryHistory(waybillId: string, page: number): Promise<Page<DeliveryAttempt> | null> {

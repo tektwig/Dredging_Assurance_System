@@ -14,5 +14,35 @@
 .waybill-action-form .waybill-checkbox { display: flex; align-items: flex-start; gap: .5rem; }
 .waybill-checkbox input { width: auto; min-height: auto; margin-top: .2rem; }
 .waybill-warning { color: #604509; background: #fff8e7; border: 1px solid #ead7a7; padding: .8rem; border-radius: .5rem; }
+.waybill-copy-management { min-width: 0; }
+.waybill-copy-heading-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.waybill-copy-heading-row p { margin: 0 0 .9rem; }
+.waybill-copy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; }
+.waybill-copy-card { min-width: 0; padding: 1rem; border: 1px solid #d6e1ec; border-radius: .7rem; background: var(--brand-blue-soft); }
+.waybill-copy-card h3, .waybill-bank-workflow h3, .waybill-bank-audit h3 { margin: 0 0 .55rem; color: var(--brand-navy); font-size: 1rem; }
+.waybill-copy-card p { margin: .35rem 0; overflow-wrap: anywhere; }
+.waybill-copy-card .button { margin-top: .5rem; min-height: 2.75rem; }
+.waybill-bank-workflow, .waybill-bank-audit { margin-top: 1.3rem; padding-top: 1.1rem; border-top: 1px solid #d6e1ec; }
+.waybill-bank-workflow > p { max-width: 62rem; }
+.waybill-bank-pending, .waybill-bank-review { margin: .9rem 0; padding: 1rem; border: 1px solid #d6e1ec; border-radius: .65rem; background: #fff; }
+.waybill-bank-pending p { margin-top: 0; }
+.waybill-bank-form { margin-top: 1rem; }
+.waybill-bank-form h4, .waybill-bank-review h4 { margin: 0; color: var(--brand-navy); }
+.waybill-bank-form .waybill-bank-actions, .waybill-bank-review .waybill-bank-actions { display: flex; align-items: end; flex-wrap: wrap; gap: .65rem; }
+.waybill-bank-actions .button { min-height: 2.75rem; }
+.waybill-bank-review dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem 1.2rem; margin: .9rem 0; }
+.waybill-bank-review dt { color: #60717e; font-size: .8rem; font-weight: 700; }
+.waybill-bank-review dd { margin: .2rem 0 0; overflow-wrap: anywhere; }
+.waybill-bank-review label { display: grid; gap: .35rem; font-size: .82rem; font-weight: 700; }
+.waybill-bank-review select { min-height: 2.75rem; padding: .55rem .7rem; border: 1px solid #c7d1d8; border-radius: .5rem; background: #fff; color: #172b3a; font: inherit; }
+.waybill-bank-audit ol { display: grid; gap: .45rem; padding-left: 1.3rem; overflow-wrap: anywhere; }
+.waybill-copy-management button:focus-visible, .waybill-copy-management input:focus-visible,
+.waybill-copy-management select:focus-visible { outline: 3px solid var(--brand-blue); outline-offset: 2px; }
 @media (max-width: 900px) { .waybill-filters, .waybill-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .waybill-filters, .waybill-detail-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .waybill-copy-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .waybill-filters, .waybill-detail-grid, .waybill-bank-review dl { grid-template-columns: 1fr; }
+  .waybill-copy-heading-row { align-items: stretch; flex-direction: column; }
+  .waybill-copy-heading-row .button { align-self: start; }
+  .waybill-copy-card, .waybill-bank-pending, .waybill-bank-review { padding: .85rem; }
+}
