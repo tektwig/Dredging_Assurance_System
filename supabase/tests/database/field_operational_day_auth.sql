@@ -3,6 +3,7 @@ begin;
 create function pg_temp.field_day_assert(v boolean, message text) returns void language plpgsql as $$
 begin
   if v is distinct from true then raise exception 'Field operational-day assertion failed: %',message; end if;
+  raise notice 'ASSERTION PASS: %',message;
 end $$;
 
 insert into auth.users(id,email,raw_user_meta_data) values
@@ -58,8 +59,10 @@ begin
   v_midnight:=((v_started_at at time zone 'Africa/Lagos')::date+1)::timestamp at time zone 'Africa/Lagos';
   if not private.field_session_is_current(v_midnight-interval '1 microsecond') then
     raise exception 'Loading session expired before Lagos midnight'; end if;
+  raise notice 'ASSERTION PASS: Loading session remains valid immediately before Lagos midnight';
   if private.field_session_is_current(v_midnight) then
     raise exception 'Loading session remained valid after the Lagos operational date changed'; end if;
+  raise notice 'ASSERTION PASS: Loading session expires at the Lagos operational-day boundary';
 end $$;
 set local role authenticated;
 select pg_temp.field_day_assert(public.get_field_session_status()->>'status'='expired',
