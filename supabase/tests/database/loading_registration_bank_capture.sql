@@ -309,6 +309,8 @@ declare
   v_driver uuid:=(select (value#>>'{driver,id}')::uuid from bank_test_state where key='registration');
   v_truck uuid:=(select (value#>>'{truck,id}')::uuid from bank_test_state where key='registration');
   v_assignment uuid:=current_setting('test.loading_assignment')::uuid;
+  v_loading_officer uuid:='d0000000-0000-0000-0000-d00000000002';
+  v_offloading_officer uuid:='d0000000-0000-0000-0000-d00000000003';
   v_opened timestamptz:=statement_timestamp()-interval '2 hours';
   v_closed timestamptz:=statement_timestamp()-interval '1 hour';
 begin
@@ -339,13 +341,15 @@ begin
     id,invoice_number,trip_id,trip_number,truck_id,truck_registration,truck_type,
     truck_capacity_tonnes,truck_owner_name,driver_id,driver_name,driver_phone,driver_license,
     loading_site_id,loading_site_name,offloading_site_id,offloading_site_name,
+    loading_officer_id,loading_officer_name,offloading_officer_id,offloading_officer_name,
     quantity_tonnes,opened_at,closed_at,issued_at
   ) values (
     'd6000000-0000-0000-0000-000000000001','WB-2099-999999999','d5000000-0000-0000-0000-000000000001',
     'BANK-CAPTURE-TRIP-1',v_truck,'BANKCAPTURE1','Registered tipper truck',30,'Not provided',
     v_driver,'Synthetic Bank Driver','08020000003',null,'d1000000-0000-0000-0000-000000000001',
     'Bank Capture Loading Site','d1000000-0000-0000-0000-000000000002',
-    'Bank Capture Offloading Site',12,v_opened,v_closed,v_closed
+    'Bank Capture Offloading Site',v_loading_officer,'Synthetic Loading Officer',
+    v_offloading_officer,'Synthetic Operations Manager',12,v_opened,v_closed,v_closed
   );
 end;
 $$;
