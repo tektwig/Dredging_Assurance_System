@@ -401,10 +401,17 @@ select 'review',to_jsonb(reviewed)
 from public.get_waybill_company_bank_submission_for_review(
   ((select value->>'id' from bank_test_state where key='submission')::uuid)
 ) reviewed;
+reset role;
+select pg_temp.assert_true(exists (
+  select 1 from private.loading_registration_bank_captures capture
+  where capture.driver_id=((select value#>>'{driver,id}' from bank_test_state where key='registration')::uuid)
+    and capture.captured_by='d0000000-0000-0000-0000-000000000002'
+),'initial registration capture preserves Loading Officer attribution');
+set local role authenticated;
 select pg_temp.assert_true((select value->>'bank_name'='Test Bank'
   and value->>'account_number'='1234567890'
-  and value->>'submitted_by'='d0000000-0000-0000-0000-000000000002'
-  from bank_test_state where key='review'),'review RPC keeps original Loading Officer attribution');
+  and value->>'submitted_by'='d0000000-0000-0000-0000-000000000003'
+  from bank_test_state where key='review'),'review RPC records the authenticated Operations Manager as submission actor');
 select pg_temp.assert_true(public.verify_waybill_company_bank_details(
   ((select value->>'id' from bank_test_state where key='submission')::uuid),true,'verified'
 )='verified','Operations Manager explicitly verifies the captured bank data');
