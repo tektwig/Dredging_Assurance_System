@@ -74,9 +74,9 @@ canonical_baseline_migrations=(
 )
 field_session_migrations=(20261002000200_field_operational_day_auth.sql)
 baseline_migrations=(
-  "${canonical_baseline_migrations[@]:0:6}"
+  "${canonical_baseline_migrations[@]:0:7}"
   "${field_session_migrations[@]}"
-  "${canonical_baseline_migrations[6]}"
+  "${canonical_baseline_migrations[7]}"
 )
 payment_free_migrations=(
   20261009000000_payment_free_waybill_cutover.sql
