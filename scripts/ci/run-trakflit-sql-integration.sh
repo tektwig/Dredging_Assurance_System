@@ -316,10 +316,6 @@ copy_migrations "${fixture_root}/dual_waybill" "${secure_migrations[@]}"
 assert_staged_migrations "${through_secure_migrations[@]}"
 apply_migrations "20260921000100,20260921000200,20260924000100,20260924000200,20260925000200,20260925000400,20260927000100,20260927000150,20260927001150,20261002000100,20261002000200,20261002000300,20261002000400,20261005000600,20261009000000,20261010000100,20261011000050,20261011000100,20261012000100,20261013000100,20261013000200,20261013000300"
 
-run_transactional_suite "hybrid-cutover assertions" "${repo_root}/supabase/tests/fixtures/hybrid_cutover_assertions.sql"
-run_transactional_suite "secure dual-Waybill SQL suite" "${repo_root}/supabase/tests/database/secure_dual_waybill.sql"
-run_transactional_suite "field operational-day authorization suite" "${repo_root}/supabase/tests/database/field_operational_day_auth.sql"
-
 run_sql_file "synthetic historical receipt seed" "${repo_root}/supabase/tests/fixtures/registration_legacy_receipts.sql"
 historical_receipts_before="$(receipt_fingerprint)"
 
@@ -329,6 +325,10 @@ assert_staged_migrations "${through_secure_migrations[@]}" "${registration_migra
 apply_migrations "${expected_before_bank_capture}"
 [[ "$(receipt_fingerprint)" == "${historical_receipts_before}" ]] || fail "Migration 20261016000050 changed a synthetic historical receipt."
 printf 'PASS: migration 20261016000050 preserves every pre-existing receipt value.\n'
+
+run_transactional_suite "hybrid-cutover assertions" "${repo_root}/supabase/tests/fixtures/hybrid_cutover_assertions.sql"
+run_transactional_suite "secure dual-Waybill SQL suite" "${repo_root}/supabase/tests/database/secure_dual_waybill.sql"
+run_transactional_suite "field operational-day authorization suite" "${repo_root}/supabase/tests/database/field_operational_day_auth.sql"
 
 copy_migrations "${repo_root}/supabase/migrations" "${registration_migrations[1]}"
 assert_staged_migrations "${all_test_migrations[@]}"
