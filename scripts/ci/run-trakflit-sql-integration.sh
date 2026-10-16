@@ -220,7 +220,7 @@ printf 'Connected to isolated PostgreSQL %s for project %s.\n' "${db_identity#*|
 apply_migrations() {
   local expected_versions="$1"
   if ! supabase migration up --local --workdir "${test_root}" >"${migration_log}" 2>&1; then
-    tail -n 30 "${migration_log}" | redact_diagnostics \
+    tail -n 80 "${migration_log}" | redact_diagnostics \
       | sed -E 's/[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}/[REDACTED_EMAIL]/g' >&2
     fail "Local migration application failed."
   fi
@@ -304,6 +304,16 @@ receipt_fingerprint() {
   "
 }
 
+receipt_operation_constraint() {
+  docker exec "${db_container}" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+    select pg_get_constraintdef(constraint_row.oid)
+    from pg_constraint constraint_row
+    where constraint_row.conrelid='private.loading_request_receipts'::regclass
+      and constraint_row.conname='loading_request_receipts_operation_check'
+      and constraint_row.contype='c'
+  "
+}
+
 apply_migrations "20260921000100,20260921000200,20260924000100,20260924000200,20260925000200,20260925000400,20260927000100,20260927000150,20260927001150,20261002000100,20261002000200,20261002000300,20261002000400,20261005000600"
 run_sql_file "synthetic hybrid cutover seed" "${fixture_root}/hybrid_cutover_seed.sql"
 
@@ -324,11 +334,16 @@ expected_before_bank_capture="20260921000100,20260921000200,20260924000100,20260
 assert_staged_migrations "${through_secure_migrations[@]}" "${registration_migrations[0]}"
 apply_migrations "${expected_before_bank_capture}"
 [[ "$(receipt_fingerprint)" == "${historical_receipts_before}" ]] || fail "Migration 20261016000050 changed a synthetic historical receipt."
+receipt_constraint_after_upgrade="$(receipt_operation_constraint)"
+[[ "${receipt_constraint_after_upgrade}" == *"register_loading_participant_payment_free_v3"* ]] \
+  || fail "Migration 20261016000050 did not retain the v3 receipt operation in the actual CHECK constraint: ${receipt_constraint_after_upgrade:-missing}"
 printf 'PASS: migration 20261016000050 preserves every pre-existing receipt value.\n'
 
 run_transactional_suite "hybrid-cutover assertions" "${repo_root}/supabase/tests/fixtures/hybrid_cutover_assertions.sql"
 run_transactional_suite "secure dual-Waybill SQL suite" "${repo_root}/supabase/tests/database/secure_dual_waybill.sql"
 run_transactional_suite "field operational-day authorization suite" "${repo_root}/supabase/tests/database/field_operational_day_auth.sql"
+[[ "$(receipt_operation_constraint)" == "${receipt_constraint_after_upgrade}" ]] \
+  || fail "A transactional SQL suite changed the upgraded loading receipt CHECK constraint."
 
 copy_migrations "${repo_root}/supabase/migrations" "${registration_migrations[1]}"
 assert_staged_migrations "${all_test_migrations[@]}"
