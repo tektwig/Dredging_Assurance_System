@@ -33,6 +33,7 @@ create function pg_temp.registration_side_effect_counts() returns jsonb language
   select jsonb_build_object(
     'drivers',(select count(*) from public.drivers),
     'trucks',(select count(*) from public.trucks),
+    'bank_captures',(select count(*) from private.loading_registration_bank_captures),
     'receipts',(select count(*) from private.loading_request_receipts),
     'audit',(select count(*) from public.audit_log)
   );
@@ -136,6 +137,7 @@ select set_config('request.jwt.claim.sub','d0000000-0000-0000-0000-000000000002'
 select set_config('request.jwt.claims',jsonb_build_object('sub','d0000000-0000-0000-0000-000000000002',
   'session_id','d2000000-0000-0000-0000-000000000002',
   'iat',extract(epoch from statement_timestamp())::bigint)::text,true);
+reset role;
 select pg_temp.assert_true(not exists (select 1 from public.drivers
   where phone_number in ('08020000008','08020000009','08020000010'))
   and not exists (select 1 from private.loading_registration_bank_captures
@@ -145,6 +147,7 @@ select pg_temp.assert_true(not exists (select 1 from public.drivers
       'd3000000-0000-0000-0000-000000000010'
     )),
   'unauthorized and unassigned registration attempts create no records');
+set local role authenticated;
 
 insert into bank_test_state values('before_stale_session',pg_temp.registration_side_effect_counts());
 select set_config('request.jwt.claims',jsonb_build_object(
@@ -181,24 +184,30 @@ insert into bank_test_state values('registration',public.register_loading_partic
   'Test Bank','1234567890','Synthetic Bank Driver'
 ));
 select pg_temp.assert_true((select value->>'ok'='true'
-  and value::text !~ 'Test Bank|1234567890|Synthetic Bank Driver' from bank_test_state where key='registration'),
+  and value::text !~ 'Test Bank|1234567890'
+  and value::text !~* '"[^"]*(bank.?name|bank.?account|bank.?details|bank.?data|bank.?info|bank.?capture|banking|account.?number|account.?no|account.?name|account.?holder|payment.?details|registration.?bank)[^"]*"[[:space:]]*:'
+  from bank_test_state where key='registration'),
   'successful registration response excludes all banking values');
+reset role;
 select pg_temp.assert_true(exists (
   select 1 from private.loading_request_receipts
   where actor_id='d0000000-0000-0000-0000-000000000002'
     and operation='register_loading_participant_payment_free_v3'
     and request_id='d3000000-0000-0000-0000-000000000003'
 ), 'v4 successfully executes v3 and stores its payment-free idempotency receipt');
+set local role authenticated;
 insert into bank_test_state values('before_duplicate',pg_temp.registration_side_effect_counts());
 select pg_temp.assert_code(public.register_loading_participant_v4(
   'd3000000-0000-0000-0000-000000000007','BANKDUPLICATE1',null,null,'Possible Duplicate Driver','08020000003',null,
   'Test Bank','1234567893','Possible Duplicate Driver'
 ),'DRIVER_MATCH_REQUIRES_REVIEW');
+reset role;
 select pg_temp.assert_true(pg_temp.registration_side_effect_counts()=
   (select value from bank_test_state where key='before_duplicate')
   and not exists (select 1 from private.loading_registration_bank_captures
     where registration_request_id='d3000000-0000-0000-0000-000000000007'),
   'existing duplicate-phone protection prevents a second registration and bank capture');
+set local role authenticated;
 
 -- Same request and payload replays without a second capture or audit entry.
 insert into bank_test_state values('before_replay',pg_temp.registration_side_effect_counts());
@@ -206,9 +215,11 @@ select pg_temp.assert_true(public.register_loading_participant_v4(
   'd3000000-0000-0000-0000-000000000003','IGNORED-REPLAY',null,null,'Synthetic Bank Driver','08020000003',null,
   'Test Bank','1234567890','Synthetic Bank Driver'
 )=(select value from bank_test_state where key='registration'),'same request returns the original safe response');
+reset role;
 select pg_temp.assert_true((select count(*)=1 from private.loading_registration_bank_captures
   where registration_request_id='d3000000-0000-0000-0000-000000000003'),
   'same request creates exactly one private capture');
+set local role authenticated;
 select pg_temp.assert_code(public.register_loading_participant_v4(
   'd3000000-0000-0000-0000-000000000003','BANKCAPTURE1',null,null,'Synthetic Bank Driver','08020000003',null,
   'Different Bank','1234567890','Synthetic Bank Driver'
@@ -218,6 +229,7 @@ insert into bank_test_state values('existing_driver_mode',public.register_loadin
   ((select value#>>'{driver,id}' from bank_test_state where key='registration')::uuid),
   null,null,null,null,null,null
 ));
+reset role;
 select pg_temp.assert_true((select value->>'ok'='true' and value#>>'{driver,created}'='false'
   from bank_test_state where key='existing_driver_mode')
   and (select count(*)=1 from private.loading_registration_bank_captures
@@ -250,7 +262,8 @@ select pg_temp.expect_sqlstate($q$delete from private.loading_registration_bank_
 select pg_temp.assert_true(not exists (
   select 1 from public.audit_log
   where entity_name='loading_registration'
-    and new_value::text ~ 'Test Bank|1234567890|Synthetic Bank Driver'
+    and (new_value::text ~ 'Test Bank|1234567890'
+      or new_value::text ~* '"[^"]*(bank.?name|bank.?account|bank.?details|bank.?data|bank.?info|bank.?capture|banking|account.?number|account.?no|account.?name|account.?holder|payment.?details|registration.?bank)[^"]*"[[:space:]]*:')
 ),'registration audit metadata contains no banking values');
 
 -- A capture-table failure must roll back the earlier v3 driver/truck/audit/receipt work.
