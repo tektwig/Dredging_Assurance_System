@@ -7,7 +7,7 @@ begin
   end if;
   if to_regclass('private.loading_request_receipts') is null
     or to_regprocedure('private.lock_loading_actor()') is null
-    or to_regprocedure('private.loading_failure(text)') is null
+    or to_regprocedure('private.loading_failure(text,jsonb)') is null
     or to_regprocedure('private.require_role(public.app_role[])') is null then
     raise exception 'Payment-free authorization and request-replay helpers are required';
   end if;
