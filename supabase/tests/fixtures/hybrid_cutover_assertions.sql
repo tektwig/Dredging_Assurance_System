@@ -286,7 +286,7 @@ select pg_temp.hybrid_assert(not exists(select 1 from public.trip_closure_invoic
     where trip_id=pg_temp.hybrid_trip_id('HYB-103')),
   'an open trip has no PDF-copy jobs before its post-migration closure');
 select set_config('request.jwt.claim.sub','f1000000-0000-4000-8000-000000000002',true);
-select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000002","role":"authenticated"}',true);
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000002","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000002"}',true);
 set local role authenticated;
 select pg_temp.hybrid_assert((public.register_loading_participant_v3(
   'f7000000-0000-4000-8000-000000000004','HYB-104',null,null,
