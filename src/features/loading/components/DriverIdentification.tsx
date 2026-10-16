@@ -37,6 +37,10 @@ const registrationMessages: Record<RegistrationFailureCode, string> = {
   INVALID_PHONE: 'Check the driver’s phone number.',
   INVALID_EMAIL: 'Check the driver’s email address.',
   INVALID_TRUCK_DETAILS: 'Check the truck details.',
+  INVALID_BANK_NAME: 'Enter a valid bank name.',
+  INVALID_ACCOUNT_NUMBER: 'Enter an account number containing exactly 10 digits.',
+  INVALID_ACCOUNT_NAME: 'Enter a valid account holder’s name.',
+  REQUEST_PAYLOAD_CONFLICT: 'This registration request was already used with different details. Start a new registration.',
   DRIVER_MATCH_REQUIRES_REVIEW: 'A driver may already use this phone number. Review before continuing.',
 };
 
@@ -79,6 +83,13 @@ function NewDriverFields({ state, onEdit, disabled }: {
     {field('fullName', 'Full Name', true, { maxLength: 200 })}
     {field('phoneNumber', 'Phone Number', true, { type: 'tel', maxLength: 40 })}
     {field('email', 'Email (optional)', false, { type: 'email', maxLength: 254 })}
+    <div className="loading-bank-fields">
+      <h4>Bank Details</h4>
+      <p>Required to register a new driver. Account numbers must contain exactly 10 digits.</p>
+      {field('bankName', 'Bank Name', true, { maxLength: 200 })}
+      {field('accountNumber', 'Account Number', true, { inputMode: 'numeric', maxLength: 10 })}
+      {field('accountName', "Account Holder's Name", true, { maxLength: 200 })}
+    </div>
   </div>;
 }
 
@@ -126,6 +137,7 @@ export function DriverIdentification(props: Props) {
       </div> : <>
         {registration.status === 'business_failure' && <p role="alert">{registrationMessages[registration.code]}</p>}
         {registration.status === 'authorization' && <p role="alert">Loading access is unavailable. Recheck your account and site assignment before registering.</p>}
+        {registration.status === 'rejected' && <p role="alert">The server rejected this registration request; no registration was saved. Correct the details or contact Operations before trying again.</p>}
         {registration.status === 'ambiguous' && <p role="alert">The connection ended before registration could be confirmed. Do not start another registration. Retry the same request to check its outcome.</p>}
         {registration.status === 'refreshing' && <p role="status">Registration saved. Checking the truck register…</p>}
         {registration.status === 'refresh_error' && <p role="alert">Registration was saved, but truck lookup could not be refreshed. Look up this plate again before continuing.</p>}
@@ -136,7 +148,7 @@ export function DriverIdentification(props: Props) {
             <NewDriverFields state={form} onEdit={props.onFormEdit} disabled={isSubmitting} />
           </form>}
         {(registration.status === 'editing' || registration.status === 'submitting' || registration.status === 'ambiguous'
-          || registration.status === 'business_failure') && <div className="loading-registration-actions">
+          || registration.status === 'rejected' || registration.status === 'business_failure') && <div className="loading-registration-actions">
           <button className="button" type={registration.mode === 'new_truck_existing_driver' ? 'button' : 'submit'}
             form={registration.mode === 'new_truck_existing_driver' ? undefined : 'loading-driver-registration'}
             onClick={registration.mode === 'new_truck_existing_driver' ? props.onRegister : undefined}

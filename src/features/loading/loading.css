@@ -88,8 +88,8 @@
 .loading-registration { margin-top: 1rem; padding: 1rem; border: 1px solid var(--brand-border); border-radius: .7rem; background: #fff; }
 .loading-driver-fields { display: grid; gap: .8rem; }
 .loading-driver-fields input { width: 100%; min-height: 2.9rem; padding: .55rem .7rem; border: 1px solid #c7d1d8; border-radius: .45rem; }
-.loading-payment-fields { display: grid; gap: .8rem; margin-top: .45rem; padding-top: 1rem; border-top: 1px solid #dce4e9; }
-.loading-payment-fields p { margin: 0; color: var(--brand-navy); }
+.loading-bank-fields { display: grid; gap: .8rem; margin-top: .45rem; padding-top: 1rem; border-top: 1px solid #dce4e9; }
+.loading-bank-fields p { margin: 0; color: var(--brand-navy); }
 .loading-registration-actions { display: flex; gap: .7rem; flex-wrap: wrap; margin-top: 1rem; }
 .loading-actual-driver { margin-top: 1.2rem; padding: 1rem; border-radius: .6rem; background: var(--brand-blue-soft); }
 .loading-actual-driver .loading-next-note { margin: .7rem 0 0; }

@@ -1,7 +1,7 @@
 import { supabase } from '../../../lib/supabase';
 import type { DriverSearchRequest, DriverSearchResult, LoadingDriverByIdResult, RegistrationFailureCode,
   RegistrationRequest, RegistrationResult, SafeDriverSummary } from '../types';
-import { LoadingAuthorizationError, RegistrationOutcomeUnknownError } from './errors';
+import { LoadingAuthorizationError, RegistrationOutcomeUnknownError, RegistrationRejectedError } from './errors';
 
 const registrationCodes: readonly RegistrationFailureCode[] = [
   'INVALID_REQUEST_ID', 'INVALID_PLATE', 'INVALID_REGISTRATION_MODE',
@@ -10,6 +10,7 @@ const registrationCodes: readonly RegistrationFailureCode[] = [
   'INACTIVE_TRUCK', 'OPEN_TRIP_EXISTS', 'BLOCKING_EXCEPTION',
   'DRIVER_NOT_FOUND', 'INACTIVE_DRIVER', 'INVALID_DRIVER_NAME', 'INVALID_PHONE',
   'INVALID_EMAIL', 'DRIVER_MATCH_REQUIRES_REVIEW', 'INVALID_TRUCK_DETAILS',
+  'INVALID_BANK_NAME', 'INVALID_ACCOUNT_NUMBER', 'INVALID_ACCOUNT_NAME', 'REQUEST_PAYLOAD_CONFLICT',
 ];
 const siteCodes = ['SITE_ASSIGNMENT_REQUIRED', 'INVALID_SITE_ASSIGNMENT', 'INACTIVE_SITE'] as const;
 
@@ -66,7 +67,7 @@ export async function lookupLoadingDriverById(driverId: string, assignmentId: st
 export async function registerLoadingParticipant(request: RegistrationRequest): Promise<RegistrationResult> {
   if (!supabase) throw new RegistrationOutcomeUnknownError();
   const newDriver = request.newDriver;
-  const { data, error } = await supabase.rpc('register_loading_participant_v3', {
+  const { data, error, status } = await supabase.rpc('register_loading_participant_v4', {
     p_request_id: request.requestId,
     p_plate: request.plate,
     p_expected_truck_id: request.expectedTruckId,
@@ -74,9 +75,17 @@ export async function registerLoadingParticipant(request: RegistrationRequest): 
     p_full_name: newDriver?.fullName ?? null,
     p_phone_number: newDriver?.phoneNumber ?? null,
     p_email: newDriver?.email.trim() || null,
+    p_bank_name: newDriver?.bankName.trim() ?? null,
+    p_account_number: newDriver?.accountNumber ?? null,
+    p_account_name: newDriver?.accountName.trim() ?? null,
   });
   if (error?.code === '42501') throw new LoadingAuthorizationError();
-  if (error) throw new RegistrationOutcomeUnknownError();
+  if (error) {
+    if (status === 400 && typeof error.code === 'string' && error.code.length > 0) {
+      throw new RegistrationRejectedError();
+    }
+    throw new RegistrationOutcomeUnknownError();
+  }
   const row = object(data);
   if (row?.ok === false && typeof row.code === 'string' && registrationCodes.includes(row.code as RegistrationFailureCode)) {
     return { kind: 'business_failure', code: row.code as RegistrationFailureCode };

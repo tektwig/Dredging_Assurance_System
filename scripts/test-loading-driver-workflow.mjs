@@ -5,6 +5,35 @@ import { resolve, dirname } from 'node:path';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
 
+const bankCaptureMigration = readFileSync('supabase/migrations/20261016000100_loading_registration_bank_capture.sql', 'utf8');
+const receiptMigration = readFileSync('supabase/migrations/20261016000050_loading_receipt_v3_operation.sql', 'utf8');
+const originalLoadingMigration = readFileSync('supabase/migrations/20260924000100_loading_alignment.sql', 'utf8');
+const originalReceiptCheck = originalLoadingMigration.match(/operation\s+text\s+not\s+null\s+check\s*\(\s*operation\s+in\s*\(([^)]*)\)\s*\)/i)?.[1] ?? '';
+assert(originalReceiptCheck.includes('register_loading_participant') && originalReceiptCheck.includes('create_loading_trip_v2'));
+assert(!originalReceiptCheck.includes('register_loading_participant_payment_free_v3'));
+assert.match(receiptMigration, /array\[\s*'create_loading_trip_v2',\s*'register_loading_participant'\s*\]::text\[\]/i);
+assert.match(receiptMigration, /add constraint loading_request_receipts_operation_check[\s\S]*?'register_loading_participant_payment_free_v3'/i);
+assert.match(receiptMigration, /drop constraint loading_request_receipts_operation_check/i);
+const ciBaselinePath = 'supabase/tests/fixtures/trakflit-ci/canonical_baseline/20260924000100_canonical_loading_alignment.sql';
+if (existsSync(ciBaselinePath)) {
+  const ciBaseline = readFileSync(ciBaselinePath, 'utf8');
+  const ciReceiptCheck = ciBaseline.match(/operation\s+text\s+not\s+null\s+check\s*\(\s*operation\s+in\s*\(([^)]*)\)\s*\)/i)?.[1] ?? '';
+  assert(ciReceiptCheck.includes('register_loading_participant') && ciReceiptCheck.includes('create_loading_trip_v2'));
+  assert(!ciReceiptCheck.includes('register_loading_participant_payment_free_v3'),
+    'CI baseline must preserve the original receipt constraint until the forward correction runs');
+}
+assert.match(bankCaptureMigration, /create table private\.loading_registration_bank_captures/i);
+assert.match(bankCaptureMigration, /enable row level security/i);
+assert.match(bankCaptureMigration, /revoke all on private\.loading_registration_bank_captures from public,anon,authenticated,service_role/i);
+assert.match(bankCaptureMigration, /perform private\.lock_loading_actor\(\)/i);
+assert.match(bankCaptureMigration, /public\.register_loading_participant_v3\(/i);
+assert.match(bankCaptureMigration, /Loading receipt operation constraint must be upgraded/i);
+assert.match(bankCaptureMigration, /revoke all on function public\.register_loading_participant_v3/i);
+assert.match(bankCaptureMigration, /grant execute on function public\.register_loading_participant_v4[\s\S]*?to authenticated/i);
+assert.match(bankCaptureMigration, /perform private\.require_role\(array\['operations_manager'\]/i);
+assert.doesNotMatch(bankCaptureMigration, /driver_payment_details|trip_payments|payment_status|insert\s+into\s+public\.audit_log/i);
+console.log('PASS bank-capture migration authorization, restricted storage and payment-free contract');
+
 const require = createRequire(import.meta.url);
 const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
@@ -36,6 +65,7 @@ const calls = [];
 let searchResponse;
 let registrationResponse;
 let registrationError;
+let registrationStatus = 200;
 let driverLookupResponse;
 overrides.set(absolute('src/lib/supabase.ts'), { supabase: {
   from(table) { assert.fail(`Unexpected direct table access: ${table}`); },
@@ -43,7 +73,7 @@ overrides.set(absolute('src/lib/supabase.ts'), { supabase: {
     calls.push({ name, args });
     if (name === 'search_loading_drivers') return { data: searchResponse, error: null };
     if (name === 'lookup_loading_driver_by_id') return { data: driverLookupResponse, error: null };
-    if (name === 'register_loading_participant_v3') return { data: registrationResponse, error: registrationError };
+    if (name === 'register_loading_participant_v4') return { data: registrationResponse, error: registrationError, status: registrationStatus };
     assert.fail(`Unexpected RPC: ${name}`);
   },
 } });
@@ -77,30 +107,43 @@ assert.deepEqual(await service.lookupLoadingDriverById(other.id, 'assignment-1')
 registrationResponse = { ok: true, request_id: 'req-1',
   truck: { id: truck.id, registration_number: truck.registrationNumber, normalized_registration: truck.normalizedRegistration, created: true },
   driver: { id: other.id, full_name: other.fullName, phone_number: other.phoneNumber, email: other.email, created: true },
-  default_driver_changed: false, account_number: 'NEVER_DISPLAY', bank_name: 'NEVER_DISPLAY' };
-const sensitive = { fullName: 'James Obi', phoneNumber: other.phoneNumber, email: '' };
+  default_driver_changed: false, account_number: 'NEVER_DISPLAY', bank_name: 'NEVER_DISPLAY', account_name: 'NEVER_DISPLAY' };
+const sensitive = { fullName: 'James Obi', phoneNumber: other.phoneNumber, email: '',
+  bankName: 'Test Bank', accountNumber: '0123456789', accountName: 'James Obi' };
 const request = { requestId: 'req-1', plate: 'ABC-123', expectedTruckId: null, existingDriverId: null, newDriver: sensitive };
 const registration = await service.registerLoadingParticipant(request);
 assert.equal(registration.kind, 'success');
-assert.equal(calls.at(-1).name, 'register_loading_participant_v3');
+assert.equal(calls.at(-1).name, 'register_loading_participant_v4');
 assert(!JSON.stringify(registration).includes('NEVER_DISPLAY'));
 assert.deepEqual(calls.at(-1).args, {
   p_request_id: 'req-1', p_plate: 'ABC-123', p_expected_truck_id: null, p_existing_driver_id: null,
   p_full_name: 'James Obi', p_phone_number: other.phoneNumber, p_email: null,
+  p_bank_name: 'Test Bank', p_account_number: '0123456789', p_account_name: 'James Obi',
 });
-assert(!Object.keys(calls.at(-1).args).some(key => /bank|account|payment/i.test(key)));
 const existingRequest = { requestId: 'req-2', plate: 'NEW-123', expectedTruckId: null, existingDriverId: other.id, newDriver: null };
 registrationResponse = { ...registrationResponse, request_id: 'req-2',
   driver: { ...registrationResponse.driver, created: false } };
 await service.registerLoadingParticipant(existingRequest);
 assert.equal(calls.at(-1).args.p_existing_driver_id, other.id);
-assert(!Object.keys(calls.at(-1).args).some(key => /bank|account|payment/i.test(key)));
+assert.equal(calls.at(-1).args.p_bank_name, null);
+assert.equal(calls.at(-1).args.p_account_number, null);
+assert.equal(calls.at(-1).args.p_account_name, null);
 registrationError = { code: 'PGRST000', message: 'Private transport detail' };
+registrationStatus = 503;
+await assert.rejects(service.registerLoadingParticipant(existingRequest), { message: 'Registration outcome unknown' });
+registrationError = { code: 'P0001', message: 'Private database detail' };
+registrationStatus = 400;
+await assert.rejects(service.registerLoadingParticipant(existingRequest), { message: 'Registration request rejected' });
+registrationError = { message: 'Unparsed intermediary response' };
 await assert.rejects(service.registerLoadingParticipant(existingRequest), { message: 'Registration outcome unknown' });
 registrationError = null;
+registrationStatus = 200;
 registrationResponse = { ok: false, code: 'DRIVER_MATCH_REQUIRES_REVIEW', details: {} };
 assert.deepEqual(await service.registerLoadingParticipant(request),
   { kind: 'business_failure', code: 'DRIVER_MATCH_REQUIRES_REVIEW' });
+registrationResponse = { ok: false, code: 'INVALID_ACCOUNT_NUMBER', details: {} };
+assert.deepEqual(await service.registerLoadingParticipant(request),
+  { kind: 'business_failure', code: 'INVALID_ACCOUNT_NUMBER' });
 console.log('PASS payment-free RPC contract, sensitive-response exclusion and ambiguous transport result');
 
 const { DriverWorkflowController, RegistrationRequestLifecycle, validateNewDriver } = load('src/features/loading/utils/driverWorkflowController.ts');
@@ -113,6 +156,10 @@ assert.notEqual(browserIds.current(), generatedId);
 assert.equal(validateNewDriver(sensitive), null);
 assert.match(validateNewDriver({ ...sensitive, email: 'invalid-address' }), /email/i);
 assert.equal(validateNewDriver({ ...sensitive, email: '' }), null);
+assert.match(validateNewDriver({ ...sensitive, bankName: '' }), /bank/i);
+assert.match(validateNewDriver({ ...sensitive, accountNumber: '123456789' }), /10 digits/i);
+assert.match(validateNewDriver({ ...sensitive, accountNumber: '012345678x' }), /10 digits/i);
+assert.match(validateNewDriver({ ...sensitive, accountName: ' '.repeat(2) }), /account holder/i);
 let uuid = 0;
 let refreshes = 0;
 let publishedReady = [];
@@ -213,6 +260,13 @@ const callbacks = { onRegular() {}, onDifferent() {}, onSearchEdit() {}, onSearc
 let html = renderToStaticMarkup(React.createElement(DriverIdentification, { state, ...callbacks }));
 assert(html.includes('Possible existing driver') && html.includes(other.fullName));
 assert(!html.includes('NEVER_DISPLAY') && !html.includes('0123456789'));
+const newDriverMarkup = renderToStaticMarkup(React.createElement(DriverIdentification, {
+  state: { ...state, registration: { status: 'editing', mode: 'new_truck_new_driver' }, form: sensitive }, ...callbacks,
+}));
+assert(newDriverMarkup.includes('Bank Details') && newDriverMarkup.includes('Bank Name')
+  && newDriverMarkup.includes('Account Number') && newDriverMarkup.includes("Account Holder&#x27;s Name"));
+assert.match(newDriverMarkup, /maxlength\s*=\s*["']?10["']?/i);
+console.log('PASS required bank fields render and validate before registration');
 workflow.selectExisting(other);
 assert.equal(state.registration.mode, 'new_truck_existing_driver');
 assert.equal(state.form.email, '');
@@ -241,7 +295,7 @@ workflow.editForm('phoneNumber', '+2348099999999');
 assert.equal(state.registration.status, 'editing');
 workflow.cancelRegistration();
 assert.equal(state.form.email, '');
-console.log('PASS unknown-truck modes, duplicate-phone review, double-submit guard and payment-free cleanup');
+console.log('PASS unknown-truck modes, duplicate-phone review, double-submit guard and bank-data cleanup');
 
 workflow.startUnknownRegistration();
 for (const [field, value] of Object.entries(sensitive)) workflow.editForm(field, value);
@@ -254,6 +308,17 @@ assert.equal(registrations.at(-1).requestId, ambiguousId, 'unchanged ambiguous r
 workflow.editForm('email', 'another@example.invalid');
 await workflow.submitRegistration();
 assert.notEqual(registrations.at(-1).requestId, ambiguousId, 'changed payload gets new UUID');
+const changedPayloadId = registrations.at(-1).requestId;
+registerBehavior = async value => {
+  registrations.push(value);
+  throw new (load('src/features/loading/services/errors.ts').RegistrationRejectedError)();
+};
+await workflow.submitRegistration();
+assert.equal(state.registration.status, 'rejected');
+assert.equal(registrations.at(-1).requestId, changedPayloadId);
+await workflow.submitRegistration();
+assert.notEqual(registrations.at(-1).requestId, changedPayloadId, 'definite rejection starts a fresh idempotency request');
+assert.equal(state.registration.status, 'rejected');
 workflow.cancelRegistration();
 workflow.startUnknownRegistration();
 for (const [field, value] of Object.entries(sensitive)) workflow.editForm(field, value);
@@ -283,8 +348,17 @@ assert(html.includes('Set James Obi as this truck'));
 assert(!html.includes('bank_name') && !html.includes('NEVER_DISPLAY'));
 workflow.startNewDriver();
 html = renderToStaticMarkup(React.createElement(DriverIdentification, { state, ...callbacks }));
-assert(html.includes('Email (optional)') && html.includes('name="email"') && !html.match(/bank|account|payment/i));
+assert(html.includes('Email (optional)') && html.includes('name="email"')
+  && html.includes('Bank Name') && html.includes('Account Number') && html.includes("Account Holder&#x27;s Name"));
 assert(html.includes('name="email"') && !html.includes('name="email" type="email" required'));
+const accountNumberInput = html.match(/<label>Account Number(<input[^>]*>)<\/label>/)?.[1] ?? '';
+assert(accountNumberInput.includes('name="accountNumber"') && accountNumberInput.includes('maxLength="10"')
+  && accountNumberInput.includes('required=""'));
+const rejectedMarkup = renderToStaticMarkup(React.createElement(DriverIdentification, {
+  state: { ...state, registration: { status: 'rejected', mode: 'existing_truck_new_driver' } }, ...callbacks,
+}));
+assert(rejectedMarkup.includes('no registration was saved') && rejectedMarkup.includes('name="accountNumber"')
+  && rejectedMarkup.includes('>Register</button>') && !rejectedMarkup.includes('Retry same request'));
 assert(!calls.some(call => call.name === 'create_loading_trip_v2'));
 console.log('PASS field UI terminology, conditional regular-driver option and no trip opening');
 

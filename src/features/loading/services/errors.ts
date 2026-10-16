@@ -7,6 +7,10 @@ export class RegistrationOutcomeUnknownError extends Error {
   constructor() { super('Registration outcome unknown'); }
 }
 
+export class RegistrationRejectedError extends Error {
+  constructor() { super('Registration request rejected'); }
+}
+
 // The opening RPC may have committed before a transport or response failure.
 export class TripOutcomeUnknownError extends Error {
   constructor() { super('Trip opening outcome unknown'); }

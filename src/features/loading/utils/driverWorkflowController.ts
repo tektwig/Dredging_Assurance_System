@@ -1,9 +1,9 @@
 import type { DriverSearchResult, NewDriverForm, RegistrationFailureCode, RegistrationMode, RegistrationRequest, RegistrationResult, RegistrationSafeResponse, SafeDriverSummary, SavedRegistrationOutcome, SavedRegistrationReceipt, SelectedActualDriver, TruckLookupResult, TruckSummary } from '../types';
-import { LoadingAuthorizationError, RegistrationOutcomeUnknownError } from '../services/errors';
+import { LoadingAuthorizationError, RegistrationOutcomeUnknownError, RegistrationRejectedError } from '../services/errors';
 import { registrationReceipt, registrationResponseMatchesMode, validateRegistrationRefresh } from './registrationValidation';
 
 export const emptyDriverForm = (): NewDriverForm => ({
-  fullName: '', phoneNumber: '', email: '',
+  fullName: '', phoneNumber: '', email: '', bankName: '', accountNumber: '', accountName: '',
 });
 
 export type DriverContext =
@@ -20,6 +20,7 @@ export type RegistrationState =
   | { status: 'editing'; mode: RegistrationMode }
   | { status: 'submitting'; mode: RegistrationMode }
   | { status: 'ambiguous'; mode: RegistrationMode }
+  | { status: 'rejected'; mode: RegistrationMode }
   | { status: 'duplicate_review'; mode: RegistrationMode; candidates: SafeDriverSummary[] }
   | { status: 'business_failure'; mode: RegistrationMode; code: RegistrationFailureCode }
   | { status: 'refreshing'; mode: RegistrationMode }
@@ -40,6 +41,9 @@ export function validateNewDriver(form: NewDriverForm): string | null {
   if (!form.fullName.trim() || form.fullName.trim().length > 200) return 'Enter the driver’s full name.';
   if (!form.phoneNumber.trim() || form.phoneNumber.length > 40) return 'Enter a valid phone number.';
   if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return 'Check the email address.';
+  if (!form.bankName.trim() || form.bankName.trim().length > 200) return 'Enter a valid bank name.';
+  if (!/^\d{10}$/.test(form.accountNumber)) return 'Enter an account number containing exactly 10 digits.';
+  if (!form.accountName.trim() || form.accountName.trim().length > 200) return 'Enter a valid account holder’s name.';
   return null;
 }
 
@@ -190,7 +194,7 @@ export class DriverWorkflowController {
     const replacingInactiveRegular = context?.kind === 'known' && this.state.saved?.status === 'blocked'
       && this.state.saved.reason === 'inactive_driver';
     if (!context || this.pending || (this.state.saved && !replacingInactiveRegular)
-      || (registration.status !== 'editing' && registration.status !== 'ambiguous'
+      || (registration.status !== 'editing' && registration.status !== 'ambiguous' && registration.status !== 'rejected'
       && registration.status !== 'business_failure')) return;
     if (registration.status === 'business_failure' && registration.code === 'DRIVER_MATCH_REQUIRES_REVIEW') return;
     const mode = registration.mode;
@@ -261,6 +265,9 @@ export class DriverWorkflowController {
         this.requests.changed();
         this.publish({ registration: { status: 'authorization', mode }, form: emptyDriverForm() });
         this.siteUnavailable?.();
+      } else if (error instanceof RegistrationRejectedError) {
+        this.requests.changed();
+        this.publish({ registration: { status: 'rejected', mode } });
       } else if (error instanceof RegistrationOutcomeUnknownError) {
         this.publish({ registration: { status: 'ambiguous', mode } });
       } else this.publish({ registration: { status: 'ambiguous', mode } });
