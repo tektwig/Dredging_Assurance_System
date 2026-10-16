@@ -1,0 +1,62 @@
+name: TRAKFLIT SQL integration
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/trakflit-sql-integration.yml"
+      - "scripts/ci/run-trakflit-sql-integration.sh"
+      - "supabase/migrations/**"
+      - "supabase/tests/database/**"
+      - "supabase/tests/fixtures/trakflit-ci/**"
+      - "supabase/tests/fixtures/hybrid_cutover_assertions.sql"
+      - "supabase/tests/fixtures/secure_dual_waybill_legacy_storage_seed.sql"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trakflit-sql-integration-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sql-integration:
+    name: Isolated Supabase SQL integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "true"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install pinned Supabase CLI
+        uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+        with:
+          version: 2.120.0
+
+      - name: Verify runner tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(supabase --version)" = "2.120.0"
+          docker info --format '{{.ServerVersion}}' >/dev/null
+
+      - name: Run isolated SQL integration suites
+        shell: bash
+        run: bash scripts/ci/run-trakflit-sql-integration.sh
+
+      - name: Stop and remove this job's Supabase project
+        if: always()
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -u
+          project_id="trklci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          test_root="${RUNNER_TEMP}/${project_id}"
+          if [[ -d "${test_root}/supabase" ]]; then
+            supabase stop --yes --project-id "${project_id}" --no-backup --workdir "${test_root}" >/dev/null 2>&1 || true
+          fi
+          if [[ "${test_root}" == "${RUNNER_TEMP}/trklci-"* && -d "${test_root}" ]]; then
+            rm -rf -- "${test_root}"
+          fi
