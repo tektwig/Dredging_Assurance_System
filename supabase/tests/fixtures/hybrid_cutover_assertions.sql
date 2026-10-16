@@ -261,7 +261,7 @@ select pg_temp.hybrid_assert((select count(*)=2 from storage.objects where bucke
 reset role;
 
 select set_config('request.jwt.claim.sub','f1000000-0000-4000-8000-000000000002',true);
-select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000002","role":"authenticated"}',true);
+select set_config('request.jwt.claims','{"sub":"f1000000-0000-4000-8000-000000000002","role":"authenticated","session_id":"f2000000-0000-4000-8000-000000000002"}',true);
 set local role authenticated;
 select pg_temp.hybrid_assert((select count(*)=0 from storage.objects where bucket_id='waybills'),
   'Loading Officer cannot read private Waybill Storage objects');
