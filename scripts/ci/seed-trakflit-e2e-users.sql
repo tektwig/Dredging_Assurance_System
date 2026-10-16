@@ -28,9 +28,23 @@ where id in (:'loading_id'::uuid, :'operations_id'::uuid, :'finance_id'::uuid, :
 \quit 1
 \endif
 
-select set_config('request.jwt.claim.sub', :'operations_id', true);
+select exists (
+  select 1
+  from public.profiles
+  where id = 'f1000000-0000-4000-8000-000000000001'::uuid
+    and role = 'system_administrator'::public.app_role
+    and is_active
+) as seed_admin_ready
+\gset
+\if :seed_admin_ready
+\else
+\echo Synthetic System Administrator fixture is unavailable.
+\quit 1
+\endif
+
+select set_config('request.jwt.claim.sub', 'f1000000-0000-4000-8000-000000000001', true);
 select set_config('request.jwt.claims', jsonb_build_object(
-  'sub', :'operations_id', 'role', 'authenticated'
+  'sub', 'f1000000-0000-4000-8000-000000000001', 'role', 'authenticated'
 )::text, true);
 set local role authenticated;
 select (public.assign_user_site(:'loading_id'::uuid, 'f3000000-0000-4000-8000-000000000001'::uuid)->>'ok')::boolean as assignment_ready
