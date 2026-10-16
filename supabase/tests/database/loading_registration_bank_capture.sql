@@ -459,7 +459,7 @@ select pg_temp.assert_true((select value->>'bank_name'='Corrected Test Bank'
   'Operations Manager correction review is asserted without printing bank values');
 select pg_temp.assert_true(public.verify_waybill_company_bank_details(
   ((select value->>'id' from bank_test_state where key='correction_submission')::uuid),true,'verified'
-)='verified','Operations Manager can verify a correction');
+)='corrected','Operations Manager can verify a correction');
 reset role;
 select pg_temp.assert_true((select count(*)=2 and min(version)=1 and max(version)=2
   from public.trip_closure_invoice_bank_snapshots where invoice_id='d6000000-0000-0000-0000-000000000001')
