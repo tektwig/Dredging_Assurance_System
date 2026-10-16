@@ -88,6 +88,9 @@ insert into auth.users(id,email,raw_user_meta_data) values
   ('d9000000-0000-0000-0000-000000000004','secure-operations@example.invalid','{}'),
   ('d9000000-0000-0000-0000-000000000005','secure-finance@example.invalid','{}'),
   ('d9000000-0000-0000-0000-000000000006','secure-audit@example.invalid','{}');
+insert into auth.sessions(id,user_id,created_at) values
+  ('d9010000-0000-0000-0000-000000000002','d9000000-0000-0000-0000-000000000002',statement_timestamp()),
+  ('d9010000-0000-0000-0000-000000000003','d9000000-0000-0000-0000-000000000003',statement_timestamp());
 update public.profiles
 set display_name='Secure Waybill Test User',
   role=case right(id::text,1)
@@ -109,14 +112,17 @@ insert into public.trucks(id,registration_number,driver_id,truck_type,capacity,c
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub','d9000000-0000-0000-0000-000000000001',true);
+select set_config('request.jwt.claims','{"sub":"d9000000-0000-0000-0000-000000000001","role":"authenticated"}',true);
 select public.assign_user_site('d9000000-0000-0000-0000-000000000002','d9100000-0000-0000-0000-000000000001');
 select public.assign_user_site('d9000000-0000-0000-0000-000000000003','d9100000-0000-0000-0000-000000000002');
 select set_config('request.jwt.claim.sub','d9000000-0000-0000-0000-000000000002',true);
+select set_config('request.jwt.claims','{"sub":"d9000000-0000-0000-0000-000000000002","role":"authenticated","session_id":"d9010000-0000-0000-0000-000000000002"}',true);
 insert into secure_waybill_state values('opened',public.create_loading_trip_v2(
   'd9400000-0000-0000-0000-000000000001','SYN-001','d9200000-0000-0000-0000-000000000001',
   (select id from public.user_site_assignments where profile_id=auth.uid() and ended_at is null),
   'MANUAL',clock_timestamp(),12.50));
 select set_config('request.jwt.claim.sub','d9000000-0000-0000-0000-000000000003',true);
+select set_config('request.jwt.claims','{"sub":"d9000000-0000-0000-0000-000000000003","role":"authenticated","session_id":"d9010000-0000-0000-0000-000000000003"}',true);
 insert into secure_waybill_state values('closed',public.close_trip_v2(
   'd9500000-0000-0000-0000-000000000001',
   (select (v#>>'{trip,id}')::uuid from secure_waybill_state where k='opened'),
