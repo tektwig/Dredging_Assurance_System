@@ -309,8 +309,8 @@ declare
   v_driver uuid:=(select (value#>>'{driver,id}')::uuid from bank_test_state where key='registration');
   v_truck uuid:=(select (value#>>'{truck,id}')::uuid from bank_test_state where key='registration');
   v_assignment uuid:=current_setting('test.loading_assignment')::uuid;
-  v_loading_officer uuid:='d0000000-0000-0000-0000-d00000000002';
-  v_offloading_officer uuid:='d0000000-0000-0000-0000-d00000000003';
+  v_loading_officer uuid:='d0000000-0000-0000-0000-000000000002';
+  v_offloading_officer uuid:='d0000000-0000-0000-0000-000000000003';
   v_opened timestamptz:=statement_timestamp()-interval '2 hours';
   v_closed timestamptz:=statement_timestamp()-interval '1 hour';
 begin
