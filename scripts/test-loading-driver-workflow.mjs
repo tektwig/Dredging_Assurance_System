@@ -43,7 +43,7 @@ overrides.set(absolute('src/lib/supabase.ts'), { supabase: {
     calls.push({ name, args });
     if (name === 'search_loading_drivers') return { data: searchResponse, error: null };
     if (name === 'lookup_loading_driver_by_id') return { data: driverLookupResponse, error: null };
-    if (name === 'register_loading_participant') return { data: registrationResponse, error: registrationError };
+    if (name === 'register_loading_participant_v3') return { data: registrationResponse, error: registrationError };
     assert.fail(`Unexpected RPC: ${name}`);
   },
 } });
@@ -77,32 +77,31 @@ assert.deepEqual(await service.lookupLoadingDriverById(other.id, 'assignment-1')
 registrationResponse = { ok: true, request_id: 'req-1',
   truck: { id: truck.id, registration_number: truck.registrationNumber, normalized_registration: truck.normalizedRegistration, created: true },
   driver: { id: other.id, full_name: other.fullName, phone_number: other.phoneNumber, email: other.email, created: true },
-  payment_details_captured: true, default_driver_changed: false, account_number: 'NEVER_DISPLAY' };
-const sensitive = { fullName: 'James Obi', phoneNumber: other.phoneNumber, email: '',
-  bankName: 'Example Bank', accountNumber: '0123456789', accountName: 'James Obi' };
+  default_driver_changed: false, account_number: 'NEVER_DISPLAY', bank_name: 'NEVER_DISPLAY' };
+const sensitive = { fullName: 'James Obi', phoneNumber: other.phoneNumber, email: '' };
 const request = { requestId: 'req-1', plate: 'ABC-123', expectedTruckId: null, existingDriverId: null, newDriver: sensitive };
 const registration = await service.registerLoadingParticipant(request);
 assert.equal(registration.kind, 'success');
-assert(!JSON.stringify(registration).includes('0123456789'));
-assert(!JSON.stringify(registration).includes('Example Bank'));
+assert.equal(calls.at(-1).name, 'register_loading_participant_v3');
+assert(!JSON.stringify(registration).includes('NEVER_DISPLAY'));
 assert.deepEqual(calls.at(-1).args, {
   p_request_id: 'req-1', p_plate: 'ABC-123', p_expected_truck_id: null, p_existing_driver_id: null,
   p_full_name: 'James Obi', p_phone_number: other.phoneNumber, p_email: null,
-  p_bank_name: 'Example Bank', p_account_number: '0123456789', p_account_name: 'James Obi',
 });
+assert(!Object.keys(calls.at(-1).args).some(key => /bank|account|payment/i.test(key)));
 const existingRequest = { requestId: 'req-2', plate: 'NEW-123', expectedTruckId: null, existingDriverId: other.id, newDriver: null };
-registrationResponse = { ...registrationResponse, request_id: 'req-2', payment_details_captured: false,
+registrationResponse = { ...registrationResponse, request_id: 'req-2',
   driver: { ...registrationResponse.driver, created: false } };
 await service.registerLoadingParticipant(existingRequest);
 assert.equal(calls.at(-1).args.p_existing_driver_id, other.id);
-assert.equal(calls.at(-1).args.p_bank_name, null);
+assert(!Object.keys(calls.at(-1).args).some(key => /bank|account|payment/i.test(key)));
 registrationError = { code: 'PGRST000', message: 'Private transport detail' };
 await assert.rejects(service.registerLoadingParticipant(existingRequest), { message: 'Registration outcome unknown' });
 registrationError = null;
 registrationResponse = { ok: false, code: 'DRIVER_MATCH_REQUIRES_REVIEW', details: {} };
 assert.deepEqual(await service.registerLoadingParticipant(request),
   { kind: 'business_failure', code: 'DRIVER_MATCH_REQUIRES_REVIEW' });
-console.log('PASS safe RPC contracts, write-only banking and ambiguous transport result');
+console.log('PASS payment-free RPC contract, sensitive-response exclusion and ambiguous transport result');
 
 const { DriverWorkflowController, RegistrationRequestLifecycle, validateNewDriver } = load('src/features/loading/utils/driverWorkflowController.ts');
 const browserIds = new RegistrationRequestLifecycle();
@@ -112,7 +111,7 @@ assert.equal(browserIds.current(), generatedId);
 browserIds.changed();
 assert.notEqual(browserIds.current(), generatedId);
 assert.equal(validateNewDriver(sensitive), null);
-assert.match(validateNewDriver({ ...sensitive, accountNumber: '123456789' }), /10 digits/);
+assert.match(validateNewDriver({ ...sensitive, email: 'invalid-address' }), /email/i);
 assert.equal(validateNewDriver({ ...sensitive, email: '' }), null);
 let uuid = 0;
 let refreshes = 0;
@@ -125,7 +124,7 @@ let registerBehavior = async value => {
       normalizedRegistration: value.plate.replace(/-/g, ''), created: !value.expectedTruckId },
     driver: { id: value.existingDriverId ?? 'driver-new', fullName: value.newDriver?.fullName ?? other.fullName,
       phoneNumber: value.newDriver?.phoneNumber ?? other.phoneNumber, email: value.newDriver?.email || null, created: !value.existingDriverId },
-    paymentDetailsCaptured: !value.existingDriverId, defaultDriverChanged: false };
+    defaultDriverChanged: false };
 };
 let pendingSearch;
 let state;
@@ -175,12 +174,12 @@ assert.equal(registrations.at(-1).expectedTruckId, truck.id);
 assert.equal(registrations.at(-1).existingDriverId, null);
 assert.equal(state.selected.driver.id, 'driver-new');
 assert.equal(state.selected.makeRegular, false);
-assert.equal(state.form.accountNumber, '');
+assert.equal(state.form.email, '');
 workflow.setMakeRegular(true);
 assert.equal(state.selected.makeRegular, true);
 workflow.reset();
 assert.equal(state.selected, null);
-assert.equal(state.form.accountNumber, '');
+assert.equal(state.form.email, '');
 console.log('PASS known-truck selection, stale search, new actual driver and local regular-driver intent');
 
 workflow.setContext({ kind: 'unknown', plate: 'NEW-123', assignmentId: 'assignment-1' });
@@ -216,14 +215,14 @@ assert(html.includes('Possible existing driver') && html.includes(other.fullName
 assert(!html.includes('NEVER_DISPLAY') && !html.includes('0123456789'));
 workflow.selectExisting(other);
 assert.equal(state.registration.mode, 'new_truck_existing_driver');
-assert.equal(state.form.accountNumber, '');
+assert.equal(state.form.email, '');
 registerBehavior = async value => {
   registrations.push(value);
   return { kind: 'success', requestId: value.requestId,
     truck: { id: 'truck-new', registrationNumber: value.plate,
       normalizedRegistration: value.plate.replace(/-/g, ''), created: true },
     driver: { id: other.id, fullName: other.fullName, phoneNumber: other.phoneNumber,
-      email: other.email, created: false }, paymentDetailsCaptured: false, defaultDriverChanged: false };
+      email: other.email, created: false }, defaultDriverChanged: false };
 };
 await workflow.submitRegistration();
 assert.notEqual(registrations.at(-1).requestId, duplicateAttemptId);
@@ -241,8 +240,8 @@ workflow.backFromDuplicate();
 workflow.editForm('phoneNumber', '+2348099999999');
 assert.equal(state.registration.status, 'editing');
 workflow.cancelRegistration();
-assert.equal(state.form.accountNumber, '');
-console.log('PASS unknown-truck modes, duplicate-phone review, double-submit guard and banking cleanup');
+assert.equal(state.form.email, '');
+console.log('PASS unknown-truck modes, duplicate-phone review, double-submit guard and payment-free cleanup');
 
 workflow.startUnknownRegistration();
 for (const [field, value] of Object.entries(sensitive)) workflow.editForm(field, value);
@@ -252,7 +251,7 @@ assert.equal(state.registration.status, 'ambiguous');
 const ambiguousId = registrations.at(-1).requestId;
 await workflow.submitRegistration();
 assert.equal(registrations.at(-1).requestId, ambiguousId, 'unchanged ambiguous retry reuses UUID');
-workflow.editForm('accountName', 'Another Name');
+workflow.editForm('email', 'another@example.invalid');
 await workflow.submitRegistration();
 assert.notEqual(registrations.at(-1).requestId, ambiguousId, 'changed payload gets new UUID');
 workflow.cancelRegistration();
@@ -261,10 +260,10 @@ for (const [field, value] of Object.entries(sensitive)) workflow.editForm(field,
 registerBehavior = async value => { registrations.push(value); return { kind: 'success', requestId: value.requestId,
   truck: { id: 'truck-new', registrationNumber: value.plate, normalizedRegistration: 'NEW456', created: true },
   driver: { id: 'driver-new', fullName: sensitive.fullName, phoneNumber: sensitive.phoneNumber, email: null, created: true },
-  paymentDetailsCaptured: true, defaultDriverChanged: false }; };
+  defaultDriverChanged: false }; };
 await workflow.submitRegistration();
 assert.equal(refreshes, 3);
-assert.equal(state.form.accountNumber, '');
+assert.equal(state.form.email, '');
 assert.notEqual(registrations.at(-1).requestId, ambiguousId);
 const successfulId = registrations.at(-1).requestId;
 workflow.setContext({ kind: 'unknown', plate: 'NEW-789', assignmentId: 'assignment-1' });
@@ -284,7 +283,7 @@ assert(html.includes('Set James Obi as this truck'));
 assert(!html.includes('bank_name') && !html.includes('NEVER_DISPLAY'));
 workflow.startNewDriver();
 html = renderToStaticMarkup(React.createElement(DriverIdentification, { state, ...callbacks }));
-assert(html.includes('Payment Details') && html.includes('name="accountNumber"') && html.includes('type="text"'));
+assert(html.includes('Email (optional)') && html.includes('name="email"') && !html.match(/bank|account|payment/i));
 assert(html.includes('name="email"') && !html.includes('name="email" type="email" required'));
 assert(!calls.some(call => call.name === 'create_loading_trip_v2'));
 console.log('PASS field UI terminology, conditional regular-driver option and no trip opening');
@@ -306,15 +305,15 @@ const savedResponse = {
   kind: 'success', requestId: 'saved-request',
   truck: { id: 'saved-truck', registrationNumber: 'NEW-123', normalizedRegistration: 'NEW123', created: true },
   driver: { id: 'saved-driver', fullName: sensitive.fullName, phoneNumber: sensitive.phoneNumber, email: null, created: true },
-  paymentDetailsCaptured: true, defaultDriverChanged: false,
+  defaultDriverChanged: false,
 };
 const savedReceipt = registrationReceipt('NEW-123', 'assignment-1', savedResponse);
-assert(!JSON.stringify(savedReceipt).includes('0123456789'));
+assert(!JSON.stringify(savedReceipt).match(/bank|account|payment/i));
 const refreshed = { kind: 'known_ready', assignmentId: 'assignment-1',
   truck: { id: 'saved-truck', registrationNumber: 'NEW-123', normalizedRegistration: 'NEW123', isActive: true },
   driver: { id: 'saved-driver', fullName: sensitive.fullName, phoneNumber: sensitive.phoneNumber, email: null, isActive: true } };
 assert.equal(validateRegistrationRefresh(savedReceipt, savedResponse, refreshed).outcome.status, 'ready');
-const existingDriverResponse = { ...savedResponse, driver: { ...savedResponse.driver, created: false }, paymentDetailsCaptured: false };
+const existingDriverResponse = { ...savedResponse, driver: { ...savedResponse.driver, created: false } };
 assert.equal(validateRegistrationRefresh(savedReceipt, existingDriverResponse, refreshed).outcome.status, 'ready');
 const newModeRequest = { requestId: 'saved-request', plate: 'NEW-123', expectedTruckId: null,
   existingDriverId: null, newDriver: sensitive };
@@ -395,7 +394,7 @@ async function validateThroughController(lookup, expectedStatus, response = save
   }
   await controller.submitRegistration();
   assert.equal(snapshot.saved.status, expectedStatus);
-  assert.equal(snapshot.form.accountNumber, '');
+  assert.equal(snapshot.form.email, '');
   assert.equal(accepted.length, expectedStatus === 'ready' || lookup.kind === 'inactive_driver' ? 1 : 0);
   return snapshot;
 }
@@ -423,7 +422,7 @@ assert.equal(state.selected.driver.id, other.id);
 workflow.startNewDriver();
 assert.equal(state.registration.mode, 'existing_truck_new_driver');
 workflow.cancelRegistration();
-assert.equal(state.form.accountNumber, '');
+assert.equal(state.form.email, '');
 console.log('PASS inactive regular driver cannot be selected but has replacement paths');
 
 let rejectOldSearch;
@@ -466,7 +465,7 @@ releaseLateRegistration();
 await pendingRegistration;
 assert.equal(lateState.context.plate, 'OTHER-999');
 assert.equal(lateState.saved, null);
-assert.equal(lateState.form.accountNumber, '');
+assert.equal(lateState.form.email, '');
 assert.equal(lateReceipt.plate, 'NEW-123');
 assert(!JSON.stringify(lateReceipt).includes('0123456789'));
 console.log('PASS late successful registration reports safe notice without replacing new context');
@@ -481,7 +480,7 @@ const replacementWorkflow = new DriverWorkflowController(
     return { kind: 'success', requestId: requestValue.requestId,
       truck: { id: 'saved-truck', registrationNumber: 'NEW-123', normalizedRegistration: 'NEW123', created: false },
       driver: { id: 'replacement-driver', fullName: sensitive.fullName, phoneNumber: sensitive.phoneNumber,
-        email: null, created: true }, paymentDetailsCaptured: true, defaultDriverChanged: false };
+        email: null, created: true }, defaultDriverChanged: false };
   },
   async () => ({ ...refreshed, kind: 'inactive_driver', driver: { ...refreshed.driver, isActive: false } }),
   () => true, value => { replacementState = value; }, () => crypto.randomUUID(),
@@ -500,7 +499,7 @@ await replacementWorkflow.submitRegistration();
 assert.equal(replacementCalls, 2);
 assert.equal(replacementState.selected.driver.id, 'replacement-driver');
 assert.equal(replacementState.selected.makeRegular, false);
-assert.equal(replacementState.form.accountNumber, '');
+assert.equal(replacementState.form.email, '');
 console.log('PASS saved truck with inactive regular driver can register a replacement');
 
 const { RegistrationDialog } = load('src/features/loading/components/RegistrationDialog.tsx');

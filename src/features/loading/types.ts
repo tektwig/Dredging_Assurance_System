@@ -44,9 +44,6 @@ export type NewDriverForm = {
   fullName: string;
   phoneNumber: string;
   email: string;
-  bankName: string;
-  accountNumber: string;
-  accountName: string;
 };
 
 export type RegistrationMode = 'new_truck_new_driver' | 'new_truck_existing_driver' | 'existing_truck_new_driver';
@@ -63,14 +60,11 @@ export type RegistrationFailureCode =
   | 'PLATE_ALREADY_REGISTERED' | 'TRUCK_NOT_FOUND' | 'TRUCK_PLATE_MISMATCH'
   | 'INACTIVE_TRUCK' | 'OPEN_TRIP_EXISTS' | 'BLOCKING_EXCEPTION'
   | 'DRIVER_NOT_FOUND' | 'INACTIVE_DRIVER' | 'INVALID_DRIVER_NAME'
-  | 'INVALID_PHONE' | 'INVALID_EMAIL' | 'DRIVER_MATCH_REQUIRES_REVIEW'
-  | 'PAYMENT_DETAILS_REQUIRED' | 'INVALID_BANK_NAME' | 'INVALID_ACCOUNT_NUMBER'
-  | 'INVALID_ACCOUNT_NAME';
+  | 'INVALID_PHONE' | 'INVALID_EMAIL' | 'INVALID_TRUCK_DETAILS' | 'DRIVER_MATCH_REQUIRES_REVIEW';
 export type RegistrationSafeResponse = {
   kind: 'success'; requestId: string;
   truck: { id: string; registrationNumber: string; normalizedRegistration: string; created: boolean };
   driver: { id: string; fullName: string; phoneNumber: string; email: string | null; created: boolean };
-  paymentDetailsCaptured: boolean;
   defaultDriverChanged: false;
 };
 export type RegistrationResult = RegistrationSafeResponse | { kind: 'business_failure'; code: RegistrationFailureCode };

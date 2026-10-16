@@ -9,8 +9,7 @@ const registrationCodes: readonly RegistrationFailureCode[] = [
   'PLATE_ALREADY_REGISTERED', 'TRUCK_NOT_FOUND', 'TRUCK_PLATE_MISMATCH',
   'INACTIVE_TRUCK', 'OPEN_TRIP_EXISTS', 'BLOCKING_EXCEPTION',
   'DRIVER_NOT_FOUND', 'INACTIVE_DRIVER', 'INVALID_DRIVER_NAME', 'INVALID_PHONE',
-  'INVALID_EMAIL', 'DRIVER_MATCH_REQUIRES_REVIEW', 'PAYMENT_DETAILS_REQUIRED',
-  'INVALID_BANK_NAME', 'INVALID_ACCOUNT_NUMBER', 'INVALID_ACCOUNT_NAME',
+  'INVALID_EMAIL', 'DRIVER_MATCH_REQUIRES_REVIEW', 'INVALID_TRUCK_DETAILS',
 ];
 const siteCodes = ['SITE_ASSIGNMENT_REQUIRED', 'INVALID_SITE_ASSIGNMENT', 'INACTIVE_SITE'] as const;
 
@@ -67,7 +66,7 @@ export async function lookupLoadingDriverById(driverId: string, assignmentId: st
 export async function registerLoadingParticipant(request: RegistrationRequest): Promise<RegistrationResult> {
   if (!supabase) throw new RegistrationOutcomeUnknownError();
   const newDriver = request.newDriver;
-  const { data, error } = await supabase.rpc('register_loading_participant', {
+  const { data, error } = await supabase.rpc('register_loading_participant_v3', {
     p_request_id: request.requestId,
     p_plate: request.plate,
     p_expected_truck_id: request.expectedTruckId,
@@ -75,9 +74,6 @@ export async function registerLoadingParticipant(request: RegistrationRequest): 
     p_full_name: newDriver?.fullName ?? null,
     p_phone_number: newDriver?.phoneNumber ?? null,
     p_email: newDriver?.email.trim() || null,
-    p_bank_name: newDriver?.bankName ?? null,
-    p_account_number: newDriver?.accountNumber ?? null,
-    p_account_name: newDriver?.accountName ?? null,
   });
   if (error?.code === '42501') throw new LoadingAuthorizationError();
   if (error) throw new RegistrationOutcomeUnknownError();
@@ -92,13 +88,12 @@ export async function registerLoadingParticipant(request: RegistrationRequest): 
     || typeof truck.normalized_registration !== 'string' || typeof truck.created !== 'boolean'
     || typeof driver.id !== 'string' || typeof driver.full_name !== 'string'
     || typeof driver.phone_number !== 'string' || (driver.email !== null && typeof driver.email !== 'string')
-    || typeof driver.created !== 'boolean' || typeof row.payment_details_captured !== 'boolean'
+    || typeof driver.created !== 'boolean'
     || row.default_driver_changed !== false) throw new RegistrationOutcomeUnknownError();
   return { kind: 'success', requestId: row.request_id,
     truck: { id: truck.id, registrationNumber: truck.registration_number,
       normalizedRegistration: truck.normalized_registration, created: truck.created },
     driver: { id: driver.id, fullName: driver.full_name, phoneNumber: driver.phone_number,
       email: driver.email, created: driver.created },
-    paymentDetailsCaptured: row.payment_details_captured,
     defaultDriverChanged: false };
 }

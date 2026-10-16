@@ -118,6 +118,13 @@ export interface Database {
         p_bank_name?: string | null; p_account_number?: string | null;
         p_account_name?: string | null;
       }; Returns: unknown };
+      register_loading_participant_v3: { Args: {
+        p_request_id: string; p_plate: string; p_expected_truck_id?: string | null;
+        p_existing_driver_id?: string | null; p_full_name?: string | null;
+        p_phone_number?: string | null; p_email?: string | null;
+        p_capacity_tonnes?: number; p_truck_type?: string;
+        p_owner_name?: string; p_owner_contact?: string | null; p_driver_license?: string | null;
+      }; Returns: unknown };
       create_loading_trip_v2: { Args: {
         p_request_id: string; p_plate: string; p_driver_id: string; p_expected_assignment_id: string;
         p_capture_method: string; p_captured_at: string; p_estimated_quantity_tonnes: number;

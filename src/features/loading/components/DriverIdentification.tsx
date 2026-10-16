@@ -36,11 +36,8 @@ const registrationMessages: Record<RegistrationFailureCode, string> = {
   INVALID_DRIVER_NAME: 'Check the driver’s full name.',
   INVALID_PHONE: 'Check the driver’s phone number.',
   INVALID_EMAIL: 'Check the driver’s email address.',
+  INVALID_TRUCK_DETAILS: 'Check the truck details.',
   DRIVER_MATCH_REQUIRES_REVIEW: 'A driver may already use this phone number. Review before continuing.',
-  PAYMENT_DETAILS_REQUIRED: 'Complete all required payment details.',
-  INVALID_BANK_NAME: 'Check the bank name.',
-  INVALID_ACCOUNT_NUMBER: 'The account number must be exactly 10 digits.',
-  INVALID_ACCOUNT_NAME: 'Check the account name.',
 };
 
 function DriverSearch({ search, onEdit, onSearch, onSelect }: {
@@ -82,12 +79,6 @@ function NewDriverFields({ state, onEdit, disabled }: {
     {field('fullName', 'Full Name', true, { maxLength: 200 })}
     {field('phoneNumber', 'Phone Number', true, { type: 'tel', maxLength: 40 })}
     {field('email', 'Email (optional)', false, { type: 'email', maxLength: 254 })}
-    <div className="loading-payment-fields"><h4>Payment Details</h4>
-      <p>Required for driver payout setup. Account ownership is not verified here.</p>
-      {field('bankName', 'Bank Name', true, { maxLength: 200 })}
-      {field('accountNumber', 'Account Number', true, { inputMode: 'numeric', maxLength: 10 })}
-      {field('accountName', 'Account Name', true, { maxLength: 200 })}
-    </div>
   </div>;
 }
 

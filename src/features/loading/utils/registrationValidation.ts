@@ -15,12 +15,12 @@ export function registrationResponseMatchesMode(request: RegistrationRequest, re
   if (request.expectedTruckId === null) {
     if (!response.truck.created) return false;
     if (request.existingDriverId !== null) return !response.driver.created
-      && response.driver.id === request.existingDriverId && !response.paymentDetailsCaptured;
-    return newDriverMatches && response.driver.created && response.paymentDetailsCaptured;
+      && response.driver.id === request.existingDriverId;
+    return newDriverMatches && response.driver.created;
   }
   return request.existingDriverId === null && !response.truck.created
     && response.truck.id === request.expectedTruckId
-    && newDriverMatches && response.driver.created && response.paymentDetailsCaptured;
+    && newDriverMatches && response.driver.created;
 }
 
 export function registrationReceipt(

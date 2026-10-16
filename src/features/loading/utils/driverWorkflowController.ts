@@ -3,7 +3,7 @@ import { LoadingAuthorizationError, RegistrationOutcomeUnknownError } from '../s
 import { registrationReceipt, registrationResponseMatchesMode, validateRegistrationRefresh } from './registrationValidation';
 
 export const emptyDriverForm = (): NewDriverForm => ({
-  fullName: '', phoneNumber: '', email: '', bankName: '', accountNumber: '', accountName: '',
+  fullName: '', phoneNumber: '', email: '',
 });
 
 export type DriverContext =
@@ -40,9 +40,6 @@ export function validateNewDriver(form: NewDriverForm): string | null {
   if (!form.fullName.trim() || form.fullName.trim().length > 200) return 'Enter the driver’s full name.';
   if (!form.phoneNumber.trim() || form.phoneNumber.length > 40) return 'Enter a valid phone number.';
   if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return 'Check the email address.';
-  if (!form.bankName.trim() || form.bankName.trim().length > 200) return 'Enter the bank name.';
-  if (!/^[0-9]{10}$/.test(form.accountNumber.trim())) return 'Account number must be exactly 10 digits.';
-  if (!form.accountName.trim() || form.accountName.trim().length > 200) return 'Enter the account name.';
   return null;
 }
 
