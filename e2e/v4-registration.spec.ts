@@ -229,7 +229,7 @@ test('V4 registration, safe replay, existing driver, and trip opening use the re
   expect(firstResponse.status()).toBe(200);
   expect(firstBody.ok === true && typeof firstBody.request_id === 'string').toBe(true);
   expect(containsRestrictedBankInformation(JSON.stringify(firstBody))).toBe(false);
-  await expect(page.getByRole('button', { name: 'Confirm Truck' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByLabel('Estimated Tonnage (tonnes)')).toBeVisible({ timeout: 30_000 });
   expect(calls.length).toBeGreaterThan(0);
 
   const newDriverCall = calls.find(call => normalizePlate(call.payload.p_plate) === 'KJA102AB');
@@ -264,7 +264,6 @@ test('V4 registration, safe replay, existing driver, and trip opening use the re
   expect(duplicateBody.ok === false && duplicateBody.code === 'PLATE_ALREADY_REGISTERED').toBe(true);
   expect(containsRestrictedBankInformation(JSON.stringify(duplicateBody))).toBe(false);
 
-  await page.getByRole('button', { name: 'Confirm Truck' }).click();
   await page.getByLabel('Estimated Tonnage (tonnes)').fill('12.50');
   await page.getByRole('button', { name: 'Review Trip' }).click();
   await page.getByRole('button', { name: 'Open Trip' }).click();
@@ -287,7 +286,7 @@ test('V4 registration, safe replay, existing driver, and trip opening use the re
   expect(existingResponse.status()).toBe(200);
   expect(existingBody.ok === true).toBe(true);
   expect(containsRestrictedBankInformation(JSON.stringify(existingBody))).toBe(false);
-  await expect(page.getByRole('button', { name: 'Confirm Truck' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByLabel('Estimated Tonnage (tonnes)')).toBeVisible({ timeout: 30_000 });
   const existingDriverCall = calls.slice(callsBeforeExisting).find(call => normalizePlate(call.payload.p_plate) === 'KJA103AB');
   expect(existingDriverCall !== undefined).toBe(true);
   expect(typeof existingDriverCall!.payload.p_existing_driver_id === 'string').toBe(true);
@@ -316,7 +315,8 @@ test('Operations Manager authenticates into the Operations route', async ({ page
   const { guard } = installNetworkGuard(page);
   await signIn(page, requiredEnv('E2E_OPERATIONS_EMAIL'), requiredEnv('E2E_OPERATIONS_PASSWORD'));
   await expect(page).toHaveURL(/\/operations(?:\/|$)/);
-  await expect(page.getByRole('heading', { name: /Operations/ }).first()).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Operations navigation' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible();
   expect(guard.blockedSupabaseHosts.length).toBe(0);
   expect(guard.blockedExternalHosts.length).toBe(0);
   expect(guard.misdirectedSupabaseOrigins.length).toBe(0);
@@ -325,6 +325,7 @@ test('Operations Manager authenticates into the Operations route', async ({ page
 test('unauthorized and unassigned accounts cannot enter assigned Loading operations', async ({ page }) => {
   const { guard: financeGuard } = installNetworkGuard(page);
   await signIn(page, requiredEnv('E2E_FINANCE_EMAIL'), requiredEnv('E2E_FINANCE_PASSWORD'));
+  await expect(page).toHaveURL(/\/access-denied$/);
   await page.goto('/loading');
   await expect(page).toHaveURL(/\/access-denied$/);
   expect(financeGuard.blockedSupabaseHosts.length).toBe(0);
