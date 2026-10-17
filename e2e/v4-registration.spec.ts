@@ -164,11 +164,29 @@ function normalizePlate(value: unknown): string {
 }
 
 async function capturePlate(page: Page, text: string) {
+  let ocrCompleted = false;
+  const trackOcrCompletion = (message: import('@playwright/test').ConsoleMessage) => {
+    if (message.text().startsWith('[OCR Process Result]:')) ocrCompleted = true;
+  };
+  page.on('console', trackOcrCompletion);
   await drawSyntheticPlate(page, text);
   await page.getByRole('button', { name: 'Scan Number Plate' }).click();
   await expect(page.getByRole('button', { name: 'Capture Plate' })).toBeVisible();
   await page.getByRole('button', { name: 'Capture Plate' }).click();
-  await expect(page.getByText(/Truck not registered|Truck found/)).toBeVisible({ timeout: 90_000 });
+  try {
+    await expect(page.getByText(/Truck not registered|Truck found/)).toBeVisible({ timeout: 90_000 });
+  } catch {
+    const scannerErrorVisible = await page.locator('.loading-scan-error').isVisible();
+    const processingVisible = await page.getByRole('status').filter({
+      hasText: /Preparing plate image|Loading on-device OCR model|Reading the plate image/,
+    }).isVisible();
+    const diagnostic = scannerErrorVisible ? 'ocr-error-state'
+      : ocrCompleted ? 'ocr-finished-before-truck-lookup'
+        : processingVisible ? 'ocr-still-processing' : 'no-ocr-terminal-state';
+    throw new Error(`Synthetic plate capture did not reach truck lookup (${diagnostic}).`);
+  } finally {
+    page.off('console', trackOcrCompletion);
+  }
 }
 
 function containsRestrictedBankInformation(responseBody: string): boolean {
