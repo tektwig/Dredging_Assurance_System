@@ -163,6 +163,6 @@ docker exec -i "${db_container}" psql -X -v ON_ERROR_STOP=1 -U postgres -d postg
   >"${diagnostic_root}/e2e-database-verification.log" 2>&1 \
   || { tail -n 35 "${diagnostic_root}/e2e-database-verification.log" | redact >&2 || true; fail 'Post-browser privileged persistence verification failed.'; }
 browser_assertions="$(grep -c 'ASSERTION PASS:' "${diagnostic_root}/e2e-database-verification.log" || true)"
-[[ "${browser_assertions}" == '9' ]] || fail "Expected 9 privileged post-browser persistence assertions; observed ${browser_assertions}."
+[[ "${browser_assertions}" == '10' ]] || fail "Expected 10 privileged post-browser persistence assertions; observed ${browser_assertions}."
 cat "${diagnostic_root}/e2e-database-verification.log"
 printf 'PASS: V4 browser registration, trip opening, role routing and restricted database persistence verified (assertions=%s).\n' "${browser_assertions}"
