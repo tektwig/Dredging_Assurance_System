@@ -172,17 +172,27 @@ async function capturePlate(page: Page, text: string) {
   await drawSyntheticPlate(page, text);
   await page.getByRole('button', { name: 'Scan Number Plate' }).click();
   await expect(page.getByRole('button', { name: 'Capture Plate' })).toBeVisible();
+  const preview = page.locator('video[aria-label="Live plate camera preview"]');
+  await expect.poll(() => preview.evaluate(element => {
+    const video = element as HTMLVideoElement;
+    return video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+      && video.videoWidth > 0 && video.videoHeight > 0;
+  }), { timeout: 15_000 }).toBe(true);
   await page.getByRole('button', { name: 'Capture Plate' }).click();
   try {
     await expect(page.getByText(/Truck not registered|Truck found/)).toBeVisible({ timeout: 90_000 });
   } catch {
     const scannerErrorVisible = await page.locator('.loading-scan-error').isVisible();
+    const cameraErrorVisible = await page.getByRole('alert').filter({
+      hasText: /Camera could not start|Camera unavailable|Camera permission was denied/,
+    }).isVisible();
     const processingVisible = await page.getByRole('status').filter({
       hasText: /Preparing plate image|Loading on-device OCR model|Reading the plate image/,
     }).isVisible();
-    const diagnostic = scannerErrorVisible ? 'ocr-error-state'
-      : ocrCompleted ? 'ocr-finished-before-truck-lookup'
-        : processingVisible ? 'ocr-still-processing' : 'no-ocr-terminal-state';
+    const diagnostic = cameraErrorVisible ? 'camera-frame-capture-failed'
+      : scannerErrorVisible ? 'ocr-error-state'
+        : ocrCompleted ? 'ocr-finished-before-truck-lookup'
+          : processingVisible ? 'ocr-still-processing' : 'no-ocr-terminal-state';
     throw new Error(`Synthetic plate capture did not reach truck lookup (${diagnostic}).`);
   } finally {
     page.off('console', trackOcrCompletion);
