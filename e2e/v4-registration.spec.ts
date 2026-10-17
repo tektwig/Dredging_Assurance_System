@@ -122,7 +122,6 @@ async function installSyntheticCamera(page: Page) {
   await page.addInitScript(() => {
     let plateText = 'KJA 102 AB';
     let frame: HTMLCanvasElement | null = null;
-    let stream: MediaStream | null = null;
     const redraw = () => {
       if (!frame) return;
       const context = frame.getContext('2d');
@@ -154,8 +153,7 @@ async function installSyntheticCamera(page: Page) {
           redraw();
           window.setInterval(redraw, 250);
         }
-        if (!stream) stream = frame.captureStream(5);
-        return stream;
+        return frame.captureStream(5);
       },
     });
   });
@@ -322,7 +320,7 @@ test('Operations Manager authenticates into the Operations route', async ({ page
   expect(guard.misdirectedSupabaseOrigins.length).toBe(0);
 });
 
-test('unauthorized and unassigned accounts cannot enter assigned Loading operations', async ({ page }) => {
+test('Finance Officer cannot enter Loading operations', async ({ page }) => {
   const { guard: financeGuard } = installNetworkGuard(page);
   await signIn(page, requiredEnv('E2E_FINANCE_EMAIL'), requiredEnv('E2E_FINANCE_PASSWORD'));
   await expect(page).toHaveURL(/\/access-denied$/);
@@ -331,7 +329,9 @@ test('unauthorized and unassigned accounts cannot enter assigned Loading operati
   expect(financeGuard.blockedSupabaseHosts.length).toBe(0);
   expect(financeGuard.blockedExternalHosts.length).toBe(0);
   expect(financeGuard.misdirectedSupabaseOrigins.length).toBe(0);
+});
 
+test('unassigned Loading Officer cannot process trucks without a site assignment', async ({ page }) => {
   const { guard: unassignedGuard } = installNetworkGuard(page);
   await signIn(page, requiredEnv('E2E_UNASSIGNED_EMAIL'), requiredEnv('E2E_UNASSIGNED_PASSWORD'));
   await expect(page).toHaveURL(/\/loading$/);
