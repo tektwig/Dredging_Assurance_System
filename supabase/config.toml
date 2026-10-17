@@ -10,6 +10,7 @@ verify_jwt = false
 
 [functions.process-waybill-pdfs]
 verify_jwt = false
+static_files = ["./functions/process-waybill-pdfs/assets/trakflit-logo.jpg"]
 
 [functions.create-operational-user]
 verify_jwt = true

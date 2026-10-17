@@ -2,6 +2,14 @@ import { supabase } from '../../../lib/supabase';
 import { normalizePageRequest } from '../../../types/listQuery';
 
 export type PdfStatus = 'pending' | 'processing' | 'ready' | 'failed';
+export type SecurePdfStatus = PdfStatus | 'blocked_missing_bank_details' | 'blocked_bank_details_unverified' | 'not_available';
+export type WaybillCopyManagementState = {
+  driver_pdf_status: SecurePdfStatus;
+  driver_pdf_ready_at: string | null;
+  company_pdf_status: SecurePdfStatus;
+  company_pdf_ready_at: string | null;
+  company_pdf_held_for_missing_bank_details: boolean;
+};
 export type DeliveryStatus = 'pending' | 'processing' | 'sent' | 'failed'
   | 'blocked_missing_email' | 'blocked_configuration' | null;
 export type WaybillFilters = {
@@ -68,6 +76,10 @@ function timestamp(value: unknown): value is string { return text(value) && Numb
 function nullableTimestamp(value: unknown): value is string | null { return value === null || timestamp(value); }
 function pdfStatus(value: unknown): value is PdfStatus {
   return value === 'pending' || value === 'processing' || value === 'ready' || value === 'failed';
+}
+function securePdfStatus(value: unknown): value is SecurePdfStatus {
+  return pdfStatus(value) || value === 'blocked_missing_bank_details'
+    || value === 'blocked_bank_details_unverified' || value === 'not_available';
 }
 function deliveryStatus(value: unknown): value is DeliveryStatus {
   return value === null || value === 'pending' || value === 'processing' || value === 'sent'
@@ -171,6 +183,78 @@ export async function loadWaybillDetail(waybillId: string): Promise<WaybillDetai
   const result = await client().rpc('get_operations_waybill_detail', { p_invoice_id: waybillId });
   if (result.error) safeError(result.error, 'load');
   return parseWaybillDetail(result.data);
+}
+
+export function parseWaybillCopyManagementState(value: unknown, waybillId: string): WaybillCopyManagementState {
+  if (!Array.isArray(value) || value.length !== 1 || !record(value[0])) {
+    throw new Error('Invalid secure Waybill copy status response');
+  }
+  const row = value[0];
+  const expectedKeys = ['invoice_id','invoice_number','driver_pdf_status','driver_pdf_ready_at',
+    'company_pdf_status','company_pdf_ready_at','bank_verification_state','pending_bank_submission_id',
+    'latest_bank_snapshot_version','company_pdf_held_for_missing_bank_details'];
+  if (!exactKeys(row, expectedKeys) || row.invoice_id !== waybillId || !text(row.invoice_number)
+    || !securePdfStatus(row.driver_pdf_status) || !nullableTimestamp(row.driver_pdf_ready_at)
+    || !securePdfStatus(row.company_pdf_status) || !nullableTimestamp(row.company_pdf_ready_at)
+    || !['missing','pending_verification','correction_pending','verified','rejected'].includes(row.bank_verification_state as string)
+    || !nullableText(row.pending_bank_submission_id)
+    || !(row.latest_bank_snapshot_version === null || (Number.isSafeInteger(row.latest_bank_snapshot_version)
+      && (row.latest_bank_snapshot_version as number) > 0))
+    || typeof row.company_pdf_held_for_missing_bank_details !== 'boolean') {
+    throw new Error('Invalid secure Waybill copy status response');
+  }
+  return {
+    driver_pdf_status: row.driver_pdf_status,
+    driver_pdf_ready_at: row.driver_pdf_ready_at,
+    company_pdf_status: row.company_pdf_status,
+    company_pdf_ready_at: row.company_pdf_ready_at,
+    company_pdf_held_for_missing_bank_details: row.company_pdf_held_for_missing_bank_details,
+  };
+}
+
+export async function loadWaybillCopyManagementState(waybillId: string): Promise<WaybillCopyManagementState> {
+  const result = await client().rpc('get_operations_waybill_copy_management_state', { p_invoice_id: waybillId });
+  if (result.error) safeError(result.error, 'load secure Waybill copy status for');
+  return parseWaybillCopyManagementState(result.data, waybillId);
+}
+
+export async function downloadWaybillCopy(
+  waybillId: string,
+  waybillNumber: string,
+  copyKind: 'driver' | 'company',
+): Promise<void> {
+  const result = await client().rpc('get_operations_waybill_pdf_copy', {
+    p_invoice_id: waybillId,
+    p_copy_kind: copyKind,
+  });
+  if (result.error) safeError(result.error, 'authorize secure Waybill PDF download for');
+  const expectedBucket = copyKind === 'driver' ? 'waybill-driver-copies' : 'waybill-company-copies';
+  const basePath = waybillStoragePath(waybillNumber);
+  const rows = result.data;
+  if (!basePath || !Array.isArray(rows) || rows.length !== 1 || !record(rows[0])
+    || !exactKeys(rows[0], ['copy_kind','storage_bucket','storage_path','ready_at'])
+    || rows[0].copy_kind !== copyKind || rows[0].storage_bucket !== expectedBucket
+    || !timestamp(rows[0].ready_at) || !text(rows[0].storage_path)) {
+    throw new Error('Invalid secure Waybill PDF authorization response');
+  }
+  const path = rows[0].storage_path;
+  const year = basePath.split('/')[0];
+  const companyVersionPath = new RegExp(`^${year}/${waybillNumber}-company-v(?:[2-9]|[1-9][0-9]+)\\.pdf$`);
+  const validPath = copyKind === 'driver' ? path === basePath : path === basePath || companyVersionPath.test(path);
+  if (!validPath) throw new Error('Invalid secure Waybill PDF path');
+  const download = await client().storage.from(expectedBucket).download(path);
+  if (download.error || !download.data) throw new Error('Unable to download secure Waybill PDF');
+  const objectUrl = URL.createObjectURL(download.data);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = `${waybillNumber}-${copyKind}-copy.pdf`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 export async function loadDeliveryHistory(waybillId: string, page: number): Promise<Page<DeliveryAttempt> | null> {

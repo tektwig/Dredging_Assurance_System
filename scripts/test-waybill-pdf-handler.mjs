@@ -3,9 +3,10 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 
 const source = readFileSync('supabase/functions/process-waybill-pdfs/index.ts', 'utf8')
-  .replace(/^import .*;\r?\n/gm, '');
+  .replace(/^import .*;\r?\n/gm, '')
+  .replace("new URL('./assets/trakflit-logo.jpg', import.meta.url)", "'synthetic-logo-path'");
 const javascript = ts.transpileModule(
-  `const processWaybillPdfs = globalThis.__processWaybillPdfs;\nconst generateWaybillPdf = globalThis.__generateWaybillPdf;\n${source}`,
+  `const processWaybillPdfs = globalThis.__processWaybillPdfs;\nconst generateWaybillPdf = globalThis.__generateWaybillPdf;\nconst generateDriverWaybillPdf = globalThis.__generateDriverWaybillPdf;\nconst generateCompanyWaybillPdf = globalThis.__generateCompanyWaybillPdf;\n${source}`,
   { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } },
 ).outputText;
 const env = new Map();
@@ -14,15 +15,19 @@ let workerCalls = 0;
 const workerLimits = [];
 globalThis.Deno = {
   env: { get: name => env.get(name) },
+  async readFile() { return new Uint8Array([1, 2, 3]); },
   serve: value => { handler = value; },
 };
 globalThis.__processWaybillPdfs = async (config, _generatePdf, batchLimit) => {
   workerCalls++;
   assert.equal(config.serviceRoleKey, 'server-only-service-role-key');
   workerLimits.push(batchLimit);
-  return { claimed: 0, ready: 0, deferred: 0, unacknowledged: 0 };
+  return { claimed: 0, ready: 0, deferred: 0, unacknowledged: 0, legacy_claimed: 0,
+    driver_claimed: 0, company_claimed: 0, claim_errors: 0 };
 };
 globalThis.__generateWaybillPdf = async () => new Uint8Array();
+globalThis.__generateDriverWaybillPdf = async () => new Uint8Array();
+globalThis.__generateCompanyWaybillPdf = async () => new Uint8Array();
 await import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`);
 
 const workerSecret = 'waybill-worker-secret-with-at-least-32-characters';
@@ -42,7 +47,10 @@ env.set('SUPABASE_URL', 'https://project.example.invalid');
 env.set('SUPABASE_SERVICE_ROLE_KEY', serviceRoleKey);
 const response = await handler(request());
 assert.equal(response.status, 200);
-assert.deepEqual(await response.json(), { claimed: 0, ready: 0, deferred: 0, unacknowledged: 0 });
+assert.deepEqual(await response.json(), {
+  claimed: 0, ready: 0, deferred: 0, unacknowledged: 0, legacy_claimed: 0,
+  driver_claimed: 0, company_claimed: 0, claim_errors: 0,
+});
 assert.equal(response.headers.get('access-control-allow-origin'), null);
 assert.equal(workerCalls, 1);
 assert.deepEqual(workerLimits, [5]);

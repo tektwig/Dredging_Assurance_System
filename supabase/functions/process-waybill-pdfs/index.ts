@@ -1,5 +1,14 @@
 import { processWaybillPdfs, type WorkerConfig } from './worker.ts';
 import { generateWaybillPdf } from './pdf.ts';
+import { generateCompanyWaybillPdf, generateDriverWaybillPdf } from './secure_pdf.ts';
+import type { PdfGenerators } from './types.ts';
+
+const logoBytes = await Deno.readFile(new URL('./assets/trakflit-logo.jpg', import.meta.url));
+const pdfGenerators: PdfGenerators = {
+  legacy: generateWaybillPdf,
+  driver: snapshot => generateDriverWaybillPdf(snapshot, logoBytes),
+  company: snapshot => generateCompanyWaybillPdf(snapshot, logoBytes),
+};
 
 const env = (name: string): string => Deno.env.get(name)?.trim() ?? '';
 
@@ -49,7 +58,7 @@ Deno.serve(async (request: Request) => {
   try {
     const batchLimit = await readBatchLimit(request);
     if (batchLimit === null) return new Response('Invalid batch limit', { status: 400 });
-    const result = await processWaybillPdfs(config, generateWaybillPdf, batchLimit);
+    const result = await processWaybillPdfs(config, pdfGenerators, batchLimit);
     return Response.json(result);
   } catch {
     return new Response('Waybill PDF processing unavailable; queued work retained', { status: 503 });

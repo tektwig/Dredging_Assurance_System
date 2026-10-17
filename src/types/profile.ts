@@ -71,6 +71,8 @@ export interface Database {
         p_quick_filter?: string | null; p_date_from?: string | null; p_date_to?: string | null;
         p_pdf_status?: string | null; p_delivery_status?: string | null; p_payout_status?: string | null }; Returns: unknown };
       get_operations_waybill_detail: { Args: { p_invoice_id: string }; Returns: unknown };
+      get_operations_waybill_copy_management_state: { Args: { p_invoice_id: string }; Returns: unknown };
+      get_operations_waybill_pdf_copy: { Args: { p_invoice_id: string; p_copy_kind: 'driver' | 'company' }; Returns: unknown };
       get_operations_waybill_delivery_history: { Args: { p_invoice_id: string; p_page?: number; p_page_size?: number }; Returns: unknown };
       resend_operations_waybill: { Args: { p_invoice_id: string; p_audience: string; p_request_id: string;
         p_reason_code: string; p_duplicate_risk_confirmed: boolean }; Returns: unknown };

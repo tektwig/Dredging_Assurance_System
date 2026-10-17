@@ -4,15 +4,24 @@ import { Link, useParams } from 'react-router-dom';
 import { ListResultState } from '../../../components/data/ListResultState';
 import { PaginationControls } from '../../../components/data/PaginationControls';
 import {
-  downloadWaybill, loadDeliveryHistory, loadWaybillDetail, resendWaybill, retryWaybillDelivery,
-  type DeliveryAttempt, type DeliveryStatus, type Page, type WaybillDetail,
+  downloadWaybill, downloadWaybillCopy, loadDeliveryHistory, loadWaybillCopyManagementState,
+  loadWaybillDetail, resendWaybill, retryWaybillDelivery, type DeliveryAttempt, type DeliveryStatus,
+  type Page, type SecurePdfStatus, type WaybillCopyManagementState, type WaybillDetail,
 } from '../services/operationsWaybills';
 import { formatLagosDate } from './OperationsWaybillsRegister';
 import './waybills.css';
 
 type State = { status: 'loading' } | { status: 'error' } | { status: 'not-found' } | { status: 'ready'; data: WaybillDetail };
+type CopyState = { status: 'loading' } | { status: 'error' } | { status: 'ready'; data: WaybillCopyManagementState };
 function DetailField({ label, children }: { label: string; children: ReactNode }) {
   return <div><dt>{label}</dt><dd>{children ?? '—'}</dd></div>;
+}
+
+function secureCopyStatusLabel(status: SecurePdfStatus): string {
+  if (status === 'blocked_missing_bank_details') return 'Bank Details Required';
+  if (status === 'blocked_bank_details_unverified') return 'Bank Details Unverified';
+  if (status === 'not_available') return 'Not Available';
+  return status[0].toUpperCase() + status.slice(1);
 }
 
 function DeliveryRecovery({ detail, audience, status, onDone, onError }: {
@@ -85,10 +94,11 @@ function DeliveryRecovery({ detail, audience, status, onDone, onError }: {
   </section>;
 }
 
-export function OperationsWaybillDetailView({ state, history, historyError, historyPage, onHistoryPageChange, onRetry, onDownload, onRefresh, onActionError }: {
-  state: State; history: Page<DeliveryAttempt> | null; historyError: boolean; historyPage: number;
+export function OperationsWaybillDetailView({ state, copyState, history, historyError, historyPage, onHistoryPageChange, onRetry, onDownload, onCopyDownload, onRefresh, onActionError }: {
+  state: State; copyState: CopyState; history: Page<DeliveryAttempt> | null; historyError: boolean; historyPage: number;
   onHistoryPageChange: (page: number) => void; onRetry: () => void;
-  onDownload: (detail: WaybillDetail) => void; onRefresh: () => void; onActionError: (message: string) => void;
+  onDownload: (detail: WaybillDetail) => void; onCopyDownload: (kind: 'driver' | 'company', detail: WaybillDetail) => void;
+  onRefresh: () => void; onActionError: (message: string) => void;
 }) {
   if (state.status === 'loading') return <ListResultState status="loading" />;
   if (state.status === 'error') return <ListResultState status="error" message="Unable to load Waybill detail." onRetry={onRetry} />;
@@ -116,6 +126,26 @@ export function OperationsWaybillDetailView({ state, history, historyError, hist
       {document.ready_at && <p>Ready: {formatLagosDate(document.ready_at)}</p>}
       <button className="button secondary" type="button" disabled={document.status !== 'ready'}
         onClick={() => onDownload(state.data)}>Download private PDF</button></section>
+    <section className="card waybill-section" aria-labelledby="secure-waybill-copies-heading">
+      <h2 id="secure-waybill-copies-heading">Secure PDF copies</h2>
+      {copyState.status === 'loading' && <p role="status">Loading Driver and Company PDF statuses…</p>}
+      {copyState.status === 'error' && <p role="alert">Secure copy statuses are unavailable. The legacy PDF status above is unchanged.</p>}
+      {copyState.status === 'ready' && <div className="waybill-detail-grid">
+        <div><h3>Driver PDF</h3>
+          <p>Status: <strong>{secureCopyStatusLabel(copyState.data.driver_pdf_status)}</strong></p>
+          {copyState.data.driver_pdf_ready_at && <p>Ready: {formatLagosDate(copyState.data.driver_pdf_ready_at)}</p>}
+          <button className="button secondary" type="button" disabled={copyState.data.driver_pdf_status !== 'ready'}
+            onClick={() => onCopyDownload('driver', state.data)}>Download Driver Copy</button>
+        </div>
+        <div><h3>Company PDF</h3>
+          <p>Status: <strong>{secureCopyStatusLabel(copyState.data.company_pdf_status)}</strong></p>
+          {copyState.data.company_pdf_ready_at && <p>Ready: {formatLagosDate(copyState.data.company_pdf_ready_at)}</p>}
+          {copyState.data.company_pdf_held_for_missing_bank_details && <p role="status">Bank Details Required. Company PDF generation is held until verified banking information is available.</p>}
+          <button className="button secondary" type="button" disabled={copyState.data.company_pdf_status !== 'ready'}
+            onClick={() => onCopyDownload('company', state.data)}>Download Company Copy</button>
+        </div>
+      </div>}
+    </section>
     <section className="card waybill-section"><h2>Delivery</h2>
       <p className="muted">Company and driver deliveries are tracked independently.</p>
       <DeliveryRecovery detail={state.data} audience="driver" status={delivery.driver} onDone={onRefresh} onError={onActionError} />
@@ -140,6 +170,7 @@ export function OperationsWaybillDetailView({ state, history, historyError, hist
 export function OperationsWaybillDetail() {
   const { waybillId } = useParams();
   const [state, setState] = useState<State>({ status: 'loading' });
+  const [copyState, setCopyState] = useState<CopyState>({ status: 'loading' });
   const [history, setHistory] = useState<Page<DeliveryAttempt> | null>(null);
   const [historyError, setHistoryError] = useState(false);
   const [historyPage, setHistoryPage] = useState(1);
@@ -148,18 +179,23 @@ export function OperationsWaybillDetail() {
   const refresh = useCallback(() => setRevision(value => value + 1), []);
   useEffect(() => {
     let current = true;
-    setState({ status: 'loading' }); setHistory(null); setHistoryError(false);
-    if (!waybillId) { setState({ status: 'not-found' }); return; }
+    setState({ status: 'loading' }); setCopyState({ status: 'loading' }); setHistory(null); setHistoryError(false);
+    if (!waybillId) { setState({ status: 'not-found' }); setCopyState({ status: 'error' }); return; }
     void loadWaybillDetail(waybillId).then(data => {
       if (current) setState(data ? { status: 'ready', data } : { status: 'not-found' });
     }).catch(() => { if (current) setState({ status: 'error' }); });
+    void loadWaybillCopyManagementState(waybillId).then(data => {
+      if (current) setCopyState({ status: 'ready', data });
+    }).catch(() => { if (current) setCopyState({ status: 'error' }); });
     void loadDeliveryHistory(waybillId, historyPage).then(data => { if (current) setHistory(data); })
       .catch(() => { if (current) setHistoryError(true); });
     return () => { current = false; };
   }, [waybillId, historyPage, revision]);
   return <>{message && <p role="alert">{message}</p>}
-    <OperationsWaybillDetailView state={state} history={history} historyError={historyError} historyPage={historyPage}
+    <OperationsWaybillDetailView state={state} copyState={copyState} history={history} historyError={historyError} historyPage={historyPage}
       onHistoryPageChange={setHistoryPage} onRetry={refresh} onRefresh={refresh} onActionError={setMessage}
       onDownload={detail => { setMessage(''); void downloadWaybill(detail)
-        .catch(() => setMessage('Unable to download private Waybill PDF.')); }} /></>;
+        .catch(() => setMessage('Unable to download private Waybill PDF.')); }}
+      onCopyDownload={(kind, detail) => { setMessage(''); void downloadWaybillCopy(detail.waybill.id, detail.waybill.waybill_number, kind)
+        .catch(() => setMessage(`Unable to download secure ${kind} PDF copy.`)); }} /></>;
 }

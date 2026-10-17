@@ -14,6 +14,8 @@ const cache = new Map();
 const rpcCalls = [];
 let rpcHandler = async () => ({ data: null, error: null });
 let storagePath;
+let storageBucket;
+let copyDownloadOverride;
 
 function load(path) {
   const full = resolve(path);
@@ -39,8 +41,7 @@ function load(path) {
 overrides.set(resolve('src/lib/supabase.ts'), { supabase: {
   async rpc(name, args) { rpcCalls.push({ name, args }); return rpcHandler(name, args); },
   storage: { from(bucket) {
-    assert.equal(bucket, 'waybills');
-    return { async download(path) { storagePath = path; return { data: new Blob(['%PDF-mock']), error: null }; } };
+    return { async download(path) { storageBucket = bucket; storagePath = path; return { data: new Blob(['%PDF-mock']), error: null }; } };
   } },
 } });
 const service = load('src/features/operations/services/operationsWaybills.ts');
@@ -65,6 +66,10 @@ const detail = { invoice: { id: 'waybill-1', invoice_number: waybillNumber, trip
 const attempt = { notification_id: 'notification-1', audience: 'driver', sequence: 0,
   status: 'blocked_missing_email', attempts: 0, created_at: timestamp, sent_at: null,
   requested_reason_code: null, blocked_reason_code: 'missing_driver_email' };
+const copyStatus = { invoice_id: 'waybill-1', invoice_number: waybillNumber, driver_pdf_status: 'ready',
+  driver_pdf_ready_at: timestamp, company_pdf_status: 'blocked_missing_bank_details', company_pdf_ready_at: null,
+  bank_verification_state: 'missing', pending_bank_submission_id: null, latest_bank_snapshot_version: null,
+  company_pdf_held_for_missing_bank_details: true };
 
 const parsedRow = service.parseWaybillRow(row);
 assert.equal(parsedRow.waybill_number, waybillNumber);
@@ -80,6 +85,11 @@ console.log('PASS Waybill read models allowlist operational fields and exclude p
 rpcHandler = async (name, args) => ({ data: name === 'get_operations_waybills'
   ? { ...page([row]), page: args.p_page, page_size: args.p_page_size }
   : name === 'get_operations_waybill_detail' ? detail
+  : name === 'get_operations_waybill_copy_management_state' ? [copyStatus]
+  : name === 'get_operations_waybill_pdf_copy' ? copyDownloadOverride ?? [{ copy_kind: args.p_copy_kind,
+    storage_bucket: args.p_copy_kind === 'driver' ? 'waybill-driver-copies' : 'waybill-company-copies',
+    storage_path: args.p_copy_kind === 'company' ? '2026/WB-2026-000001-company-v2.pdf' : '2026/WB-2026-000001.pdf',
+    ready_at: timestamp }]
   : name === 'get_operations_waybill_delivery_history'
     ? { ...page([attempt]), page: args.p_page, page_size: args.p_page_size }
     : { notification_id: 'notification-1', status: 'pending', sequence: 0 }, error: null });
@@ -92,6 +102,12 @@ assert.deepEqual(rpcCalls[0], { name: 'get_operations_waybills', args: {
   p_delivery_status: 'blocked_missing_email',
 } });
 assert.equal((await service.loadWaybillDetail('waybill-1')).waybill.trip_number, 'TRP-000001');
+const secureStatus = await service.loadWaybillCopyManagementState('waybill-1');
+assert.equal(secureStatus.driver_pdf_status, 'ready');
+assert.equal(secureStatus.company_pdf_status, 'blocked_missing_bank_details');
+assert.equal(secureStatus.company_pdf_held_for_missing_bank_details, true);
+assert(!JSON.stringify(secureStatus).match(/account_number|bank_name|storage_path|pending_bank_submission_id/i));
+assert.throws(() => service.parseWaybillCopyManagementState([{ ...copyStatus, account_number: 'restricted' }], 'waybill-1'), /Invalid/);
 const deliveryHistory = await service.loadDeliveryHistory('waybill-1', 1);
 const parsedAttempt = deliveryHistory.items[0];
 assert.equal(parsedAttempt.audience, 'driver');
@@ -111,7 +127,21 @@ URL.createObjectURL = () => 'blob:mock'; URL.revokeObjectURL = () => {};
 try {
   await service.downloadWaybill(parsedDetail);
   assert.equal(storagePath, '2026/WB-2026-000001.pdf');
+  assert.equal(storageBucket, 'waybills');
   storagePath = undefined;
+  await service.downloadWaybillCopy('waybill-1', waybillNumber, 'driver');
+  assert.equal(storageBucket, 'waybill-driver-copies');
+  assert.equal(storagePath, '2026/WB-2026-000001.pdf');
+  storagePath = undefined;
+  await service.downloadWaybillCopy('waybill-1', waybillNumber, 'company');
+  assert.equal(storageBucket, 'waybill-company-copies');
+  assert.equal(storagePath, '2026/WB-2026-000001-company-v2.pdf');
+  storagePath = undefined;
+  copyDownloadOverride = [{ copy_kind: 'company', storage_bucket: 'waybill-company-copies',
+    storage_path: '2026/WB-2026-000001.pdf', ready_at: timestamp, bank_name: 'must-not-accept' }];
+  await assert.rejects(() => service.downloadWaybillCopy('waybill-1', waybillNumber, 'company'), /Invalid/);
+  assert.equal(storagePath, undefined);
+  copyDownloadOverride = undefined;
   await assert.rejects(() => service.downloadWaybill({ ...parsedDetail, document: {
     ...parsedDetail.document, storage_path: '2026/WB-2026-999999.pdf',
   } }), /Invalid/);
@@ -129,9 +159,10 @@ const registerReady = registerHtml({ status: 'ready', data: { items: [parsedRow]
 for (const text of ['Waybill #', 'Waybill PDF', 'Delivery Status', 'Parent company:', 'Driver:']) assert(registerReady.includes(text));
 assert(registerReady.includes('href="/operations/waybills/waybill-1"'));
 assert(!registerReady.match(/payout|payment|bank|account_number/i));
-const detailHtml = state => renderToStaticMarkup(React.createElement(router.MemoryRouter, null,
-  React.createElement(detailModule.OperationsWaybillDetailView, { state, history: { ...page([parsedAttempt]), pageSize: 25 },
-    historyError: false, historyPage: 1, onHistoryPageChange() {}, onRetry() {}, onDownload() {}, onRefresh() {}, onActionError() {} })));
+const detailHtml = (state, copyState = { status: 'ready', data: secureStatus }) => renderToStaticMarkup(React.createElement(router.MemoryRouter, null,
+  React.createElement(detailModule.OperationsWaybillDetailView, { state, copyState,
+    history: { ...page([parsedAttempt]), pageSize: 25 }, historyError: false, historyPage: 1,
+    onHistoryPageChange() {}, onRetry() {}, onDownload() {}, onCopyDownload() {}, onRefresh() {}, onActionError() {} })));
 const readyHtml = detailHtml({ status: 'ready', data: parsedDetail });
 for (const text of ['Correct the driver email', 'Add an email to the driver master record first.',
   'Company delivery is blocked until the parent company email recipient is configured.',
@@ -140,5 +171,9 @@ for (const text of ['Correct the driver email', 'Add an email to the driver mast
 }
 const acceptedHtml = detailHtml({ status: 'ready', data: { ...parsedDetail, delivery: { driver: 'sent', company: 'sent' } } });
 assert(acceptedHtml.includes('The email provider accepted the message. This does not confirm mailbox delivery.'));
-assert(!acceptedHtml.match(/payout|payment|bank|account_number/i));
-console.log('PASS responsive Waybill views show blocked recovery states and do not overstate provider acceptance');
+assert(acceptedHtml.includes('Driver PDF'));
+assert(acceptedHtml.includes('Company PDF'));
+assert(acceptedHtml.includes('Bank Details Required'));
+assert(!acceptedHtml.match(/payout|payment|bank_name|account_number|1234567890/i));
+assert(detailHtml({ status: 'ready', data: parsedDetail }, { status: 'error' }).includes('Secure copy statuses are unavailable'));
+console.log('PASS Waybill detail shows separate secure PDF states without exposing bank values or copy paths');
