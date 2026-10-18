@@ -45,6 +45,20 @@ overrides.set(resolve('src/lib/supabase.ts'), {
 const service = load('src/features/operations/services/operationsTrips.ts');
 const register = load('src/features/operations/trips/OperationsTripsRegister.tsx');
 const detailView = load('src/features/operations/trips/OperationsTripDetail.tsx');
+const payoutMigrationPath = 'supabase/migrations/20261018124936_restore_operations_trip_detail_payout.sql';
+const payoutMigration = readFileSync(payoutMigrationPath, 'utf8');
+const estimatedTonnageMigration = readFileSync('supabase/migrations/20260927001100_scan_first_estimated_tonnage.sql', 'utf8');
+const detailFunction = source => source.match(/create or replace function public\.get_operations_trip_detail\(p_trip_id uuid\) returns jsonb[\s\S]*?\$\$;/i)?.[0];
+const normalizeSql = source => source.replace(/\s+/g, ' ').trim().toLowerCase();
+assert(detailFunction(payoutMigration), 'Forward migration defines the trip-detail RPC');
+assert.equal(normalizeSql(detailFunction(payoutMigration)), normalizeSql(detailFunction(estimatedTonnageMigration)),
+  'Forward migration preserves the complete hardened function from the latest repository migration');
+assert.match(payoutMigration, /to_regprocedure\('public\.get_operations_trip_detail\(uuid\)'\) is null/i);
+assert.match(payoutMigration, /private\.require_role\(array\['operations_manager'\]::public\.app_role\[\]\)/i);
+assert.match(payoutMigration, /stable security definer set search_path\s*=\s*''/i);
+assert.doesNotMatch(detailFunction(payoutMigration), /payment\.(?:account_name|account_number|bank_name|driver_email|driver_phone|payment_reference)/i);
+assert.doesNotMatch(payoutMigration, /^\s*(?:grant|revoke)\b/im);
+console.log('PASS payout restoration migration preserves the hardened RPC contract, authorization, and grants');
 const timestamp = '2026-09-27T09:00:00.000Z';
 const tripRow = {
   trip_id: 'trip-1', trip_number: 'TRP-2026-001', truck_id: 'truck-1', truck_registration: 'ABC-001',
@@ -91,6 +105,15 @@ const parsedDetail = service.parseOperationsTripDetail(detail);
 assert.equal(parsedDetail.waybill.pdf_status, 'ready');
 assert.equal(parsedDetail.payout.status, 'pending');
 assert.equal(parsedDetail.exceptions[0].exception_type, 'dispute');
+assert.equal(parsedDetail.trip.estimated_quantity_tonnes, 10.25);
+assert.equal(parsedDetail.trip.quantity_tonnes, 12.5);
+const detailMissingEstimate = { ...detail, trip: { ...detail.trip } };
+delete detailMissingEstimate.trip.estimated_quantity_tonnes;
+assert.throws(() => service.parseOperationsTripDetail(detailMissingEstimate), /Invalid/);
+assert.throws(() => service.parseOperationsTripDetail({ ...detail,
+  trip: { ...detail.trip, account_number: 'unsafe' } }), /Invalid/);
+assert.throws(() => service.parseOperationsTripDetail({ ...detail,
+  trip: { ...detail.trip, estimated_quantity_tonnes: 'invalid' } }), /Invalid/);
 assert.throws(() => service.parseOperationsTripDetail({ ...detail, bank_name: 'unsafe' }), /Invalid/);
 assert.throws(() => service.parseOperationsTripDetail({ ...detail, payout: { ...detail.payout, account_number: 'unsafe' } }), /Invalid/);
 assert.throws(() => service.parseOperationsTripDetail({ ...detail, exceptions: [{ ...detail.exceptions[0], description: 'unsafe' }] }), /Invalid/);
@@ -126,8 +149,41 @@ for (const label of ['Trip #', 'Plate', 'Driver', 'Loading Site', 'Opened At', '
 assert(registerReadyHtml.includes('Driver At Loading'));
 assert(registerReadyHtml.includes('12.50 t'));
 assert(registerReadyHtml.includes('href="/operations/trips/trip-1"'));
+assert.match(readFileSync('src/App.tsx', 'utf8'), /path="trips\/:tripId"\s+element=\{<OperationsTripDetail\s*\/>\}/);
 assert(registerReadyHtml.includes('Trip register filters'));
 assert(!registerReadyHtml.includes('Cancel open trip'));
+rpcCalls.length = 0;
+rpcHandler = async name => {
+  assert.equal(name, 'get_operations_trip_detail');
+  return { data: detail, error: null };
+};
+const selectedTripDetail = await service.loadOperationsTripDetail('trip-1');
+assert.equal(selectedTripDetail.trip.trip_id, 'trip-1');
+assert.equal(selectedTripDetail.trip.estimated_quantity_tonnes, 10.25);
+assert.deepEqual(rpcCalls, [{ name: 'get_operations_trip_detail', args: { p_trip_id: 'trip-1' } }]);
+console.log('PASS Trips register link resolves to the Operations detail route and loads the selected trip');
+const invalidResponseLoad = async response => {
+  rpcHandler = async () => ({ data: response, error: null });
+  await assert.rejects(service.loadOperationsTripDetail('trip-1'), /Invalid Operations Trips response/);
+};
+const missingDriverName = { ...detail, trip: { ...detail.trip } };
+delete missingDriverName.trip.driver_name;
+await invalidResponseLoad(missingDriverName);
+await invalidResponseLoad(detailMissingEstimate);
+const detailMissingPayout = { ...detail };
+delete detailMissingPayout.payout;
+await invalidResponseLoad(detailMissingPayout);
+await invalidResponseLoad({ ...detail, trip: { ...detail.trip, bank_name: 'synthetic-sensitive-value' } });
+await invalidResponseLoad({ ...detail, trip: { ...detail.trip, quantity_tonnes: 'invalid' } });
+await invalidResponseLoad({ ...detail, trip: { ...detail.trip, opened_at: 'invalid-timestamp' } });
+await invalidResponseLoad({ ...detail, trip: { ...detail.trip, status: 'open' } });
+const rpcErrorMessage = 'synthetic-sensitive-value';
+rpcHandler = async () => ({ data: null, error: { code: '42501', message: rpcErrorMessage } });
+await assert.rejects(service.loadOperationsTripDetail('trip-1'), /access denied/);
+rpcHandler = async () => ({ data: null, error: { code: '23514', message: rpcErrorMessage } });
+await assert.rejects(service.loadOperationsTripDetail('trip-1'), error =>
+  error.message === 'Unable to load Operations trip' && !error.message.includes(rpcErrorMessage));
+console.log('PASS strict trip-detail response validation and safe RPC error handling');
 const resultState = load('src/components/data/ListResultState.tsx');
 let registerRetried = false;
 const registerErrorTree = register.OperationsTripsRegisterView({ state: { status: 'error' },
@@ -166,6 +222,8 @@ assert.match(detailHtml({ status: 'not-found' }), /Trip not found/);
 const closedHtml = detailHtml({ status: 'ready', data: parsedDetail });
 for (const value of ['Authoritative lifecycle', 'Loading', 'Open Trip', 'Offloading', 'Closed', 'Waybill', 'Payout',
   'INV-2026-000001', 'PDF: ready', 'Safe Officer Name', 'Exceptions']) assert(closedHtml.includes(value), value);
+assert.match(closedHtml, /<dt>Estimated tonnage<\/dt><dd>10\.25 tonnes<\/dd>/);
+assert.match(closedHtml, /<dt>Tonnage<\/dt><dd>12\.50 tonnes<\/dd>/);
 assert.equal(parsedDetail.waybill.waybill_number, 'INV-2026-000001', 'Historical Waybill references remain visible');
 assert(!('invoice_number' in parsedDetail.waybill), 'The frontend exposes Waybill terminology');
 assert(!closedHtml.includes('Cancel open trip'));
@@ -184,10 +242,15 @@ assert(!unknownPdfHtml.includes('PDF: Ready'));
 const openTripDetail = { ...detail, trip: { ...detail.trip, status: 'open', closed_at: null,
   offloading_site_id: null, offloading_site_name: null, quantity_tonnes: null,
   offloading_officer: null, cancelled_at: null, cancelled_officer: null }, waybill: null, payout: null, exceptions: [] };
-const openHtml = detailHtml({ status: 'ready', data: openTripDetail }, {
+const parsedOpenTripDetail = service.parseOperationsTripDetail(openTripDetail);
+assert.equal(parsedOpenTripDetail.trip.status, 'open');
+assert.equal(parsedOpenTripDetail.trip.estimated_quantity_tonnes, 10.25);
+assert.equal(parsedOpenTripDetail.trip.quantity_tonnes, null);
+const openHtml = detailHtml({ status: 'ready', data: parsedOpenTripDetail }, {
   onOpenCancellation() {}, onCloseCancellation() {}, onReasonChange() {}, onCancel() {},
 });
 assert(openHtml.includes('Cancel open trip'));
+assert.match(openHtml, /<dt>Tonnage<\/dt><dd>—<\/dd>/);
 assert(openHtml.includes('role="dialog"'));
 assert(openHtml.includes('required'));
 assert(openHtml.includes('Confirm cancellation'));
@@ -195,8 +258,13 @@ assert.match(openHtml, /disabled=""[^>]*>Confirm cancellation/);
 const cancelledDetail = { ...detail, trip: { ...detail.trip, status: 'cancelled', closed_at: null,
   offloading_site_id: null, offloading_site_name: null, quantity_tonnes: null, offloading_officer: null,
   cancelled_at: timestamp, cancelled_officer: officer }, waybill: null, payout: null, exceptions: [] };
-const cancelledHtml = detailHtml({ status: 'ready', data: cancelledDetail });
+const parsedCancelledDetail = service.parseOperationsTripDetail(cancelledDetail);
+assert.equal(parsedCancelledDetail.trip.status, 'cancelled');
+assert.equal(parsedCancelledDetail.trip.estimated_quantity_tonnes, 10.25);
+assert.equal(parsedCancelledDetail.trip.quantity_tonnes, null);
+const cancelledHtml = detailHtml({ status: 'ready', data: parsedCancelledDetail });
 assert(cancelledHtml.includes('Trip Cancelled'));
+assert.match(cancelledHtml, /<dt>Tonnage<\/dt><dd>—<\/dd>/);
 assert(cancelledHtml.includes('closure, Waybill and payout steps are not implied'));
 assert(!cancelledHtml.includes('Invoice'));
 console.log('PASS detail lifecycle, cancellation terminal state, and open-only required-reason dialog');
