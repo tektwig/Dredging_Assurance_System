@@ -26,8 +26,8 @@ const activityLabels: Record<OperationsDashboardActivity['event_type'], string> 
   trip_cancelled: 'Trip Cancelled',
   exception_raised: 'Exception Raised',
   exception_resolved: 'Exception Resolved',
-  waybill_issued: 'Waybill Issued',
-  pdf_ready: 'PDF Ready',
+  waybill_issued: 'Waybill Record Created',
+  pdf_ready: 'Legacy Waybill PDF Ready',
 };
 
 function formatDate(value: string): string {

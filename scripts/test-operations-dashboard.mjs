@@ -42,6 +42,9 @@ const activityResponse = {
     { event_id: 'waybill-issued:waybill-1', event_type: 'waybill_issued', occurred_at: '2026-09-27T09:30:00.000Z',
       trip_number: 'TRP-1', truck_registration: 'ABC-123', officer_id: 'officer-1',
       officer_name: 'Officer One', officer_role: 'offloading_officer', site_name: 'Offloading Site' },
+    { event_id: 'pdf-ready:legacy-document-1', event_type: 'pdf_ready', occurred_at: '2026-09-27T09:45:00.000Z',
+      trip_number: 'TRP-1', truck_registration: 'ABC-123', officer_id: null,
+      officer_name: null, officer_role: null, site_name: 'Offloading Site' },
   ],
 };
 const queueHealthResponse = {
@@ -117,6 +120,10 @@ assert.throws(() => service.parseOperationsDashboardSummary({ ...summaryResponse
 rpcCalls = [];
 const data = await service.loadOperationsDashboard();
 assert.equal(data.openTrips.items.length, 1);
+assert.equal(data.activity.items[1].event_id, 'waybill-issued:waybill-1');
+assert.equal(data.activity.items[1].occurred_at, '2026-09-27T09:30:00.000Z');
+assert.equal(data.activity.items[2].event_id, 'pdf-ready:legacy-document-1');
+assert.equal(data.activity.items[2].occurred_at, '2026-09-27T09:45:00.000Z');
 assert.deepEqual(rpcCalls.map(call => call.name), [
   'get_operations_dashboard_summary', 'get_operations_dashboard_open_trips', 'get_operations_dashboard_activity',
 ]);
@@ -181,12 +188,22 @@ assert.match(emptyHtml, /No recent operational activity/);
 assert.match(emptyHtml, /No items requiring attention/);
 assert.match(emptyHtml, /No pending, processing, or failed jobs are currently recorded/);
 const readyHtml = renderView({ status: 'ready', data });
+const dashboardMigration = readFileSync(resolve('supabase/migrations/20261009000000_payment_free_waybill_cutover.sql'), 'utf8');
+const pdfReadyStart = dashboardMigration.indexOf("(select 'pdf-ready:");
+assert.notEqual(pdfReadyStart, -1);
+const pdfReadySource = dashboardMigration.slice(pdfReadyStart, pdfReadyStart + 600);
+assert.match(pdfReadySource, /'pdf_ready',\s*d\.ready_at/);
+assert.match(pdfReadySource, /from public\.trip_closure_invoice_documents d/);
+assert.match(pdfReadySource, /where d\.status='ready' and d\.ready_at is not null/);
+assert(!pdfReadySource.includes('trip_closure_invoice_pdf_copies'));
 for (const label of ['Trips Opened Today', 'Trips Closed Today', 'Open Trips', 'Tonnage Today',
   'Trucks Processed Today', 'Exceptions Requiring Attention', 'Open Trips Requiring Attention',
   'Action Required', 'Waybill Queue Health', 'PDF generation', 'Notifications', 'Pending', 'Due pending',
   'Processing total', 'Currently processing', 'Expired or missing lease', 'Failed', 'Completed',
   'Provider accepted', 'Unrecognized status', 'Latest current job status',
-  'Recent Activity', 'Waybill Issued', 'TRP-1']) assert(readyHtml.includes(label), label);
+  'Recent Activity', 'Waybill Record Created', 'Legacy Waybill PDF Ready', 'TRP-1']) assert(readyHtml.includes(label), label);
+assert(!readyHtml.includes('Waybill Issued'));
+assert(!readyHtml.includes('>PDF Ready</td>'));
 assert(readyHtml.includes('12.50'));
 assert(readyHtml.includes('href="/operations/trips"'));
 assert(readyHtml.includes('href="/operations/waybills"'));
