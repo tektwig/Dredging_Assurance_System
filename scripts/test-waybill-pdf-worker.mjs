@@ -3,27 +3,26 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 
 const workerSource = readFileSync('supabase/functions/process-waybill-pdfs/worker.ts', 'utf8');
+const pdfMigration = readFileSync('supabase/migrations/20261013000200_secure_dual_waybill_foundation.sql', 'utf8');
 const workerJavaScript = ts.transpileModule(workerSource, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 const { processWaybillPdfs } = await import(`data:text/javascript;base64,${Buffer.from(workerJavaScript).toString('base64')}`);
 
 const config = { supabaseUrl: 'https://synthetic-project.example.invalid', serviceRoleKey: 'server-only-test-key' };
-const legacyJob = {
-  id: 'legacy-doc', invoice_id: 'legacy-invoice', trip_id: 'legacy-trip', invoice_number: 'WB-2026-000123',
-  storage_path: '2026/WB-2026-000123.pdf', lease_token: 'legacy-lease',
-};
 const driverJob = {
-  copy_id: 'driver-copy', invoice_id: 'driver-invoice', trip_id: 'driver-trip', invoice_number: 'WB-2026-000123',
+  copy_id: '44444444-4444-4444-8444-444444444444',
+  invoice_id: '22222222-2222-4222-8222-222222222222',
+  trip_id: '55555555-5555-4555-8555-555555555555', invoice_number: 'WB-2026-000123',
   storage_bucket: 'waybill-driver-copies', storage_path: '2026/WB-2026-000123.pdf', attempts: 1,
-  lease_token: 'driver-lease', lease_until: '2026-10-17T11:00:00.000Z',
+  lease_token: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', lease_until: '2099-10-17T11:00:00.000Z',
 };
 const companyJob = {
   ...driverJob,
-  copy_id: 'company-copy',
+  copy_id: '66666666-6666-4666-8666-666666666666',
   storage_bucket: 'waybill-company-copies',
   storage_path: '2026/WB-2026-000123-company-v2.pdf',
-  lease_token: 'company-lease',
+  lease_token: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
 };
 const secureSnapshot = {
   invoice_number: 'WB-2026-000123', truck_registration: 'LAG-482XY', driver_name: 'Synthetic Driver',
@@ -31,25 +30,19 @@ const secureSnapshot = {
   quantity_tonnes: 12.5, opened_at: '2026-10-17T09:00:00.000Z', closed_at: '2026-10-17T10:00:00.000Z',
   issued_at: '2026-10-17T10:00:00.000Z',
 };
-const legacySnapshot = {
-  ...secureSnapshot, trip_number: 'TRIP-000123', truck_type: 'Tipper', truck_capacity_tonnes: 25,
-  truck_owner_name: 'Synthetic Owner', driver_phone: '08000000000', driver_email: null, driver_license: null,
-  bank_name: 'Legacy Synthetic Bank', account_name: 'Legacy Synthetic Account', account_number: '9876543210',
-  loading_officer_name: null, offloading_officer_name: null,
-};
 const json = (value, status = 200, headers = {}) => new Response(JSON.stringify(value), {
   status, headers: { 'content-type': 'application/json', ...headers },
 });
 const pdfBytes = new Uint8Array([37, 80, 68, 70]);
 
 async function runWorker({
-  legacyJobs = [], legacyDenied = true, driverJobs = [], companyJobs = [], driverSnapshot = secureSnapshot,
+  driverJobs = [], companyJobs = [], driverSnapshot = secureSnapshot,
   companySnapshot = { ...secureSnapshot, driver_phone: null, bank_name: 'Synthetic Bank',
     account_name: 'Synthetic Account', account_number: '1234567890' },
   failSecureStorage = false, conflictSecureStorage = false, staleDriverLease = false, invalidDriverPath = false,
 } = {}) {
   const calls = [];
-  const rendered = { legacy: [], driver: [], company: [] };
+  const rendered = { driver: [], company: [] };
   const http = async (input, init = {}) => {
     const url = new URL(String(input));
     const method = init.method ?? 'GET';
@@ -58,19 +51,16 @@ async function runWorker({
       const name = url.pathname.split('/').pop();
       const body = JSON.parse(String(init.body ?? '{}'));
       calls.push({ name, body, method, headers });
-      if (name === 'claim_waybill_pdf_jobs') return legacyDenied ? json({ message: 'permission denied' }, 403) : json(legacyJobs);
       if (name === 'claim_driver_waybill_pdf_jobs') {
         return json(invalidDriverPath ? [{ ...driverJob, storage_path: 'other/unsafe.pdf' }] : driverJobs);
       }
       if (name === 'claim_company_waybill_pdf_jobs') return json(companyJobs);
-      if (name === 'get_waybill_pdf_snapshot') return json([legacySnapshot]);
       if (name === 'get_driver_waybill_pdf_snapshot') {
         return json({ ...driverSnapshot, driver_phone: 'MUST_NOT_REACH_DRIVER_RENDERER',
           bank_name: 'MUST_NOT_REACH_DRIVER_RENDERER', account_name: 'MUST_NOT_REACH_DRIVER_RENDERER',
           account_number: '1111111111' });
       }
       if (name === 'get_company_waybill_pdf_snapshot') return json(companySnapshot);
-      if (name === 'finish_waybill_pdf_job') return json(true);
       if (name === 'finish_driver_waybill_pdf_job') return json(!staleDriverLease);
       if (name === 'finish_company_waybill_pdf_job') return json(true);
       throw new Error(`Unexpected RPC ${name}`);
@@ -84,7 +74,6 @@ async function runWorker({
     return new Response(null, { status: 201 });
   };
   const counts = await processWaybillPdfs(config, {
-    legacy: async snapshot => { rendered.legacy.push(snapshot); return pdfBytes; },
     driver: async snapshot => { rendered.driver.push(snapshot); return pdfBytes; },
     company: async snapshot => { rendered.company.push(snapshot); return pdfBytes; },
   }, 2, http);
@@ -93,8 +82,8 @@ async function runWorker({
 
 const secureSuccess = await runWorker({ driverJobs: [driverJob], companyJobs: [companyJob] });
 assert.deepEqual(secureSuccess.counts, {
-  claimed: 2, ready: 2, deferred: 0, unacknowledged: 0, legacy_claimed: 0,
-  driver_claimed: 1, company_claimed: 1, claim_errors: 1,
+  claimed: 2, ready: 2, deferred: 0, unacknowledged: 0,
+  driver_claimed: 1, company_claimed: 1, claim_errors: 0,
 });
 assert.equal(secureSuccess.rendered.driver.length, 1);
 assert.equal('driver_phone' in secureSuccess.rendered.driver[0], false);
@@ -103,6 +92,8 @@ assert.equal('account_number' in secureSuccess.rendered.driver[0], false);
 assert.equal(secureSuccess.rendered.company[0].account_number, '1234567890');
 assert.equal(secureSuccess.rendered.company[0].bank_name, 'Synthetic Bank');
 assert.equal(secureSuccess.calls.some(call => call.name === 'get_waybill_pdf_snapshot'), false);
+assert.equal(secureSuccess.calls.some(call => call.name === 'claim_waybill_pdf_jobs'), false);
+assert.equal(secureSuccess.calls.some(call => call.name === 'finish_waybill_pdf_job'), false);
 assert(secureSuccess.calls.some(call => call.name === 'get_driver_waybill_pdf_snapshot'
   && call.body.p_copy_id === driverJob.copy_id && call.body.p_lease_token === driverJob.lease_token));
 assert(secureSuccess.calls.some(call => call.name === 'get_company_waybill_pdf_snapshot'
@@ -159,16 +150,29 @@ assert(unsafePath.calls.some(call => call.name === 'finish_driver_waybill_pdf_jo
   && call.body.p_failure_code === 'invalid_snapshot'));
 console.log('PASS unsafe bucket paths are rejected before snapshot access or Storage upload');
 
-const legacySuccess = await runWorker({ legacyDenied: false, legacyJobs: [legacyJob] });
-assert.equal(legacySuccess.counts.legacy_claimed, 1);
-assert.equal(legacySuccess.counts.ready, 1);
-assert.equal(legacySuccess.rendered.legacy[0].account_number, '9876543210');
-const legacyUpload = legacySuccess.calls.find(call => call.name === 'storage');
-assert.equal(legacyUpload.url, 'https://synthetic-project.example.invalid/storage/v1/object/waybills/2026/WB-2026-000123.pdf');
-assert.equal(legacyUpload.headers.get('x-upsert'), 'true');
-assert(legacySuccess.calls.some(call => call.name === 'finish_waybill_pdf_job'
-  && call.body.p_id === legacyJob.id && call.body.p_lease_token === legacyJob.lease_token));
-console.log('PASS legacy queue processing retains its existing snapshot, path, upload, and finish contract');
+const legacyPreserved = await runWorker({ driverJobs: [driverJob] });
+assert.equal(legacyPreserved.counts.driver_claimed, 1);
+assert.equal(legacyPreserved.rendered.driver.length, 1);
+assert.equal(legacyPreserved.calls.some(call => ['claim_waybill_pdf_jobs', 'get_waybill_pdf_snapshot',
+  'finish_waybill_pdf_job'].includes(call.name)), false);
+assert.equal(legacyPreserved.calls.some(call => call.name === 'storage' && call.url.includes('/waybills/2026/')), false);
+for (const retiredRpc of ['claim_waybill_pdf_jobs', 'get_waybill_pdf_snapshot', 'finish_waybill_pdf_job']) {
+  assert(!workerSource.includes(retiredRpc), `worker source must not invoke retired RPC ${retiredRpc}`);
+}
+for (const signature of [
+  'public.claim_driver_waybill_pdf_jobs(integer,uuid)',
+  'public.claim_company_waybill_pdf_jobs(integer,uuid)',
+  'public.get_driver_waybill_pdf_snapshot(uuid,uuid)',
+  'public.get_company_waybill_pdf_snapshot(uuid,uuid)',
+  'public.finish_driver_waybill_pdf_job(uuid,uuid,boolean,text)',
+  'public.finish_company_waybill_pdf_job(uuid,uuid,boolean,text)',
+]) {
+  assert(pdfMigration.includes(`revoke all on function ${signature} from public,anon,authenticated,service_role`));
+  assert(pdfMigration.includes(`grant execute on function ${signature} to service_role`));
+}
+assert(pdfMigration.includes("to_regprocedure('public.claim_waybill_pdf_jobs(integer)')"));
+assert(pdfMigration.includes("execute format('revoke all on function %s from public,anon,authenticated,service_role',v_function)"));
+console.log('PASS legacy PDF queue is not claimed, rewritten, uploaded, or acknowledged while secure copies process');
 
 const pdfSource = readFileSync('supabase/functions/process-waybill-pdfs/secure_pdf.ts', 'utf8');
 const pdfJavaScript = ts.transpileModule(pdfSource

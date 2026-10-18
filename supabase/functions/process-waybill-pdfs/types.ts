@@ -70,7 +70,6 @@ export type PdfFailureCode =
   | 'storage_upload_failed';
 
 export interface PdfGenerators {
-  legacy: (snapshot: LegacyWaybillSnapshot) => Promise<Uint8Array>;
   driver: (snapshot: DriverWaybillSnapshot) => Promise<Uint8Array>;
   company: (snapshot: CompanyWaybillSnapshot) => Promise<Uint8Array>;
 }

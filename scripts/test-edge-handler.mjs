@@ -32,9 +32,15 @@ assert.equal((await handler(request('POST', 'wrong'))).status, 401);
 console.log('PASS handler unauthorized rejection');
 assert.equal((await handler(request('POST', testSecret))).status, 503);
 console.log('PASS handler incomplete-config rejection');
-for (const name of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'RESEND_API_KEY', 'TRIP_NOTIFICATION_FROM', 'TRIP_NOTIFICATION_FINANCE_EMAILS']) {
+for (const name of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'RESEND_API_KEY', 'TRIP_NOTIFICATION_FROM']) {
   values.set(name, 'test-only');
 }
+values.set('WAYBILL_NOTIFICATION_DELIVERY_ENABLED', 'false');
+const disabledDispatchCount = globalThis.__workerDispatchCount ?? 0;
+assert.equal((await handler(request('POST', testSecret))).status, 503);
+assert.equal(globalThis.__workerDispatchCount ?? 0, disabledDispatchCount);
+console.log('PASS notification delivery fails closed until its explicit enable flag is true');
+values.set('WAYBILL_NOTIFICATION_DELIVERY_ENABLED', 'true');
 let response = await handler(request('POST', testSecret));
 assert.equal(response.status, 200);
 assert.equal(globalThis.__capturedWorkerConfig.waybillClientEmail, null);
@@ -50,19 +56,22 @@ assert.equal(response.status, 200);
 const responseBody = await response.json();
 assert.deepEqual(responseBody, { mocked: true });
 assert.equal(globalThis.__capturedWorkerConfig.waybillClientEmail, targetAddress);
+assert.equal(globalThis.__capturedWorkerConfig.deliveryEnabled, true);
 assert(!('waybillInternalRecipients' in globalThis.__capturedWorkerConfig));
-assert.equal(globalThis.__capturedBatchLimit, 5);
+assert.equal(globalThis.__capturedBatchLimit, 1);
 values.set('WAYBILL_INTERNAL_RECIPIENTS', ' ops@example.invalid, finance@example.invalid,ops@example.invalid ');
 assert.equal((await handler(request('POST', testSecret))).status, 200);
 assert(!('waybillInternalRecipients' in globalThis.__capturedWorkerConfig));
-assert.equal(globalThis.__capturedBatchLimit, 5);
+assert.equal(globalThis.__capturedBatchLimit, 1);
 assert(!JSON.stringify(globalThis.__capturedWorkerConfig).includes('SERVICE_ROLE'));
 assert.equal((await handler(request('POST', testSecret, '{}'))).status, 200);
-assert.equal(globalThis.__capturedBatchLimit, 5);
+assert.equal(globalThis.__capturedBatchLimit, 1);
 assert.equal((await handler(request('POST', testSecret, '{"limit":1}'))).status, 200);
 assert.equal(globalThis.__capturedBatchLimit, 1);
+assert.equal((await handler(request('POST', testSecret, '{"limit":2}'))).status, 200);
+assert.equal(globalThis.__capturedBatchLimit, 2);
 const dispatchCountBeforeInvalidLimits = globalThis.__workerDispatchCount;
-for (const body of ['{', 'null', '[]', '{"limit":0}', '{"limit":11}', '{"limit":1.5}', '{"limit":"1"}']) {
+for (const body of ['{', 'null', '[]', '{"limit":0}', '{"limit":3}', '{"limit":11}', '{"limit":1.5}', '{"limit":"1"}']) {
   assert.equal((await handler(request('POST', testSecret, body))).status, 400);
 }
 assert.equal(globalThis.__workerDispatchCount, dispatchCountBeforeInvalidLimits);

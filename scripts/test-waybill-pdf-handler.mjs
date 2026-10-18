@@ -6,7 +6,7 @@ const source = readFileSync('supabase/functions/process-waybill-pdfs/index.ts', 
   .replace(/^import .*;\r?\n/gm, '')
   .replace("new URL('./assets/trakflit-logo.jpg', import.meta.url)", "'synthetic-logo-path'");
 const javascript = ts.transpileModule(
-  `const processWaybillPdfs = globalThis.__processWaybillPdfs;\nconst generateWaybillPdf = globalThis.__generateWaybillPdf;\nconst generateDriverWaybillPdf = globalThis.__generateDriverWaybillPdf;\nconst generateCompanyWaybillPdf = globalThis.__generateCompanyWaybillPdf;\n${source}`,
+  `const processWaybillPdfs = globalThis.__processWaybillPdfs;\nconst generateDriverWaybillPdf = globalThis.__generateDriverWaybillPdf;\nconst generateCompanyWaybillPdf = globalThis.__generateCompanyWaybillPdf;\n${source}`,
   { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } },
 ).outputText;
 const env = new Map();
@@ -22,10 +22,9 @@ globalThis.__processWaybillPdfs = async (config, _generatePdf, batchLimit) => {
   workerCalls++;
   assert.equal(config.serviceRoleKey, 'server-only-service-role-key');
   workerLimits.push(batchLimit);
-  return { claimed: 0, ready: 0, deferred: 0, unacknowledged: 0, legacy_claimed: 0,
+  return { claimed: 0, ready: 0, deferred: 0, unacknowledged: 0,
     driver_claimed: 0, company_claimed: 0, claim_errors: 0 };
 };
-globalThis.__generateWaybillPdf = async () => new Uint8Array();
 globalThis.__generateDriverWaybillPdf = async () => new Uint8Array();
 globalThis.__generateCompanyWaybillPdf = async () => new Uint8Array();
 await import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`);
@@ -48,24 +47,28 @@ env.set('SUPABASE_SERVICE_ROLE_KEY', serviceRoleKey);
 const response = await handler(request());
 assert.equal(response.status, 200);
 assert.deepEqual(await response.json(), {
-  claimed: 0, ready: 0, deferred: 0, unacknowledged: 0, legacy_claimed: 0,
+  claimed: 0, ready: 0, deferred: 0, unacknowledged: 0,
   driver_claimed: 0, company_claimed: 0, claim_errors: 0,
 });
 assert.equal(response.headers.get('access-control-allow-origin'), null);
 assert.equal(workerCalls, 1);
-assert.deepEqual(workerLimits, [5]);
+assert.deepEqual(workerLimits, [1]);
 
 const defaultResponse = await handler(request('POST', workerSecret, '{}'));
 assert.equal(defaultResponse.status, 200);
-assert.deepEqual(workerLimits, [5, 5]);
+assert.deepEqual(workerLimits, [1, 1]);
 
 const limitedResponse = await handler(request('POST', workerSecret, '{"limit":1}'));
 assert.equal(limitedResponse.status, 200);
-assert.deepEqual(workerLimits, [5, 5, 1]);
+assert.deepEqual(workerLimits, [1, 1, 1]);
 
-for (const body of ['{', '{"limit":0}', '{"limit":11}', '{"limit":1.5}', '{"limit":"1"}', 'null']) {
+const maxLimitResponse = await handler(request('POST', workerSecret, '{"limit":2}'));
+assert.equal(maxLimitResponse.status, 200);
+assert.deepEqual(workerLimits, [1, 1, 1, 2]);
+
+for (const body of ['{', '{"limit":0}', '{"limit":3}', '{"limit":11}', '{"limit":1.5}', '{"limit":"1"}', 'null']) {
   const invalidResponse = await handler(request('POST', workerSecret, body));
   assert.equal(invalidResponse.status, 400, `Expected invalid body ${body} to return 400`);
 }
-assert.equal(workerCalls, 3, 'invalid batch limits must not claim jobs');
+assert.equal(workerCalls, 4, 'invalid batch limits must not claim jobs');
 console.log('PASS endpoint validates optional batch limit before processing and never returns server credentials');

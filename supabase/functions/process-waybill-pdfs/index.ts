@@ -1,11 +1,9 @@
 import { processWaybillPdfs, type WorkerConfig } from './worker.ts';
-import { generateWaybillPdf } from './pdf.ts';
 import { generateCompanyWaybillPdf, generateDriverWaybillPdf } from './secure_pdf.ts';
 import type { PdfGenerators } from './types.ts';
 
 const logoBytes = await Deno.readFile(new URL('./assets/trakflit-logo.jpg', import.meta.url));
 const pdfGenerators: PdfGenerators = {
-  legacy: generateWaybillPdf,
   driver: snapshot => generateDriverWaybillPdf(snapshot, logoBytes),
   company: snapshot => generateCompanyWaybillPdf(snapshot, logoBytes),
 };
@@ -14,7 +12,7 @@ const env = (name: string): string => Deno.env.get(name)?.trim() ?? '';
 
 async function readBatchLimit(request: Request): Promise<number | null> {
   const bodyText = await request.text();
-  if (!bodyText.trim()) return 5;
+  if (!bodyText.trim()) return 1;
 
   let body: unknown;
   try {
@@ -25,8 +23,8 @@ async function readBatchLimit(request: Request): Promise<number | null> {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
 
   const limit = (body as Record<string, unknown>).limit;
-  if (limit === undefined) return 5;
-  return typeof limit === 'number' && Number.isInteger(limit) && limit >= 1 && limit <= 10
+  if (limit === undefined) return 1;
+  return typeof limit === 'number' && Number.isInteger(limit) && limit >= 1 && limit <= 2
     ? limit
     : null;
 }

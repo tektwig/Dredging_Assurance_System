@@ -20,21 +20,11 @@ export type {
 
 export type WaybillSnapshot = LegacyWaybillSnapshot;
 
-interface LegacyPdfJob {
-  id: string;
-  invoice_id: string;
-  trip_id: string;
-  invoice_number: string;
-  storage_path: string;
-  lease_token: string;
-}
-
 interface WorkerCounts {
   claimed: number;
   ready: number;
   deferred: number;
   unacknowledged: number;
-  legacy_claimed: number;
   driver_claimed: number;
   company_claimed: number;
   claim_errors: number;
@@ -42,12 +32,7 @@ interface WorkerCounts {
 
 type CopyKind = 'driver' | 'company';
 type AnySecureSnapshot = DriverWaybillSnapshot | CompanyWaybillSnapshot;
-type LegacyPdfFailureCode =
-  | 'invoice_snapshot_unavailable'
-  | 'invalid_invoice_snapshot'
-  | 'pdf_generation_failed'
-  | 'storage_upload_failed';
-
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -56,11 +41,6 @@ const validText = (value: unknown): value is string => typeof value === 'string'
 const validTimestamp = (value: unknown): value is string =>
   validText(value) && !Number.isNaN(new Date(value).getTime());
 
-function legacyStoragePath(invoiceNumber: string): string | null {
-  const match = /^(?:INV|WB)-(\d{4})-\d{6,}$/.exec(invoiceNumber);
-  return match ? `${match[1]}/${invoiceNumber}.pdf` : null;
-}
-
 export function expectedWaybillPath(invoiceNumber: string, copyKind: CopyKind, path: string): boolean {
   const match = /^(INV|WB)-(\d{4})-(\d{6,})$/.exec(invoiceNumber);
   if (!match) return false;
@@ -68,6 +48,21 @@ export function expectedWaybillPath(invoiceNumber: string, copyKind: CopyKind, p
   if (copyKind === 'driver') return path === basePath;
   return path === basePath
     || new RegExp(`^${match[2]}/${invoiceNumber}-company-v(?:[2-9]|[1-9][0-9]+)\\.pdf$`).test(path);
+}
+
+function parseWaybillPdfJob(value: unknown): WaybillPdfJob | null {
+  if (!isRecord(value)
+    || typeof value.copy_id !== 'string' || !uuidPattern.test(value.copy_id)
+    || typeof value.invoice_id !== 'string' || !uuidPattern.test(value.invoice_id)
+    || typeof value.trip_id !== 'string' || !uuidPattern.test(value.trip_id)
+    || typeof value.invoice_number !== 'string' || !/^(?:INV|WB)-\d{4}-\d{6,}$/.test(value.invoice_number)
+    || typeof value.storage_bucket !== 'string' || typeof value.storage_path !== 'string'
+    || typeof value.lease_token !== 'string' || !uuidPattern.test(value.lease_token)
+    || typeof value.lease_until !== 'string' || !Number.isFinite(Date.parse(value.lease_until))
+    || typeof value.attempts !== 'number' || !Number.isInteger(value.attempts) || value.attempts < 1 || value.attempts > 5) {
+    return null;
+  }
+  return value as unknown as WaybillPdfJob;
 }
 
 function parseSecureSnapshot(value: unknown, copyKind: CopyKind, job: WaybillPdfJob): AnySecureSnapshot | null {
@@ -120,27 +115,6 @@ function parseSecureSnapshot(value: unknown, copyKind: CopyKind, job: WaybillPdf
   };
 }
 
-async function uploadLegacyPdf(
-  config: WorkerConfig,
-  job: LegacyPdfJob,
-  pdf: Uint8Array,
-  http: typeof fetch,
-) {
-  const objectPath = job.storage_path.split('/').map(encodeURIComponent).join('/');
-  const response = await http(`${config.supabaseUrl}/storage/v1/object/waybills/${objectPath}`, {
-    method: 'POST',
-    headers: {
-      apikey: config.serviceRoleKey,
-      Authorization: `Bearer ${config.serviceRoleKey}`,
-      'Content-Type': 'application/pdf',
-      'x-upsert': 'true',
-    },
-    body: pdf as unknown as BodyInit,
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) throw new Error('Legacy Storage upload failed');
-}
-
 async function uploadSecurePdf(
   config: WorkerConfig,
   job: WaybillPdfJob,
@@ -175,83 +149,15 @@ async function uploadSecurePdf(
   }
 }
 
-async function processLegacyQueue(
-  config: WorkerConfig,
-  generatePdf: PdfGenerators['legacy'],
-  batchLimit: number,
-  rpc: <T>(name: string, body: unknown) => Promise<T>,
-  http: typeof fetch,
-): Promise<Pick<WorkerCounts, 'claimed' | 'ready' | 'deferred' | 'unacknowledged' | 'legacy_claimed'> & { claimErrors: number }> {
-  const counts = { claimed: 0, ready: 0, deferred: 0, unacknowledged: 0, legacy_claimed: 0, claimErrors: 0 };
-  let jobs: LegacyPdfJob[];
-  try {
-    const result = await rpc<unknown>('claim_waybill_pdf_jobs', { p_limit: batchLimit });
-    if (!Array.isArray(result)) throw new Error('Invalid legacy claim response');
-    jobs = result as LegacyPdfJob[];
-  } catch {
-    counts.claimErrors++;
-    return counts;
-  }
-
-  counts.claimed = jobs.length;
-  counts.legacy_claimed = jobs.length;
-  for (const job of jobs) {
-    let failureCode: LegacyPdfFailureCode | null = null;
-    try {
-      const rows = await rpc<unknown>('get_waybill_pdf_snapshot', {
-        p_document_id: job.id,
-        p_lease_token: job.lease_token,
-      });
-      if (!Array.isArray(rows) || rows.length !== 1 || !isRecord(rows[0])) {
-        throw new Error('Legacy snapshot unavailable');
-      }
-      const snapshot = rows[0] as unknown as WaybillSnapshot;
-      const path = legacyStoragePath(snapshot.invoice_number);
-      if (!path || path !== job.storage_path || snapshot.invoice_number !== job.invoice_number) {
-        failureCode = 'invalid_invoice_snapshot';
-      } else {
-        let pdf: Uint8Array | null = null;
-        try {
-          pdf = await generatePdf(snapshot);
-          if (!pdf.length) throw new Error('Empty legacy PDF');
-        } catch {
-          failureCode = 'pdf_generation_failed';
-        }
-        if (pdf && failureCode === null) {
-          try {
-            await uploadLegacyPdf(config, job, pdf, http);
-          } catch {
-            failureCode = 'storage_upload_failed';
-          }
-        }
-      }
-    } catch {
-      failureCode = 'invoice_snapshot_unavailable';
-    }
-
-    try {
-      const acknowledged = await rpc<boolean>('finish_waybill_pdf_job', {
-        p_id: job.id,
-        p_lease_token: job.lease_token,
-        p_succeeded: failureCode === null,
-        p_failure_code: failureCode,
-      });
-      if (!acknowledged) counts.unacknowledged++;
-      else if (failureCode === null) counts.ready++;
-      else counts.deferred++;
-    } catch {
-      counts.unacknowledged++;
-    }
-  }
-  return counts;
-}
-
 export async function processWaybillPdfs(
   config: WorkerConfig,
   generators: PdfGenerators,
-  batchLimit = 5,
+  batchLimit = 1,
   http: typeof fetch = fetch,
 ) {
+  if (!Number.isInteger(batchLimit) || batchLimit < 1 || batchLimit > 2) {
+    throw new Error('Invalid secure Waybill PDF batch limit');
+  }
   const headers = {
     apikey: config.serviceRoleKey,
     Authorization: `Bearer ${config.serviceRoleKey}`,
@@ -273,26 +179,17 @@ export async function processWaybillPdfs(
     ready: 0,
     deferred: 0,
     unacknowledged: 0,
-    legacy_claimed: 0,
     driver_claimed: 0,
     company_claimed: 0,
     claim_errors: 0,
   };
-  const legacy = await processLegacyQueue(config, generators.legacy, batchLimit, rpc, http);
-  result.claimed += legacy.claimed;
-  result.ready += legacy.ready;
-  result.deferred += legacy.deferred;
-  result.unacknowledged += legacy.unacknowledged;
-  result.legacy_claimed = legacy.legacy_claimed;
-  result.claim_errors += legacy.claimErrors;
-
   const processSecureCopy = async (copyKind: CopyKind) => {
-    let jobs: WaybillPdfJob[];
+    let jobs: unknown[];
     try {
       const claimRpc = copyKind === 'driver' ? 'claim_driver_waybill_pdf_jobs' : 'claim_company_waybill_pdf_jobs';
       const response = await rpc<unknown>(claimRpc, { p_limit: batchLimit });
       if (!Array.isArray(response)) throw new Error('Invalid secure claim response');
-      jobs = response as WaybillPdfJob[];
+      jobs = response;
     } catch {
       result.claim_errors++;
       return;
@@ -300,7 +197,12 @@ export async function processWaybillPdfs(
     result.claimed += jobs.length;
     result[copyKind === 'driver' ? 'driver_claimed' : 'company_claimed'] = jobs.length;
 
-    for (const job of jobs) {
+    for (const value of jobs) {
+      const job = parseWaybillPdfJob(value);
+      if (!job) {
+        result.unacknowledged++;
+        continue;
+      }
       let failureCode: PdfFailureCode | null = null;
       let pdf: Uint8Array | null = null;
       const expectedBucket = copyKind === 'driver' ? 'waybill-driver-copies' : 'waybill-company-copies';
@@ -360,7 +262,6 @@ export async function processWaybillPdfs(
     }
   };
 
-  await processSecureCopy('driver');
-  await processSecureCopy('company');
+  await Promise.all([processSecureCopy('driver'), processSecureCopy('company')]);
   return result;
 }
