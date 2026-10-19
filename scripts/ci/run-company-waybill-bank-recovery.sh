@@ -137,8 +137,8 @@ verify_snapshot() {
     *) return 0 ;;
   esac
   diff -q \
-    <(sed 's/\r$//' "$repo_root/supabase/migrations/$migration") \
-    <(sed 's/\r$//' "$snapshot") >/dev/null \
+    <(awk '{ sub(/\r$/, ""); print }' "$repo_root/supabase/migrations/$migration") \
+    <(awk '{ sub(/\r$/, ""); print }' "$snapshot") >/dev/null \
     || fail "Deployable migration differs from the checksum-pinned, previously tested source: $migration"
 }
 
