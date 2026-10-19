@@ -35,6 +35,8 @@ type AnySecureSnapshot = DriverWaybillSnapshot | CompanyWaybillSnapshot;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+const maxRpcAttempts = 3;
+const rpcRetryBaseDelayMs = 100;
 
 const validText = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 
@@ -164,14 +166,29 @@ export async function processWaybillPdfs(
     'Content-Type': 'application/json',
   };
   const rpc = async <T>(name: string, body: unknown): Promise<T> => {
-    const response = await http(`${config.supabaseUrl}/rest/v1/rpc/${name}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!response.ok) throw new Error('Database operation failed');
-    return await response.json() as T;
+    for (let attempt = 0; attempt < maxRpcAttempts; attempt++) {
+      const response = await http(`${config.supabaseUrl}/rest/v1/rpc/${name}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (response.ok) return await response.json() as T;
+
+      let retryableClaimsError = false;
+      if (response.status === 401 && attempt < maxRpcAttempts - 1) {
+        try {
+          const errorBody: unknown = await response.json();
+          retryableClaimsError = isRecord(errorBody) && errorBody.code === 'PGRST303';
+        } catch {
+          retryableClaimsError = false;
+        }
+      }
+      if (!retryableClaimsError) throw new Error('Database operation failed');
+
+      await new Promise(resolve => setTimeout(resolve, rpcRetryBaseDelayMs * (2 ** attempt)));
+    }
+    throw new Error('Database operation failed');
   };
 
   const result: WorkerCounts = {

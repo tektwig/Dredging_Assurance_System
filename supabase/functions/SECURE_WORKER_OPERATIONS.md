@@ -14,6 +14,7 @@ This runbook covers the secure Driver/Company PDF queues and the secure `waybill
 ## Queue policy and retries
 
 - Secure PDF copies use five-minute leases, a maximum of five attempts, and retryable failures with exponential delay capped at one hour. Exhausted jobs become `failed`. A Company PDF without a verified snapshot remains blocked and is not claimed; the Driver queue remains independent.
+- Secure PDF RPC requests retry only when both the HTTP status is `401` and the parsed JSON error `code` is exactly `PGRST303`. PostgREST describes `PGRST303` as JWT claims validation/parsing failure; this bounded retry does not refresh credentials. Repeated failures therefore still require configuration/runtime investigation. The worker makes at most three total attempts with 100 ms and 200 ms backoff. Other 401/403 responses (including `PGRST301`), malformed error bodies, network failures, timeouts, and ambiguous responses are not retried. Error bodies, API keys, and bearer tokens are never logged or returned. Persistent `PGRST303` failures still count as claim errors when the affected call is a claim; a recovered retry does not. [PostgREST error reference](https://docs.postgrest.org/en/v16/references/errors.html)
 - Secure notification claims use five-minute leases, a maximum of eight attempts or a 23-hour retry window, and exponential retry delay capped at one hour. Resend idempotency keys are stable per outbox notification (`waybill-notification/<notification UUID>`). Resend retains idempotency keys for 24 hours, longer than the database's 23-hour retry window; this bounds duplicate risk after a timeout or lost acknowledgement. A timeout or malformed success response is treated as acceptance-uncertain and retried with the same key. Do not manually reset an exhausted/ambiguous job without checking provider state first.
 - Workers default to one item per invocation. The request limit is capped at two; the PDF worker claims Driver and Company work concurrently, while each copy type stays sequential. The email worker handles at most two jobs concurrently to keep the five-minute lease and Edge Function wall-clock/memory limits safe. Start scheduled calls with `{"limit":1}`. Increase only after observing runtime duration, memory, lease outcomes, and queue age in a controlled test.
 - A provider `sent` state means Resend accepted the request, not that the recipient mailbox delivered it. Provider delivery/bounce reporting must be monitored separately in Resend.
@@ -227,6 +228,8 @@ select job.jobname, run.status, run.start_time, run.end_time
 from cron.job_run_details run
 join cron.job job on job.jobid = run.jobid
 where job.jobname in ('trakflit-process-waybill-pdfs','trakflit-process-waybill-notifications')
+   or job.jobname = 'trakflit_dev_process_waybill_pdfs'
+   or job.jobname ilike '%waybill%notification%'
 order by run.start_time desc
 limit 20;
 
@@ -236,6 +239,63 @@ where name in ('project_url','publishable_key','waybill_pdf_worker_secret',
                'trip_notification_worker_secret')
 order by name;
 ```
+
+### Safely classify the existing PDF Cron command
+
+This query never returns `cron.job.command`, function source, header values, Vault values, URLs, or request bodies. It reports only the top-level called function identifier and boolean indicators. A direct `net.http_post` command is an HTTP invocation; a named top-level SQL function is a wrapper candidate; a SQL statement without a detected top-level call or a placeholder/other command needs further review. If a wrapper candidate delegates to another helper and all body indicators are false, inspect that helper using the same redacted pattern before classifying it.
+
+```sql
+with target_job as (
+  select jobid, jobname, schedule, active, command,
+         regexp_match(
+           command,
+           '(?i)^[[:space:]]*(select|call|perform)[[:space:]]+((?:"[^"]+"|[a-z_][a-z0-9_]*)(?:[.](?:"[^"]+"|[a-z_][a-z0-9_]*))?)[[:space:]]*[(]'
+         ) as call_match
+  from cron.job
+  where jobid = 1
+    and jobname = 'trakflit_dev_process_waybill_pdfs'
+), normalized as (
+  select target_job.*,
+         replace(call_match[2], '"', '') as called_function
+  from target_job
+), parts as (
+  select normalized.*,
+         string_to_array(called_function, '.') as function_parts
+  from normalized
+)
+select jobid, jobname, schedule, active,
+       called_function as first_called_function,
+       case
+         when command ~* 'net[.]http_post[[:space:]]*[(]' then 'direct_http_invocation'
+         when called_function is not null then 'function_wrapper_candidate'
+         when command ~* '^[[:space:]]*(select|call|perform|do)[[:space:]]' then 'sql_without_detected_function_call'
+         else 'placeholder_or_other'
+       end as command_class,
+       command ~* 'net[.]http_post[[:space:]]*[(]' as command_calls_pg_net,
+       command ~* 'process-waybill-pdfs' as command_mentions_pdf_function,
+       command ~* 'x-worker-secret' as command_mentions_worker_header,
+       command ~* 'vault' as command_mentions_vault,
+       command ~* 'limit' as command_mentions_batch_limit,
+       coalesce(wrapper.body_calls_pg_net, false) as wrapper_body_calls_pg_net,
+       coalesce(wrapper.body_mentions_pdf_function, false) as wrapper_body_mentions_pdf_function,
+       coalesce(wrapper.body_mentions_worker_header, false) as wrapper_body_mentions_worker_header,
+       coalesce(wrapper.body_mentions_vault, false) as wrapper_body_mentions_vault,
+       coalesce(wrapper.body_mentions_batch_limit, false) as wrapper_body_mentions_batch_limit
+from parts
+left join lateral (
+  select bool_or(p.prosrc ~* 'net[.]http_post[[:space:]]*[(]') as body_calls_pg_net,
+         bool_or(p.prosrc ~* 'process-waybill-pdfs') as body_mentions_pdf_function,
+         bool_or(p.prosrc ~* 'x-worker-secret') as body_mentions_worker_header,
+         bool_or(p.prosrc ~* 'vault') as body_mentions_vault,
+         bool_or(p.prosrc ~* 'limit') as body_mentions_batch_limit
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where p.proname = function_parts[array_length(function_parts, 1)]
+    and (array_length(function_parts, 1) = 1 or n.nspname = function_parts[1])
+) wrapper on true;
+```
+
+No rows means the named job is absent or has changed identity; stop and inspect the job list. The indicators are heuristic: a wrapper can delegate to another function or build its request dynamically. A wrapper candidate with no direct indicators is not proof that it is a placeholder; inspect its referenced helper chain before approving activation.
 
 Do not select Vault secret values, cron command text, notification recipients/payloads, or response bodies from `net._http_response`.
 
@@ -274,7 +334,7 @@ No deployment or scheduling is authorized by this work item. For a separately ap
 1. Confirm the DEVELOPMENT project reference and verify migration 002/003 objects and RPC grants using the read-only checks above. Do not apply or repair migrations as part of worker deployment.
 2. Inspect counts for every `notification_outbox` event stream and all legacy PDF rows. Review the candidate query row by row. Do not automatically dispatch pending historical candidates; obtain explicit approval for any candidate backlog.
 3. Configure Edge secrets by name. Keep notification delivery disabled and both schedulers inactive. Confirm `verify_jwt=false` plus the handler secret check for both functions.
-4. Deploy `process-waybill-pdfs` with its static logo, verify deployed version and secret presence without printing values. Keep its schedule inactive until the approved secure-copy processing test.
+4. For a PDF-only rollout, deploy only `process-waybill-pdfs` with its static logo, verify the deployed version and secret presence without printing values, and keep the notification function/schedule untouched. Confirm `WAYBILL_NOTIFICATION_DELIVERY_ENABLED` is false or absent and the notification schedule remains inactive. The PDF worker calls no notification RPC or email provider: it only claims secure copy jobs, reads their lease-bound snapshots, uploads to the copy-specific private bucket, and finishes the PDF job. Once a PDF execution test is separately approved, activate only a verified PDF schedule whose command targets `process-waybill-pdfs`; first classify the existing job with the redacted query above. Stop if it is a placeholder, an unexpected wrapper, or its target/authentication cannot be established. PDF readiness alone does not authorize email delivery.
 5. Deploy `process-trip-notifications` only after reviewing the worker version. Keep `WAYBILL_NOTIFICATION_DELIVERY_ENABLED=false`, `WAYBILL_TEST_RECIPIENT_SINK_ENABLED=false`, and its scheduler inactive.
 6. Under a separately authorized controlled test using synthetic recipient fixtures, set the notification delivery switch true and the DEVELOPMENT-only sink true; invoke a single limit-1 test request through a trusted method. This consumes/attempts claimed queue jobs, so do not use an unreviewed production backlog as the test fixture. Verify only aggregate status and provider acceptance in logs; never print recipients, PDF content, tokens, or bank values.
 7. After the sink test passes and a separate approval authorizes real recipient delivery, set the sink false, set the delivery switch true, and activate the notification schedule. Enable the PDF schedule separately. A schedule or secret change is not part of this implementation.

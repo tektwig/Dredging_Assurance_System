@@ -40,9 +40,11 @@ async function runWorker({
   companySnapshot = { ...secureSnapshot, driver_phone: null, bank_name: 'Synthetic Bank',
     account_name: 'Synthetic Account', account_number: '1234567890' },
   failSecureStorage = false, conflictSecureStorage = false, staleDriverLease = false, invalidDriverPath = false,
+  driverClaimResponses = null,
 } = {}) {
   const calls = [];
   const rendered = { driver: [], company: [] };
+  const claimAttempts = { driver: 0, company: 0 };
   const http = async (input, init = {}) => {
     const url = new URL(String(input));
     const method = init.method ?? 'GET';
@@ -52,9 +54,16 @@ async function runWorker({
       const body = JSON.parse(String(init.body ?? '{}'));
       calls.push({ name, body, method, headers });
       if (name === 'claim_driver_waybill_pdf_jobs') {
+        const attempt = claimAttempts.driver++;
+        const scriptedResponse = driverClaimResponses?.[attempt];
+        if (scriptedResponse?.networkFailure) throw new TypeError('synthetic network timeout');
+        if (scriptedResponse) return json(scriptedResponse.body, scriptedResponse.status);
         return json(invalidDriverPath ? [{ ...driverJob, storage_path: 'other/unsafe.pdf' }] : driverJobs);
       }
-      if (name === 'claim_company_waybill_pdf_jobs') return json(companyJobs);
+      if (name === 'claim_company_waybill_pdf_jobs') {
+        claimAttempts.company++;
+        return json(companyJobs);
+      }
       if (name === 'get_driver_waybill_pdf_snapshot') {
         return json({ ...driverSnapshot, driver_phone: 'MUST_NOT_REACH_DRIVER_RENDERER',
           bank_name: 'MUST_NOT_REACH_DRIVER_RENDERER', account_name: 'MUST_NOT_REACH_DRIVER_RENDERER',
@@ -77,8 +86,64 @@ async function runWorker({
     driver: async snapshot => { rendered.driver.push(snapshot); return pdfBytes; },
     company: async snapshot => { rendered.company.push(snapshot); return pdfBytes; },
   }, 2, http);
-  return { counts, calls, rendered };
+  return { counts, calls, rendered, claimAttempts };
 }
+
+const privateErrorSentinel = 'AUTH_RESPONSE_BODY_MUST_NOT_LEAK';
+const recoveredPgrst303 = await runWorker({
+  driverClaimResponses: [
+    { status: 401, body: { code: 'PGRST303', message: privateErrorSentinel } },
+    { status: 200, body: [driverJob] },
+  ],
+});
+assert.equal(recoveredPgrst303.counts.driver_claimed, 1);
+assert.equal(recoveredPgrst303.counts.ready, 1);
+assert.equal(recoveredPgrst303.counts.claim_errors, 0);
+assert.equal(recoveredPgrst303.claimAttempts.driver, 2);
+assert.equal(recoveredPgrst303.calls.filter(call => call.name === 'get_driver_waybill_pdf_snapshot').length, 1);
+assert.equal(recoveredPgrst303.calls.filter(call => call.name === 'finish_driver_waybill_pdf_job').length, 1);
+assert.equal(recoveredPgrst303.calls.filter(call => call.name === 'storage' && call.method === 'POST').length, 1);
+assert.equal(recoveredPgrst303.calls.some(call => call.url?.includes('api.resend.com')), false);
+assert.equal(recoveredPgrst303.calls.some(call => ['enqueue_waybill_ready_notifications',
+  'claim_waybill_notifications', 'get_waybill_notification_pdf'].includes(call.name)), false);
+assert.equal(JSON.stringify(recoveredPgrst303.counts).includes(privateErrorSentinel), false);
+console.log('PASS exact PGRST303 claim failure retries once, processes one lease once, and never invokes email delivery');
+
+const exhaustedPgrst303 = await runWorker({
+  driverClaimResponses: Array.from({ length: 3 }, () => ({
+    status: 401, body: { code: 'PGRST303', message: privateErrorSentinel },
+  })),
+});
+assert.equal(exhaustedPgrst303.claimAttempts.driver, 3);
+assert.equal(exhaustedPgrst303.counts.claim_errors, 1);
+assert.equal(exhaustedPgrst303.counts.claimed, 0);
+assert.equal(exhaustedPgrst303.calls.some(call => call.name === 'get_driver_waybill_pdf_snapshot'), false);
+assert.equal(exhaustedPgrst303.calls.some(call => call.name === 'storage'), false);
+console.log('PASS PGRST303 retry stops after three total attempts and reports one final claim error');
+
+const ordinary401 = await runWorker({
+  driverClaimResponses: [{ status: 401, body: { code: 'PGRST301', message: privateErrorSentinel } }],
+});
+assert.equal(ordinary401.claimAttempts.driver, 1);
+assert.equal(ordinary401.counts.claim_errors, 1);
+console.log('PASS ordinary 401 is not retried');
+
+const forbiddenPgrst303 = await runWorker({
+  driverClaimResponses: [{ status: 403, body: { code: 'PGRST303', message: privateErrorSentinel } }],
+});
+assert.equal(forbiddenPgrst303.claimAttempts.driver, 1);
+assert.equal(forbiddenPgrst303.counts.claim_errors, 1);
+console.log('PASS PGRST303 on a non-401 response is not retried');
+
+const networkFailure = await runWorker({ driverClaimResponses: [{ networkFailure: true }] });
+assert.equal(networkFailure.claimAttempts.driver, 1);
+assert.equal(networkFailure.counts.claim_errors, 1);
+console.log('PASS network failure is not retried');
+
+assert(!workerSource.includes('api.resend.com'));
+assert(!workerSource.includes('enqueue_waybill_ready_notifications'));
+assert(!workerSource.includes('claim_waybill_notifications'));
+console.log('PASS PDF worker implementation contains no email provider or notification RPC calls');
 
 const secureSuccess = await runWorker({ driverJobs: [driverJob], companyJobs: [companyJob] });
 assert.deepEqual(secureSuccess.counts, {
