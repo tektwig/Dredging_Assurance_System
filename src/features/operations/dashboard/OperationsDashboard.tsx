@@ -4,8 +4,10 @@ import { ListResultState } from '../../../components/data/ListResultState';
 import {
   loadOperationsDashboard,
   loadOperationsDashboardQueueHealth,
+  loadOperationsMissingBankQueue,
   type DashboardActionCategory,
   type DashboardPreview,
+  type OperationsMissingBankQueue,
   type OperationsDashboardActivity,
   type OperationsDashboardData,
   type OperationsDashboardQueueHealth,
@@ -19,6 +21,8 @@ export type OperationsDashboardLoadState =
   | { status: 'loading' } | { status: 'error' } | { status: 'ready'; data: OperationsDashboardData };
 export type OperationsDashboardQueueHealthLoadState =
   | { status: 'loading' } | { status: 'error' } | { status: 'ready'; data: OperationsDashboardQueueHealth };
+export type MissingBankQueueLoadState =
+  | { status: 'loading' } | { status: 'error' } | { status: 'ready'; data: OperationsMissingBankQueue };
 
 const activityLabels: Record<OperationsDashboardActivity['event_type'], string> = {
   trip_opened: 'Trip Opened',
@@ -83,6 +87,31 @@ function ActionCard({ title, target, category, kind }: {
         </li>;
       })}</ul>}
     <Link className="operations-module-link" to={target}>View module <span aria-hidden="true">→</span></Link>
+  </article>;
+}
+
+function MissingBankActionCard({ state, onRetry }: { state: MissingBankQueueLoadState; onRetry: () => void }) {
+  return <article className="card operations-action-card">
+    <div className="operations-action-heading">
+      <h3>Missing Bank Details</h3>
+      {state.status === 'ready' && <span className="operations-count" aria-label={`${state.data.count} Waybills`}>{state.data.count}</span>}
+    </div>
+    {state.status === 'loading' && <p role="status" className="muted small">Loading missing-bank Waybills…</p>}
+    {state.status === 'error' && <><p role="alert" className="muted small">Unable to load missing-bank Waybills.</p>
+      <button className="operations-queue-refresh" type="button" onClick={onRetry}>Retry queue</button></>}
+    {state.status === 'ready' && state.data.items.length === 0 &&
+      <p className="muted small">No closed Waybills are missing bank details.</p>}
+    {state.status === 'ready' && state.data.items.length > 0 && <>
+      <ul className="operations-preview-list">{state.data.items.map(item => <li key={item.invoice_id}>
+        <Link to={`/operations/waybills/${encodeURIComponent(item.invoice_id)}`}>
+          {item.invoice_number} · {item.trip_number}
+        </Link>
+        <time dateTime={item.issued_at}>{formatDate(item.issued_at)}</time>
+      </li>)}</ul>
+      {state.data.count > state.data.items.length &&
+        <p className="muted small">Showing {state.data.items.length} of {state.data.count} affected Waybills.</p>}
+    </>}
+    <Link className="operations-module-link" to="/operations/waybills">View Waybills <span aria-hidden="true">→</span></Link>
   </article>;
 }
 
@@ -158,10 +187,12 @@ function QueueHealthSection({ state, onRetry }: {
   </section>;
 }
 
-function DashboardContent({ data, queueHealthState, onQueueHealthRetry }: {
+function DashboardContent({ data, queueHealthState, missingBankQueueState, onQueueHealthRetry, onMissingBankQueueRetry }: {
   data: OperationsDashboardData;
   queueHealthState: OperationsDashboardQueueHealthLoadState;
+  missingBankQueueState: MissingBankQueueLoadState;
   onQueueHealthRetry: () => void;
+  onMissingBankQueueRetry: () => void;
 }) {
   const summary = data.summary;
   const kpis = [
@@ -208,6 +239,7 @@ function DashboardContent({ data, queueHealthState, onQueueHealthRetry }: {
         <ActionCard title="Unresolved Exceptions" target="/operations/exceptions" kind="exception" category={actions.unresolvedExceptions} />
         <ActionCard title="Failed Waybill PDFs" target="/operations/waybills" kind="pdf" category={actions.failedWaybillPdfs} />
         <ActionCard title="Failed Waybill Email Delivery" target="/operations/waybills" kind="email" category={actions.failedWaybillEmails} />
+        <MissingBankActionCard state={missingBankQueueState} onRetry={onMissingBankQueueRetry} />
       </div>
     </section>
 
@@ -232,23 +264,29 @@ function DashboardContent({ data, queueHealthState, onQueueHealthRetry }: {
 }
 
 export function OperationsDashboardView({ state, onRetry,
-  queueHealthState = { status: 'loading' }, onQueueHealthRetry = () => undefined }: {
+  queueHealthState = { status: 'loading' }, onQueueHealthRetry = () => undefined,
+  missingBankQueueState = { status: 'loading' }, onMissingBankQueueRetry = () => undefined }: {
   state: OperationsDashboardLoadState;
   onRetry: () => void;
   queueHealthState?: OperationsDashboardQueueHealthLoadState;
   onQueueHealthRetry?: () => void;
+  missingBankQueueState?: MissingBankQueueLoadState;
+  onMissingBankQueueRetry?: () => void;
 }) {
   if (state.status === 'loading') return <ListResultState status="loading" />;
   if (state.status === 'error') return <ListResultState status="error" message="Unable to load the Operations dashboard." onRetry={onRetry} />;
   return <DashboardContent data={state.data} queueHealthState={queueHealthState}
-    onQueueHealthRetry={onQueueHealthRetry} />;
+    missingBankQueueState={missingBankQueueState} onQueueHealthRetry={onQueueHealthRetry}
+    onMissingBankQueueRetry={onMissingBankQueueRetry} />;
 }
 
 export function OperationsDashboard() {
   const [revision, setRevision] = useState(0);
   const [queueRevision, setQueueRevision] = useState(0);
+  const [missingBankQueueRevision, setMissingBankQueueRevision] = useState(0);
   const [state, setState] = useState<OperationsDashboardLoadState>({ status: 'loading' });
   const [queueHealthState, setQueueHealthState] = useState<OperationsDashboardQueueHealthLoadState>({ status: 'loading' });
+  const [missingBankQueueState, setMissingBankQueueState] = useState<MissingBankQueueLoadState>({ status: 'loading' });
 
   const { toasts, dismissToast } = useRealtimeTrips({
     channelName: 'operations-dashboard-trips-realtime',
@@ -278,10 +316,23 @@ export function OperationsDashboard() {
     return () => { current = false; };
   }, [revision, queueRevision]);
 
+  useEffect(() => {
+    let current = true;
+    setMissingBankQueueState({ status: 'loading' });
+    void loadOperationsMissingBankQueue().then(data => {
+      if (current) setMissingBankQueueState({ status: 'ready', data });
+    }).catch(() => {
+      if (current) setMissingBankQueueState({ status: 'error' });
+    });
+    return () => { current = false; };
+  }, [revision, missingBankQueueRevision]);
+
   return (
     <>
       <OperationsDashboardView state={state} onRetry={() => setRevision(value => value + 1)}
-        queueHealthState={queueHealthState} onQueueHealthRetry={() => setQueueRevision(value => value + 1)} />
+        queueHealthState={queueHealthState} onQueueHealthRetry={() => setQueueRevision(value => value + 1)}
+        missingBankQueueState={missingBankQueueState}
+        onMissingBankQueueRetry={() => setMissingBankQueueRevision(value => value + 1)} />
       <NotificationToastContainer toasts={toasts} onDismiss={dismissToast} />
     </>
   );

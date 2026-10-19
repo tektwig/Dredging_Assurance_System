@@ -72,6 +72,9 @@ export interface Database {
         p_pdf_status?: string | null; p_delivery_status?: string | null; p_payout_status?: string | null }; Returns: unknown };
       get_operations_waybill_detail: { Args: { p_invoice_id: string }; Returns: unknown };
       get_operations_waybill_copy_management_state: { Args: { p_invoice_id: string }; Returns: unknown };
+      save_waybill_company_bank_details: { Args: { p_invoice_id: string; p_request_id: string;
+        p_bank_name: string; p_account_name: string; p_account_number: string }; Returns: unknown };
+      get_operations_missing_bank_waybills: { Args: Record<string, never>; Returns: unknown };
       get_operations_waybill_pdf_copy: { Args: { p_invoice_id: string; p_copy_kind: 'driver' | 'company' }; Returns: unknown };
       get_operations_waybill_delivery_history: { Args: { p_invoice_id: string; p_page?: number; p_page_size?: number }; Returns: unknown };
       resend_operations_waybill: { Args: { p_invoice_id: string; p_audience: string; p_request_id: string;

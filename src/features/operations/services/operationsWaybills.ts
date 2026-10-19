@@ -3,12 +3,21 @@ import { normalizePageRequest } from '../../../types/listQuery';
 
 export type PdfStatus = 'pending' | 'processing' | 'ready' | 'failed';
 export type SecurePdfStatus = PdfStatus | 'blocked_missing_bank_details' | 'blocked_bank_details_unverified' | 'not_available';
+export type WaybillBankState = 'missing' | 'pending_verification' | 'correction_pending'
+  | 'verified' | 'registration_captured' | 'rejected';
 export type WaybillCopyManagementState = {
   driver_pdf_status: SecurePdfStatus;
   driver_pdf_ready_at: string | null;
   company_pdf_status: SecurePdfStatus;
   company_pdf_ready_at: string | null;
+  bank_verification_state: WaybillBankState;
+  latest_bank_snapshot_version: number | null;
   company_pdf_held_for_missing_bank_details: boolean;
+};
+export type SaveCompanyBankResult = {
+  snapshot_version: number;
+  company_pdf_status: PdfStatus;
+  unchanged: boolean;
 };
 export type DeliveryStatus = 'pending' | 'processing' | 'sent' | 'failed'
   | 'blocked_missing_email' | 'blocked_configuration' | null;
@@ -72,6 +81,13 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
 
 function text(value: unknown): value is string { return typeof value === 'string'; }
 function nullableText(value: unknown): value is string | null { return value === null || text(value); }
+function waybillBankState(value: unknown): value is WaybillBankState {
+  return ['missing','pending_verification','correction_pending','verified','registration_captured','rejected']
+    .includes(value as string);
+}
+function snapshotVersion(value: unknown): value is number | null {
+  return value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value > 0);
+}
 function timestamp(value: unknown): value is string { return text(value) && Number.isFinite(Date.parse(value)); }
 function nullableTimestamp(value: unknown): value is string | null { return value === null || timestamp(value); }
 function pdfStatus(value: unknown): value is PdfStatus {
@@ -196,10 +212,9 @@ export function parseWaybillCopyManagementState(value: unknown, waybillId: strin
   if (!exactKeys(row, expectedKeys) || row.invoice_id !== waybillId || !text(row.invoice_number)
     || !securePdfStatus(row.driver_pdf_status) || !nullableTimestamp(row.driver_pdf_ready_at)
     || !securePdfStatus(row.company_pdf_status) || !nullableTimestamp(row.company_pdf_ready_at)
-    || !['missing','pending_verification','correction_pending','verified','rejected'].includes(row.bank_verification_state as string)
+    || !waybillBankState(row.bank_verification_state)
     || !nullableText(row.pending_bank_submission_id)
-    || !(row.latest_bank_snapshot_version === null || (Number.isSafeInteger(row.latest_bank_snapshot_version)
-      && (row.latest_bank_snapshot_version as number) > 0))
+    || !snapshotVersion(row.latest_bank_snapshot_version)
     || typeof row.company_pdf_held_for_missing_bank_details !== 'boolean') {
     throw new Error('Invalid secure Waybill copy status response');
   }
@@ -208,6 +223,8 @@ export function parseWaybillCopyManagementState(value: unknown, waybillId: strin
     driver_pdf_ready_at: row.driver_pdf_ready_at,
     company_pdf_status: row.company_pdf_status,
     company_pdf_ready_at: row.company_pdf_ready_at,
+    bank_verification_state: row.bank_verification_state,
+    latest_bank_snapshot_version: row.latest_bank_snapshot_version,
     company_pdf_held_for_missing_bank_details: row.company_pdf_held_for_missing_bank_details,
   };
 }
@@ -216,6 +233,37 @@ export async function loadWaybillCopyManagementState(waybillId: string): Promise
   const result = await client().rpc('get_operations_waybill_copy_management_state', { p_invoice_id: waybillId });
   if (result.error) safeError(result.error, 'load secure Waybill copy status for');
   return parseWaybillCopyManagementState(result.data, waybillId);
+}
+
+export function parseSaveCompanyBankResult(value: unknown): SaveCompanyBankResult {
+  if (!Array.isArray(value) || value.length !== 1 || !record(value[0])
+    || !exactKeys(value[0], ['snapshot_version','company_pdf_status','unchanged'])
+    || !Number.isSafeInteger(value[0].snapshot_version) || (value[0].snapshot_version as number) < 1
+    || !pdfStatus(value[0].company_pdf_status) || typeof value[0].unchanged !== 'boolean') {
+    throw new Error('Invalid secure bank-save response');
+  }
+  return value[0] as SaveCompanyBankResult;
+}
+
+export async function saveWaybillCompanyBankDetails(
+  waybillId: string,
+  requestId: string,
+  bankName: string,
+  accountName: string,
+  accountNumber: string,
+): Promise<SaveCompanyBankResult> {
+  const result = await client().rpc('save_waybill_company_bank_details', {
+    p_invoice_id: waybillId,
+    p_request_id: requestId,
+    p_bank_name: bankName.trim(),
+    p_account_name: accountName.trim(),
+    p_account_number: accountNumber.trim(),
+  });
+  if (result.error?.code === 'P4091') {
+    throw new Error('Waybill bank details changed while saving. Refresh and review the current copy status before retrying.');
+  }
+  if (result.error) safeError(result.error, 'save Company Waybill bank details for');
+  return parseSaveCompanyBankResult(result.data);
 }
 
 export async function downloadWaybillCopy(

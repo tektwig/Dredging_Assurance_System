@@ -35,7 +35,8 @@ create function pg_temp.registration_side_effect_counts() returns jsonb language
     'trucks',(select count(*) from public.trucks),
     'bank_captures',(select count(*) from private.loading_registration_bank_captures),
     'receipts',(select count(*) from private.loading_request_receipts),
-    'audit',(select count(*) from public.audit_log)
+    'audit',(select count(*) from public.audit_log),
+    'notification_outbox',(select count(*) from public.notification_outbox)
   );
 $$;
 
@@ -354,6 +355,61 @@ begin
 end;
 $$;
 
+insert into public.drivers(id,full_name,phone_number)
+values ('d3000000-0000-0000-0000-000000000011','Synthetic Missing Bank Driver','08020000011');
+insert into public.trucks(
+  id,registration_number,driver_id,capacity,capacity_unit,truck_type,owner_name
+) values (
+  'd3000000-0000-0000-0000-000000000012','BANKMISS001',
+  'd3000000-0000-0000-0000-000000000011',30,'tonnes','Registered tipper truck','Not provided'
+);
+alter table public.daily_registrations disable trigger user;
+insert into public.daily_registrations(
+  id,truck_id,driver_id,operational_date,registered_at,registered_by
+) values (
+  'd4000000-0000-0000-0000-000000000002',
+  'd3000000-0000-0000-0000-000000000012',
+  'd3000000-0000-0000-0000-000000000011',
+  ((statement_timestamp()+interval '1 day') at time zone 'Africa/Lagos')::date,
+  statement_timestamp()+interval '1 day','d0000000-0000-0000-0000-000000000002'
+);
+alter table public.daily_registrations enable trigger user;
+alter table public.trips disable trigger user;
+insert into public.trips(
+  id,trip_number,truck_id,driver_id,daily_registration_id,loading_site_id,offloading_site_id,
+  status,quantity_tonnes,opened_at,opened_by,closed_at,closed_by,
+  truck_registration_at_loading,truck_type_at_loading,truck_capacity_at_loading,truck_owner_at_loading,
+  driver_phone_at_loading,driver_license_at_loading,driver_name_at_loading,loading_assignment_id
+) values (
+  'd5000000-0000-0000-0000-000000000002','BANK-MISSING-TRIP-1',
+  'd3000000-0000-0000-0000-000000000012','d3000000-0000-0000-0000-000000000011',
+  'd4000000-0000-0000-0000-000000000002','d1000000-0000-0000-0000-000000000001',
+  'd1000000-0000-0000-0000-000000000002','closed',9,statement_timestamp()-interval '2 hours',
+  'd0000000-0000-0000-0000-000000000002',statement_timestamp()-interval '1 hour',
+  'd0000000-0000-0000-0000-000000000003','BANKMISS001','Registered tipper truck',30,
+  'Not provided','08020000011',null,'Synthetic Missing Bank Driver',
+  current_setting('test.loading_assignment')::uuid
+);
+alter table public.trips enable trigger user;
+insert into public.trip_closure_invoices(
+  id,invoice_number,trip_id,trip_number,truck_id,truck_registration,truck_type,
+  truck_capacity_tonnes,truck_owner_name,driver_id,driver_name,driver_phone,driver_license,
+  loading_site_id,loading_site_name,offloading_site_id,offloading_site_name,
+  loading_officer_id,loading_officer_name,offloading_officer_id,offloading_officer_name,
+  quantity_tonnes,opened_at,closed_at,issued_at
+) values (
+  'd6000000-0000-0000-0000-000000000002','WB-2099-999999998',
+  'd5000000-0000-0000-0000-000000000002','BANK-MISSING-TRIP-1',
+  'd3000000-0000-0000-0000-000000000012','BANKMISS001','Registered tipper truck',30,
+  'Not provided','d3000000-0000-0000-0000-000000000011','Synthetic Missing Bank Driver',
+  '08020000011',null,'d1000000-0000-0000-0000-000000000001','Bank Capture Loading Site',
+  'd1000000-0000-0000-0000-000000000002','Bank Capture Offloading Site',
+  'd0000000-0000-0000-0000-000000000002','Synthetic Loading Officer',
+  'd0000000-0000-0000-0000-000000000003','Synthetic Operations Manager',
+  9,statement_timestamp()-interval '2 hours',statement_timestamp()-interval '1 hour',
+  statement_timestamp()-interval '1 hour'
+);
+
 select set_config('request.jwt.claim.sub','d0000000-0000-0000-0000-000000000002',true);
 set local role authenticated;
 select pg_temp.expect_sqlstate($q$select * from public.get_operations_waybill_registration_bank_capture(
@@ -367,62 +423,209 @@ select pg_temp.expect_sqlstate($q$select * from public.get_operations_waybill_re
   'd6000000-0000-0000-0000-000000000001')$q$,'42501');
 
 select set_config('request.jwt.claim.sub','d0000000-0000-0000-0000-000000000003',true);
-insert into bank_test_state
-select 'manager_capture',to_jsonb(capture)
-from public.get_operations_waybill_registration_bank_capture('d6000000-0000-0000-0000-000000000001') capture;
-select pg_temp.assert_true((select value->>'bank_name'='Test Bank'
-  and value->>'account_number'='1234567890' and value->>'account_name'='Synthetic Bank Driver'
-  and value ? 'captured_at' from bank_test_state where key='manager_capture'),
-  'Operations Manager can review the captured values and capture time');
+select pg_temp.assert_true((select count(*)=0 from public.get_operations_waybill_registration_bank_capture(
+  'd6000000-0000-0000-0000-000000000001')),
+  'automatically snapshotted registration bank values are no longer exposed by the recovery RPC');
 select pg_temp.assert_true((select count(*)=1 from public.get_operations_waybill_copy_management_state(
   'd6000000-0000-0000-0000-000000000001') state
-  where state.driver_pdf_status='pending' and state.company_pdf_status='blocked_missing_bank_details'
-    and state.bank_verification_state='missing'),
-  'registration capture does not verify bank data or alter independent PDF queue states');
+  where state.driver_pdf_status='pending' and state.company_pdf_status='pending'
+    and state.bank_verification_state='registration_captured'
+    and state.latest_bank_snapshot_version=1
+    and not state.company_pdf_held_for_missing_bank_details),
+  'new Waybill automatically snapshots registration banking and releases only its Company PDF');
 
 select pg_temp.assert_true((select count(*)=0 from public.get_operations_waybill_copy_management_state(
   'd6000000-0000-0000-0000-000000000001') state
   where to_jsonb(state)::text ~ '1234567890|Test Bank|account_number|bank_name'),
   'generic Waybill management state does not expose captured bank values');
 
--- One Operations Manager explicitly submits, reviews and verifies; capture itself did not verify.
-insert into bank_test_state values('submission',jsonb_build_object('id',
-  public.submit_waybill_company_bank_details(
-    'd6000000-0000-0000-0000-000000000001',
-    (select value->>'bank_name' from bank_test_state where key='manager_capture'),
-    (select value->>'account_name' from bank_test_state where key='manager_capture'),
-    (select value->>'account_number' from bank_test_state where key='manager_capture')
-  )::text));
-select pg_temp.assert_true((select count(*)=0 from public.get_operations_waybill_registration_bank_capture(
-  'd6000000-0000-0000-0000-000000000001')),
-  'active bank submission uses the existing review RPC instead of exposing a second source');
-insert into bank_test_state
-select 'review',to_jsonb(reviewed)
-from public.get_waybill_company_bank_submission_for_review(
-  ((select value->>'id' from bank_test_state where key='submission')::uuid)
-) reviewed;
 reset role;
 select pg_temp.assert_true(exists (
   select 1 from private.loading_registration_bank_captures capture
   where capture.driver_id=((select value#>>'{driver,id}' from bank_test_state where key='registration')::uuid)
     and capture.captured_by='d0000000-0000-0000-0000-000000000002'
 ),'initial registration capture preserves Loading Officer attribution');
+select pg_temp.assert_true(exists (
+  select 1 from public.trip_closure_invoice_bank_snapshots snapshot
+  join public.trip_closure_invoice_bank_submissions submission
+    on submission.id=snapshot.source_submission_id
+  join private.loading_registration_bank_captures capture
+    on capture.id=snapshot.source_registration_capture_id
+  where snapshot.invoice_id='d6000000-0000-0000-0000-000000000001'
+    and snapshot.source_kind='registration_capture' and snapshot.version=1
+    and snapshot.verified_by is null and snapshot.verified_at is null
+    and snapshot.bank_name=capture.bank_name and snapshot.account_name=capture.account_name
+    and snapshot.account_number=capture.account_number
+    and snapshot.submitted_by=capture.captured_by and snapshot.submitted_at=capture.captured_at
+    and submission.source_kind='registration_capture'
+    and submission.source_registration_capture_id=capture.id
+    and submission.submitted_by=capture.captured_by and submission.submitted_at=capture.captured_at
+), 'registration snapshot preserves source values, actor, timestamp and non-approval provenance');
+select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoice_bank_detail_events event
+  join public.trip_closure_invoice_bank_submissions submission on submission.id=event.submission_id
+  where submission.invoice_id='d6000000-0000-0000-0000-000000000001'
+    and event.event_type='registration_capture_snapshotted'
+    and event.actor_id='d0000000-0000-0000-0000-000000000002'),
+  'automatic snapshot creates one auditable event attributed to the registration actor');
+do $$
+declare
+  v_capture private.loading_registration_bank_captures%rowtype;
+  v_submission_id uuid;
+begin
+  select * into v_capture from private.loading_registration_bank_captures
+  where driver_id=(select driver_id from public.trip_closure_invoices
+    where id='d6000000-0000-0000-0000-000000000001');
+  begin
+    insert into public.trip_closure_invoice_bank_submissions(
+      invoice_id,trip_id,bank_name,account_name,account_number,submitted_by,submitted_at,
+      source_kind,source_registration_capture_id
+    ) values (
+      'd6000000-0000-0000-0000-000000000002','d5000000-0000-0000-0000-000000000002',
+      v_capture.bank_name,v_capture.account_name,v_capture.account_number,
+      v_capture.captured_by,v_capture.captured_at,'registration_capture',v_capture.id
+    ) returning id into v_submission_id;
+    insert into public.trip_closure_invoice_bank_snapshots(
+      invoice_id,trip_id,version,source_submission_id,bank_name,account_name,account_number,
+      submitted_by,submitted_at,verified_by,verified_at,source_kind,source_registration_capture_id
+    ) values (
+      'd6000000-0000-0000-0000-000000000002','d5000000-0000-0000-0000-000000000002',1,
+      v_submission_id,v_capture.bank_name,v_capture.account_name,v_capture.account_number,
+      v_capture.captured_by,v_capture.captured_at,null,null,'registration_capture',v_capture.id
+    );
+    raise exception 'Expected cross-driver capture rejection';
+  exception when check_violation then
+    raise notice 'ASSERTION PASS: registration captures cannot be associated with a different driver Waybill';
+  end;
+end;
+$$;
+select pg_temp.assert_true(not exists (select 1 from public.trip_closure_invoice_bank_submissions
+  where invoice_id='d6000000-0000-0000-0000-000000000002'),
+  'failed cross-driver snapshot attempt leaves no invoice bank submission');
+select pg_temp.assert_true(not has_table_privilege('authenticated',
+    'public.trip_closure_invoice_bank_submissions','SELECT')
+  and not has_table_privilege('authenticated','public.trip_closure_invoice_bank_snapshots','SELECT')
+  and not has_table_privilege('authenticated','public.trip_closure_invoice_bank_detail_events','SELECT'),
+  'authenticated users cannot directly read invoice bank submissions, snapshots or audit events');
 set local role authenticated;
-select pg_temp.assert_true((select value->>'bank_name'='Test Bank'
-  and value->>'account_number'='1234567890'
-  and value->>'submitted_by'='d0000000-0000-0000-0000-000000000003'
-  from bank_test_state where key='review'),'review RPC records the authenticated Operations Manager as submission actor');
-select pg_temp.assert_true(public.verify_waybill_company_bank_details(
-  ((select value->>'id' from bank_test_state where key='submission')::uuid),true,'verified'
-)='verified','Operations Manager explicitly verifies the captured bank data');
+select set_config('request.jwt.claim.sub','d0000000-0000-0000-0000-000000000002',true);
+select pg_temp.expect_sqlstate($q$select * from public.get_operations_waybill_copy_management_state(
+  'd6000000-0000-0000-0000-000000000001')$q$,'42501');
+select pg_temp.expect_sqlstate($q$select public.get_operations_missing_bank_waybills()$q$,'42501');
+select pg_temp.expect_sqlstate($q$select * from public.save_waybill_company_bank_details(
+  'd6000000-0000-0000-0000-000000000002','d8000000-0000-0000-0000-000000000001',
+  'Test Bank','Synthetic Missing Bank Driver','1234567890')$q$,'42501');
+select set_config('request.jwt.claim.sub','d0000000-0000-0000-0000-000000000004',true);
+select pg_temp.expect_sqlstate($q$select public.get_operations_missing_bank_waybills()$q$,'42501');
+select pg_temp.expect_sqlstate($q$select * from public.save_waybill_company_bank_details(
+  'd6000000-0000-0000-0000-000000000002','d8000000-0000-0000-0000-000000000002',
+  'Test Bank','Synthetic Missing Bank Driver','1234567890')$q$,'42501');
+select set_config('request.jwt.claim.sub','d0000000-0000-0000-0000-000000000001',true);
+select pg_temp.expect_sqlstate($q$select public.get_operations_missing_bank_waybills()$q$,'42501');
+select pg_temp.expect_sqlstate($q$select * from public.save_waybill_company_bank_details(
+  'd6000000-0000-0000-0000-000000000002','d8000000-0000-0000-0000-000000000003',
+  'Test Bank','Synthetic Missing Bank Driver','1234567890')$q$,'42501');
+
+select set_config('request.jwt.claim.sub','d0000000-0000-0000-0000-000000000003',true);
+insert into bank_test_state
+select 'missing_queue_before',public.get_operations_missing_bank_waybills();
+select pg_temp.assert_true((select value->>'count'='1'
+  and value#>>'{items,0,invoice_number}'='WB-2099-999999998'
+  from bank_test_state where key='missing_queue_before'),
+  'missing-bank Action Required queue includes only the closed Waybill without a capture');
+insert into bank_test_state
+select 'notification_count_before',jsonb_build_object(
+  'count',pg_temp.registration_side_effect_counts()->>'notification_outbox');
+reset role;
+create function pg_temp.fail_company_bank_save_event() returns trigger language plpgsql as $$
+begin
+  if new.invoice_id='d6000000-0000-0000-0000-000000000002'::uuid
+    and new.event_type='bank_details_saved' then
+    raise exception 'synthetic bank audit insertion failure' using errcode='23514';
+  end if;
+  return new;
+end;
+$$;
+create trigger test_fail_company_bank_save_event
+before insert on public.trip_closure_invoice_bank_detail_events
+for each row execute function pg_temp.fail_company_bank_save_event();
+set local role authenticated;
+select set_config('request.jwt.claim.sub','d0000000-0000-0000-0000-000000000003',true);
+select pg_temp.expect_sqlstate($q$select * from public.save_waybill_company_bank_details(
+  'd6000000-0000-0000-0000-000000000002','d8000000-0000-0000-0000-000000000006',
+  'Synthetic Test Bank','Synthetic Missing Bank Driver','0987654321')$q$,'23514');
+reset role;
+drop trigger test_fail_company_bank_save_event on public.trip_closure_invoice_bank_detail_events;
+select pg_temp.assert_true(not exists (select 1 from public.trip_closure_invoice_bank_submissions
+    where invoice_id='d6000000-0000-0000-0000-000000000002')
+  and not exists (select 1 from public.trip_closure_invoice_bank_snapshots
+    where invoice_id='d6000000-0000-0000-0000-000000000002')
+  and not exists (select 1 from private.waybill_company_bank_save_receipts
+    where invoice_id='d6000000-0000-0000-0000-000000000002')
+  and (select status='blocked_missing_bank_details' from public.trip_closure_invoice_pdf_copies
+    where invoice_id='d6000000-0000-0000-0000-000000000002' and copy_kind='company'),
+  'failed audit insert rolls back all bank save writes and preserves the blocked PDF state');
+set local role authenticated;
+select set_config('request.jwt.claim.sub','d0000000-0000-0000-0000-000000000003',true);
+select pg_temp.expect_sqlstate($q$select * from public.save_waybill_company_bank_details(
+  'd6000000-0000-0000-0000-000000000002','d8000000-0000-0000-0000-000000000004',
+  'Test Bank','Synthetic Missing Bank Driver','123')$q$,'22023');
+insert into bank_test_state
+select 'bank_save',to_jsonb(saved)
+from public.save_waybill_company_bank_details(
+  'd6000000-0000-0000-0000-000000000002','d8000000-0000-0000-0000-000000000004',
+  'Synthetic Test Bank','Synthetic Missing Bank Driver','0987654321') saved;
+select pg_temp.assert_true((select value->>'snapshot_version'='1'
+  and value->>'company_pdf_status'='pending' and value->>'unchanged'='false'
+  from bank_test_state where key='bank_save'),
+  'one authorized save atomically verifies details and releases Company PDF processing');
 select pg_temp.assert_true((select count(*)=1 from public.get_operations_waybill_copy_management_state(
-  'd6000000-0000-0000-0000-000000000001') state
+  'd6000000-0000-0000-0000-000000000002') state
   where state.driver_pdf_status='pending' and state.company_pdf_status='pending'
     and state.bank_verification_state='verified' and state.latest_bank_snapshot_version=1),
-  'verification creates Company snapshot/job while Driver copy stays bank-free');
-select pg_temp.assert_true((select count(*)=0 from public.get_operations_waybill_registration_bank_capture(
-  'd6000000-0000-0000-0000-000000000001')),
-  'verified Waybill no longer returns the older registration capture');
+  'bank save leaves Driver PDF independent and exposes Company processing state');
+select pg_temp.assert_true((public.get_operations_missing_bank_waybills()->>'count')='0',
+  'resolved Waybill automatically leaves the Action Required queue');
+select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoice_bank_detail_events event
+  join public.trip_closure_invoice_bank_submissions submission on submission.id=event.submission_id
+  where submission.invoice_id='d6000000-0000-0000-0000-000000000002'
+    and event.event_type='bank_details_saved'
+    and event.actor_id='d0000000-0000-0000-0000-000000000003'),
+  'initial Operations Manager save creates one actor-attributed audit event');
+select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoice_bank_snapshots
+  where invoice_id='d6000000-0000-0000-0000-000000000002' and version=1
+    and source_kind='operations_manager' and verified_by='d0000000-0000-0000-0000-000000000003'),
+  'Operations Manager bank snapshot records one verified immutable version');
+select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoice_pdf_copies
+  where invoice_id='d6000000-0000-0000-0000-000000000002' and copy_kind='driver')
+  and (select count(*)=1 from public.trip_closure_invoice_pdf_copies
+  where invoice_id='d6000000-0000-0000-0000-000000000002' and copy_kind='company'),
+  'company bank capture creates no duplicate PDF-copy identities');
+select pg_temp.assert_true(pg_temp.registration_side_effect_counts()->>'notification_outbox'=
+  (select value->>'count' from bank_test_state where key='notification_count_before'),
+  'bank saving does not enqueue notification delivery or send email as a side effect');
+
+insert into bank_test_state
+select 'same_request_replay',to_jsonb(saved)
+from public.save_waybill_company_bank_details(
+  'd6000000-0000-0000-0000-000000000002','d8000000-0000-0000-0000-000000000004',
+  'Synthetic Test Bank','Synthetic Missing Bank Driver','0987654321') saved;
+select pg_temp.assert_true((select value->>'snapshot_version'='1'
+  and value->>'unchanged'='true' from bank_test_state where key='same_request_replay')
+  and (select count(*)=1 from public.trip_closure_invoice_bank_snapshots
+    where invoice_id='d6000000-0000-0000-0000-000000000002')
+  and (select count(*)=1 from public.trip_closure_invoice_bank_detail_events event
+    join public.trip_closure_invoice_bank_submissions submission on submission.id=event.submission_id
+    where submission.invoice_id='d6000000-0000-0000-0000-000000000002'
+      and event.event_type='bank_details_saved'),
+  'same request replay is idempotent and creates no duplicate snapshot or audit event');
+select pg_temp.expect_sqlstate($q$select * from public.save_waybill_company_bank_details(
+  'd6000000-0000-0000-0000-000000000002','d8000000-0000-0000-0000-000000000004',
+  'Different Bank','Synthetic Missing Bank Driver','0987654321')$q$,'P4091');
+select pg_temp.assert_true(exists (
+  select 1 from pg_proc function_row
+  where function_row.oid='public.save_waybill_company_bank_details(uuid,uuid,text,text,text)'::regprocedure
+    and pg_get_functiondef(function_row.oid) like '%pg_advisory_xact_lock%'
+), 'bank saves serialize concurrent invoice requests before idempotency checks');
 
 -- The worker-specific Driver snapshot remains structurally free of bank/phone fields.
 reset role;
@@ -440,33 +643,57 @@ select pg_temp.assert_true((select value is not null
   from bank_test_state where key='driver_pdf_snapshot'),
   'Driver PDF renderer snapshot contains no bank data or driver phone');
 
+select pg_temp.assert_true(has_function_privilege('service_role',
+  'public.get_company_waybill_pdf_snapshot(uuid,uuid)','EXECUTE')
+  and has_function_privilege('service_role','public.claim_company_waybill_pdf_jobs(integer,uuid)','EXECUTE'),
+  'service role retains only the protected Company PDF worker RPC path');
+update public.trip_closure_invoice_pdf_copies
+set status='processing',lease_token='d7000000-0000-0000-0000-000000000002',
+  lease_until=clock_timestamp()+interval '5 minutes',attempts=1
+where invoice_id='d6000000-0000-0000-0000-000000000002' and copy_kind='company' and copy_version=1;
+insert into bank_test_state values('company_pdf_snapshot',public.get_company_waybill_pdf_snapshot(
+  (select id from public.trip_closure_invoice_pdf_copies
+    where invoice_id='d6000000-0000-0000-0000-000000000002' and copy_kind='company'),
+  'd7000000-0000-0000-0000-000000000002'
+));
+select pg_temp.assert_true((select value->>'bank_name'='Synthetic Test Bank'
+  and value->>'account_name'='Synthetic Missing Bank Driver'
+  and value->>'account_number'='0987654321'
+  from bank_test_state where key='company_pdf_snapshot'),
+  'Company PDF snapshot receives only the invoice-specific saved bank version');
+select pg_temp.assert_true(public.finish_company_waybill_pdf_job(
+  (select id from public.trip_closure_invoice_pdf_copies
+    where invoice_id='d6000000-0000-0000-0000-000000000002'
+      and copy_kind='company' and copy_version=1),
+  'd7000000-0000-0000-0000-000000000002',true),
+  'Company PDF can finish only under the active lease with the authorized bank snapshot');
+
 -- Corrections remain immutable, versioned, and isolated to Company copies.
 set local role authenticated;
 select set_config('request.jwt.claim.sub','d0000000-0000-0000-0000-000000000003',true);
-insert into bank_test_state values('correction_submission',jsonb_build_object('id',
-  public.submit_waybill_company_bank_details(
-    'd6000000-0000-0000-0000-000000000001','Corrected Test Bank','Corrected Synthetic Name','0987654321'
-  )::text));
 insert into bank_test_state
-select 'correction_review',to_jsonb(reviewed)
-from public.get_waybill_company_bank_submission_for_review(
-  ((select value->>'id' from bank_test_state where key='correction_submission')::uuid)
-) reviewed;
-select pg_temp.assert_true((select value->>'bank_name'='Corrected Test Bank'
-  and value->>'account_number'='0987654321'
-  and value->>'submitted_by'='d0000000-0000-0000-0000-000000000003'
-  from bank_test_state where key='correction_review'),
-  'Operations Manager correction review is asserted without printing bank values');
-select pg_temp.assert_true(public.verify_waybill_company_bank_details(
-  ((select value->>'id' from bank_test_state where key='correction_submission')::uuid),true,'verified'
-)='corrected','Operations Manager can verify a correction');
+select 'correction_save',to_jsonb(saved)
+from public.save_waybill_company_bank_details(
+  'd6000000-0000-0000-0000-000000000001','d8000000-0000-0000-0000-000000000005',
+  'Corrected Test Bank','Corrected Synthetic Name','0987654321') saved;
+select pg_temp.assert_true((select value->>'snapshot_version'='2'
+  and value->>'company_pdf_status'='pending' and value->>'unchanged'='false'
+  from bank_test_state where key='correction_save'),
+  'one Operations Manager correction creates the next Company PDF version without review');
 reset role;
 select pg_temp.assert_true((select count(*)=2 and min(version)=1 and max(version)=2
   from public.trip_closure_invoice_bank_snapshots where invoice_id='d6000000-0000-0000-0000-000000000001')
+  and (select count(*)=1 from public.trip_closure_invoice_bank_detail_events event
+    join public.trip_closure_invoice_bank_submissions submission on submission.id=event.submission_id
+    where submission.invoice_id='d6000000-0000-0000-0000-000000000001'
+      and event.event_type='bank_details_corrected'
+      and event.actor_id='d0000000-0000-0000-0000-000000000003')
   and (select count(*)=2 from public.trip_closure_invoice_pdf_copies
     where invoice_id='d6000000-0000-0000-0000-000000000001' and copy_kind='company')
   and (select count(*)=1 from public.trip_closure_invoice_pdf_copies
-    where invoice_id='d6000000-0000-0000-0000-000000000001' and copy_kind='driver'),
+    where invoice_id='d6000000-0000-0000-0000-000000000001' and copy_kind='driver')
+  and (select status='ready' from public.trip_closure_invoice_pdf_copies
+    where invoice_id='d6000000-0000-0000-0000-000000000002' and copy_kind='company' and copy_version=1),
   'correction preserves prior snapshot and creates only a new Company PDF version');
 
 rollback;

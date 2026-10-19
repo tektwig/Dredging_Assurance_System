@@ -65,6 +65,17 @@ export type OperationsDashboardQueueHealth = {
   pdf: OperationsQueueMetrics;
   notifications: OperationsQueueMetrics;
 };
+export type MissingBankWaybill = {
+  invoice_id: string;
+  invoice_number: string;
+  trip_number: string;
+  issued_at: string;
+};
+export type OperationsMissingBankQueue = {
+  as_of: string;
+  count: number;
+  items: MissingBankWaybill[];
+};
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -134,6 +145,19 @@ export function parseOperationsDashboardQueueHealth(value: unknown): OperationsD
     pdf: parseQueueMetrics(value.pdf, 'ready'),
     notifications: parseQueueMetrics(value.notifications, 'provider_accepted'),
   };
+}
+
+export function parseOperationsMissingBankQueue(value: unknown): OperationsMissingBankQueue {
+  const keys = ['invoice_id', 'invoice_number', 'trip_number', 'issued_at'];
+  if (!record(value) || !exactKeys(value, ['as_of', 'count', 'items']) || !date(value.as_of)
+    || !count(value.count) || !Array.isArray(value.items) || value.items.length > 10
+    || value.count < value.items.length
+    || !value.items.every(item => record(item) && exactKeys(item, keys)
+      && typeof item.invoice_id === 'string' && typeof item.invoice_number === 'string'
+      && typeof item.trip_number === 'string' && date(item.issued_at))) {
+    throw new Error('Invalid missing-bank Waybill queue response');
+  }
+  return { as_of: value.as_of, count: value.count, items: value.items as MissingBankWaybill[] };
 }
 
 function parseCategory(value: unknown, expectedKeys: readonly string[]): DashboardActionCategory {
@@ -262,4 +286,15 @@ export async function loadOperationsDashboardQueueHealth(): Promise<OperationsDa
   if (result.error?.code === '42501') throw new Error('Operations queue health access denied');
   if (result.error) throw new Error('Operations queue health unavailable');
   return parseOperationsDashboardQueueHealth(result.data);
+}
+
+export async function loadOperationsMissingBankQueue(): Promise<OperationsMissingBankQueue> {
+  if (!supabase) throw new Error('Missing-bank Waybill queue unavailable');
+  const rpc = supabase.rpc.bind(supabase) as unknown as (
+    name: string, args?: Record<string, unknown>,
+  ) => Promise<{ data: unknown; error: { code?: string } | null }>;
+  const result = await rpc('get_operations_missing_bank_waybills');
+  if (result.error?.code === '42501') throw new Error('Missing-bank Waybill queue access denied');
+  if (result.error) throw new Error('Missing-bank Waybill queue unavailable');
+  return parseOperationsMissingBankQueue(result.data);
 }

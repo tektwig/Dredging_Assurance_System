@@ -5,7 +5,8 @@ import { ListResultState } from '../../../components/data/ListResultState';
 import { PaginationControls } from '../../../components/data/PaginationControls';
 import {
   downloadWaybill, downloadWaybillCopy, loadDeliveryHistory, loadWaybillCopyManagementState,
-  loadWaybillDetail, resendWaybill, retryWaybillDelivery, type DeliveryAttempt, type DeliveryStatus,
+  loadWaybillDetail, resendWaybill, retryWaybillDelivery, saveWaybillCompanyBankDetails,
+  type DeliveryAttempt, type DeliveryStatus,
   type Page, type SecurePdfStatus, type WaybillCopyManagementState, type WaybillDetail,
 } from '../services/operationsWaybills';
 import { formatLagosDate } from './OperationsWaybillsRegister';
@@ -22,6 +23,62 @@ function secureCopyStatusLabel(status: SecurePdfStatus): string {
   if (status === 'blocked_bank_details_unverified') return 'Bank Details Unverified';
   if (status === 'not_available') return 'Not Available';
   return status[0].toUpperCase() + status.slice(1);
+}
+
+function BankDetailsEntry({ waybillId, onSaved }: { waybillId: string; onSaved: () => void }) {
+  const requestId = useRef(crypto.randomUUID());
+  const [bankName, setBankName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    const normalizedBankName = bankName.trim();
+    const normalizedAccountName = accountName.trim();
+    const normalizedAccountNumber = accountNumber.trim();
+    if (!normalizedBankName || normalizedBankName.length > 200) {
+      setError('Enter a valid bank name.');
+      return;
+    }
+    if (!/^[0-9]{10}$/.test(normalizedAccountNumber)) {
+      setError('Account number must contain exactly 10 digits.');
+      return;
+    }
+    if (!normalizedAccountName || normalizedAccountName.length > 200) {
+      setError('Enter a valid account name.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await saveWaybillCompanyBankDetails(waybillId, requestId.current,
+        normalizedBankName, normalizedAccountName, normalizedAccountNumber);
+      onSaved();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Unable to save Waybill bank details.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <form className="waybill-action-form" onSubmit={submit} aria-label="Enter Company Waybill bank details">
+    <h3>Enter Bank Details</h3>
+    <p className="muted">These details are stored privately and used only for the Company Waybill copy.</p>
+    <label>Bank Name<input autoComplete="off" maxLength={200} required value={bankName}
+      onChange={event => setBankName(event.currentTarget.value)} /></label>
+    <label>Account Number<input autoComplete="off" inputMode="numeric" pattern="[0-9]{10}"
+      maxLength={10} required value={accountNumber}
+      onChange={event => setAccountNumber(event.currentTarget.value)} /></label>
+    <label>Account Name<input autoComplete="off" maxLength={200} required value={accountName}
+      onChange={event => setAccountName(event.currentTarget.value)} /></label>
+    {error && <p role="alert">{error}</p>}
+    <button className="button" type="submit" disabled={busy}>
+      {busy ? 'Saving bank details…' : 'Save bank details'}
+    </button>
+  </form>;
 }
 
 function DeliveryRecovery({ detail, audience, status, onDone, onError }: {
@@ -140,11 +197,16 @@ export function OperationsWaybillDetailView({ state, copyState, history, history
         <div><h3>Company PDF</h3>
           <p>Status: <strong>{secureCopyStatusLabel(copyState.data.company_pdf_status)}</strong></p>
           {copyState.data.company_pdf_ready_at && <p>Ready: {formatLagosDate(copyState.data.company_pdf_ready_at)}</p>}
-          {copyState.data.company_pdf_held_for_missing_bank_details && <p role="status">Bank Details Required. Company PDF generation is held until verified banking information is available.</p>}
+          {copyState.data.company_pdf_held_for_missing_bank_details && <p role="status">Bank Details Required. Save the details to release the Company PDF for processing.</p>}
           <button className="button secondary" type="button" disabled={copyState.data.company_pdf_status !== 'ready'}
             onClick={() => onCopyDownload('company', state.data)}>Download Company Copy</button>
         </div>
       </div>}
+      {copyState.status === 'ready'
+        && ['blocked_missing_bank_details','blocked_bank_details_unverified'].includes(copyState.data.company_pdf_status)
+        && copyState.data.latest_bank_snapshot_version === null
+        && ['missing','rejected','pending_verification'].includes(copyState.data.bank_verification_state)
+        && <BankDetailsEntry waybillId={waybill.id} onSaved={onRefresh} />}
     </section>
     <section className="card waybill-section"><h2>Delivery</h2>
       <p className="muted">Company and driver deliveries are tracked independently.</p>

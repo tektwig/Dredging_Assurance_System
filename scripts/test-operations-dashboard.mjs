@@ -57,11 +57,17 @@ const queueHealthResponse = {
     blocked_missing_email: 0, blocked_configuration: 0, unexpected_status: 0,
     latest_status: 'provider_accepted', latest_updated_at: '2026-09-27T09:58:00.000Z' },
 };
+const missingBankQueueResponse = {
+  as_of: '2026-09-27T10:00:00.000Z', count: 1,
+  items: [{ invoice_id: 'invoice-1', invoice_number: 'WB-2026-000040',
+    trip_number: 'TRP-40', issued_at: '2026-09-27T08:30:00.000Z' }],
+};
 const rpcData = {
   get_operations_dashboard_summary: summaryResponse,
   get_operations_dashboard_open_trips: openTripsResponse,
   get_operations_dashboard_activity: activityResponse,
   get_operations_dashboard_queue_health: queueHealthResponse,
+  get_operations_missing_bank_waybills: missingBankQueueResponse,
 };
 
 overrides.set(resolve('src/lib/supabase.ts'), {
@@ -96,9 +102,11 @@ function load(path) {
 
 const service = load('src/features/operations/services/operationsDashboard.ts');
 const dashboard = load('src/features/operations/dashboard/OperationsDashboard.tsx');
-const renderView = (state, queueHealthState = { status: 'ready', data: queueHealthResponse }) => renderToStaticMarkup(
+const renderView = (state, queueHealthState = { status: 'ready', data: queueHealthResponse },
+  missingBankQueueState = { status: 'ready', data: missingBankQueueResponse }) => renderToStaticMarkup(
   React.createElement(router.MemoryRouter, null,
-    React.createElement(dashboard.OperationsDashboardView, { state, onRetry() {}, queueHealthState, onQueueHealthRetry() {} })));
+    React.createElement(dashboard.OperationsDashboardView, { state, onRetry() {}, queueHealthState,
+      onQueueHealthRetry() {}, missingBankQueueState, onMissingBankQueueRetry() {} })));
 const summary = service.parseOperationsDashboardSummary(summaryResponse);
 assert.equal(summary.tripsOpenedToday, 3);
 assert.equal(summary.tonnageToday, 12.5);
@@ -159,9 +167,21 @@ const emptyQueueHealth = {
     latest_status: null, latest_updated_at: null },
 };
 assert.equal(service.parseOperationsDashboardQueueHealth(emptyQueueHealth).pdf.pending_total, 0);
+const missingQueue = service.parseOperationsMissingBankQueue(missingBankQueueResponse);
+assert.equal(missingQueue.count, 1);
+assert.equal(missingQueue.items[0].invoice_number, 'WB-2026-000040');
+assert.throws(() => service.parseOperationsMissingBankQueue({ ...missingBankQueueResponse,
+  items: [{ ...missingBankQueueResponse.items[0], account_number: 'sensitive' }] }), /Invalid/);
+assert.throws(() => service.parseOperationsMissingBankQueue({ ...missingBankQueueResponse,
+  items: [{ ...missingBankQueueResponse.items[0], storage_path: 'private/path' }] }), /Invalid/);
+assert.equal(service.parseOperationsMissingBankQueue({ ...missingBankQueueResponse, count: 0, items: [] }).count, 0);
+rpcCalls = [];
+assert.equal((await service.loadOperationsMissingBankQueue()).items[0].invoice_id, 'invoice-1');
+assert.deepEqual(rpcCalls.map(call => call.name), ['get_operations_missing_bank_waybills']);
 rpcFailure = { data: null, error: { code: '42501' } };
 await assert.rejects(service.loadOperationsDashboard(), /access denied/i);
 await assert.rejects(service.loadOperationsDashboardQueueHealth(), /access denied/i);
+await assert.rejects(service.loadOperationsMissingBankQueue(), /access denied/i);
 rpcFailure = null;
 console.log('PASS strict dashboard and queue response validation, sensitive-field exclusion, safe authorization errors and fixed RPC requests');
 
@@ -182,10 +202,13 @@ const emptyData = {
   openTrips: { as_of: openTripsResponse.as_of, items: [] },
   activity: { as_of: activityResponse.as_of, items: [] },
 };
-const emptyHtml = renderView({ status: 'ready', data: emptyData }, { status: 'ready', data: emptyQueueHealth });
+const resolvedMissingQueue = { ...missingBankQueueResponse, count: 0, items: [] };
+const emptyHtml = renderView({ status: 'ready', data: emptyData }, { status: 'ready', data: emptyQueueHealth },
+  { status: 'ready', data: resolvedMissingQueue });
 assert.match(emptyHtml, /There are no open trips/);
 assert.match(emptyHtml, /No recent operational activity/);
 assert.match(emptyHtml, /No items requiring attention/);
+assert.match(emptyHtml, /No closed Waybills are missing bank details/);
 assert.match(emptyHtml, /No pending, processing, or failed jobs are currently recorded/);
 const readyHtml = renderView({ status: 'ready', data });
 const dashboardMigration = readFileSync(resolve('supabase/migrations/20261009000000_payment_free_waybill_cutover.sql'), 'utf8');
@@ -207,6 +230,9 @@ assert(!readyHtml.includes('>PDF Ready</td>'));
 assert(readyHtml.includes('12.50'));
 assert(readyHtml.includes('href="/operations/trips"'));
 assert(readyHtml.includes('href="/operations/waybills"'));
+assert(readyHtml.includes('Missing Bank Details'));
+assert(readyHtml.includes('WB-2026-000040'));
+assert(readyHtml.includes('href="/operations/waybills/invoice-1"'));
 assert(readyHtml.includes('Server snapshot observed'));
 assert(readyHtml.includes('Queue status does not establish whether a worker is running or healthy'));
 assert(readyHtml.includes('not confirmed email delivery'));
@@ -218,4 +244,7 @@ assert(unrecognizedQueueHtml.includes('Latest current job status: <strong>Unreco
 const queueErrorHtml = renderView({ status: 'ready', data }, { status: 'error' });
 assert(queueErrorHtml.includes('Unable to load queue health'));
 assert(queueErrorHtml.includes('Recent Activity'));
+const missingQueueErrorHtml = renderView({ status: 'ready', data }, { status: 'ready', data: queueHealthResponse },
+  { status: 'error' });
+assert(missingQueueErrorHtml.includes('Unable to load missing-bank Waybills'));
 console.log('PASS existing dashboard compatibility, queue classifications, empty/error states, refresh controls and safe drill-down');
