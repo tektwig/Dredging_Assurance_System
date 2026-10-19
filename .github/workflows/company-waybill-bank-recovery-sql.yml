@@ -1,0 +1,63 @@
+name: Company Waybill bank recovery SQL
+
+on:
+  push:
+    branches:
+      - feature/company-waybill-bank-recovery
+    paths:
+      - ".github/workflows/company-waybill-bank-recovery-sql.yml"
+      - "scripts/ci/run-company-waybill-bank-recovery.sh"
+      - "scripts/test-company-waybill-bank-autopreparation.mjs"
+      - "supabase/migrations/**"
+      - "supabase/tests/database/company_waybill_bank_snapshot_autopreparation.sql"
+      - "supabase/tests/database/company_waybill_bank_concurrency.sql"
+      - "supabase/tests/database/loading_registration_bank_capture.sql"
+      - "supabase/tests/fixtures/company_waybill_bank_recovery/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: company-waybill-bank-recovery-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sql-integration:
+    name: Isolated Supabase SQL integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "true"
+    steps:
+      - name: Check out feature source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Check out checksum-pinned SQL baseline and fixtures
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: 16bf4ec5286f8ed5efc225da5456b95fbb7ba4dd
+          path: .ci-sql-support
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install pinned Supabase CLI
+        uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+        with:
+          version: 2.120.0
+
+      - name: Verify branch, fixtures, and runner tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/feature/company-waybill-bank-recovery"
+          test "$(supabase --version)" = "2.120.0"
+          docker info --format '{{.ServerVersion}}' >/dev/null
+          test "$(git -C .ci-sql-support rev-parse HEAD)" = "16bf4ec5286f8ed5efc225da5456b95fbb7ba4dd"
+          node scripts/test-company-waybill-bank-autopreparation.mjs
+
+      - name: Run disposable PostgreSQL migration and SQL suites
+        shell: bash
+        run: bash scripts/ci/run-company-waybill-bank-recovery.sh
