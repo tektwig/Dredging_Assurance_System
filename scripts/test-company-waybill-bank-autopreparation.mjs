@@ -66,6 +66,8 @@ assert.match(dashboard, /MissingBankActionCard[\s\S]*?\/operations\/waybills\/\$
 
 assert.match(recoverySeed, /WB-2026-'\|\|lpad\(value::text,6,'0'\)/);
 assert.match(recoverySeed, /private\.loading_registration_bank_captures/);
+assert.match(recoverySeed, /loading_officer_id,loading_officer_name,offloading_officer_id,offloading_officer_name/);
+assert.match(recoverySeed, /e0000000-0000-4000-8000-000000000002','Synthetic recovery actor'[\s\S]*?e0000000-0000-4000-8000-000000000001','Synthetic recovery actor/);
 assert.match(loadingAlignmentMigration, /assigned_at timestamptz not null default clock_timestamp\(\)/);
 assert.match(recoverySeed, /from public\.user_site_assignments[\s\S]*?ended_at is null order by assigned_at desc limit 1/);
 assert.doesNotMatch(recoverySeed, /from public\.user_site_assignments[\s\S]*?order by created_at desc/);

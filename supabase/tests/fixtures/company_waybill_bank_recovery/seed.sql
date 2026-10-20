@@ -97,6 +97,7 @@ insert into public.trip_closure_invoices(
   id,invoice_number,trip_id,trip_number,truck_id,truck_registration,truck_type,
   truck_capacity_tonnes,truck_owner_name,driver_id,driver_name,driver_phone,driver_license,
   loading_site_id,loading_site_name,offloading_site_id,offloading_site_name,
+  loading_officer_id,loading_officer_name,offloading_officer_id,offloading_officer_name,
   quantity_tonnes,opened_at,closed_at,issued_at
 )
 select ('e7000000-0000-4000-8000-'||lpad(value::text,12,'0'))::uuid,
@@ -109,6 +110,8 @@ select ('e7000000-0000-4000-8000-'||lpad(value::text,12,'0'))::uuid,
   'Synthetic recovery driver '||value,'08090000'||value::text,null,
   'e1000000-0000-4000-8000-000000000001','Synthetic Recovery Loading Site',
   'e1000000-0000-4000-8000-000000000002','Synthetic Recovery Offloading Site',
+  'e0000000-0000-4000-8000-000000000002','Synthetic recovery actor',
+  'e0000000-0000-4000-8000-000000000001','Synthetic recovery actor',
   12,statement_timestamp()-interval '2 hours',statement_timestamp()-interval '1 hour',
   statement_timestamp()-interval '1 hour'
 from generate_series(40,43) value;
