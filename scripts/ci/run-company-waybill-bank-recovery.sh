@@ -318,6 +318,7 @@ run_sql "historical registration receipt seed" "$support_fixture_root/registrati
 copy_migration "$repo_root/supabase/migrations" 20261016000050_loading_receipt_v3_operation.sql
 assert_staged_count 23
 apply_migrations "$v3_versions"
+run_transactional_suite "hybrid cutover assertions" "$support_fixture_root/hybrid_cutover_assertions.sql"
 copy_migration "$repo_root/supabase/migrations" 20261016000100_loading_registration_bank_capture.sql
 assert_staged_count 24
 apply_migrations "$v4_versions"
@@ -325,7 +326,6 @@ copy_migration "$repo_root/supabase/migrations" 20261018124936_restore_operation
 assert_staged_count 25
 apply_migrations "$later_versions"
 
-run_transactional_suite "hybrid cutover assertions" "$support_fixture_root/hybrid_cutover_assertions.sql"
 run_transactional_suite "secure dual-Waybill suite" "$support_database_test_root/secure_dual_waybill.sql"
 run_transactional_suite "field-session authorization suite" "$repo_root/supabase/tests/database/field_operational_day_auth.sql"
 run_transactional_suite "V4 registration bank-capture suite" "$repo_root/supabase/tests/database/loading_registration_bank_capture.sql"
