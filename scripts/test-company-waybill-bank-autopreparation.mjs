@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 const migration = readFileSync('supabase/migrations/20261019151115_company_waybill_bank_snapshot_autopreparation.sql', 'utf8');
 const v3RegistrationMigration = readFileSync('supabase/migrations/20261011000100_payment_free_loading_registration.sql', 'utf8');
 const v4RegistrationMigration = readFileSync('supabase/migrations/20261016000100_loading_registration_bank_capture.sql', 'utf8');
+const loadingAlignmentMigration = readFileSync('supabase/migrations/20260924000100_loading_alignment.sql', 'utf8');
 const databaseTest = readFileSync('supabase/tests/database/loading_registration_bank_capture.sql', 'utf8');
 const waybillService = readFileSync('src/features/operations/services/operationsWaybills.ts', 'utf8');
 const waybillDetail = readFileSync('src/features/operations/waybillsPayouts/OperationsWaybillDetail.tsx', 'utf8');
@@ -47,6 +48,14 @@ assert.match(databaseTest, /bank saving does not enqueue notification delivery o
 assert.match(databaseTest, /Company PDF snapshot receives only the invoice-specific saved bank version/);
 assert.match(databaseTest, /correction preserves prior snapshot and creates only a new Company PDF version/);
 assert.match(databaseTest, /Driver PDF renderer snapshot contains no bank data or driver phone/);
+assert.match(loadingAlignmentMigration, /alter table public\.daily_registrations rename column driver_id to initial_driver_id/i);
+const registrationSeedColumns = [...databaseTest.matchAll(/insert into public\.daily_registrations\s*\(([^)]*)\)/gi)]
+  .map(([, columns]) => columns);
+assert.ok(registrationSeedColumns.length > 0, 'registration suite must seed daily registrations');
+for (const columns of registrationSeedColumns) {
+  assert.match(columns, /\binitial_driver_id\b/i, 'daily registration fixtures must use the post-alignment driver column');
+  assert.doesNotMatch(columns, /(^|,)\s*driver_id\s*(,|$)/i, 'daily registration fixtures must not use the pre-alignment driver column');
+}
 assert.match(waybillService, /save_waybill_company_bank_details/);
 assert.match(waybillDetail, /Enter Bank Details[\s\S]*?Account Number[\s\S]*?Save bank details/);
 assert.match(waybillDetail, /latest_bank_snapshot_version === null/);

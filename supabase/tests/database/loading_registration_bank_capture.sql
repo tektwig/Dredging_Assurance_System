@@ -365,7 +365,7 @@ insert into public.trucks(
 );
 alter table public.daily_registrations disable trigger user;
 insert into public.daily_registrations(
-  id,truck_id,driver_id,operational_date,registered_at,registered_by
+  id,truck_id,initial_driver_id,operational_date,registered_at,registered_by
 ) values (
   'd4000000-0000-0000-0000-000000000002',
   'd3000000-0000-0000-0000-000000000012',
