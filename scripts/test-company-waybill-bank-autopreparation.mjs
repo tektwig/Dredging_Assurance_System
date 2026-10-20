@@ -43,7 +43,7 @@ assert.match(databaseTest, /registration snapshot preserves source values, actor
 assert.match(databaseTest, /one authorized save atomically verifies details and releases Company PDF processing/);
 assert.match(databaseTest, /same request replay is idempotent/);
 assert.match(databaseTest, /failed audit insert rolls back all bank save writes/);
-assert.match(databaseTest, /missing-bank Action Required queue includes only the closed Waybill without a capture/);
+assert.match(databaseTest, /value->>'count'='2'[\s\S]*?WB-2099-999999998[\s\S]*?WB-2026-000043[\s\S]*?Action Required queue contains exactly the two seeded closed Waybills without registration captures/);
 assert.match(databaseTest, /bank saving does not enqueue notification delivery or send email as a side effect/);
 assert.match(databaseTest, /Company PDF snapshot receives only the invoice-specific saved bank version/);
 assert.match(databaseTest, /correction preserves prior snapshot and creates only a new Company PDF version/);

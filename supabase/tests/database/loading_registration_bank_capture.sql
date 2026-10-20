@@ -528,10 +528,10 @@ select pg_temp.expect_sqlstate($q$select * from public.save_waybill_company_bank
 select set_config('request.jwt.claim.sub','d0000000-0000-0000-0000-000000000003',true);
 insert into bank_test_state
 select 'missing_queue_before',public.get_operations_missing_bank_waybills();
-select pg_temp.assert_true((select value->>'count'='1'
-  and value#>>'{items,0,invoice_number}'='WB-2099-999999998'
+select pg_temp.assert_true((select value->>'count'='2'
+  and value->'items' @> '[{"invoice_number":"WB-2099-999999998"},{"invoice_number":"WB-2026-000043"}]'::jsonb
   from bank_test_state where key='missing_queue_before'),
-  'missing-bank Action Required queue includes only the closed Waybill without a capture');
+  'Action Required queue contains exactly the two seeded closed Waybills without registration captures');
 insert into bank_test_state
 select 'notification_count_before',jsonb_build_object(
   'count',pg_temp.registration_side_effect_counts()->>'notification_outbox');
