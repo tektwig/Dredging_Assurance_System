@@ -124,6 +124,31 @@ copy_support_group() {
   done <<< "$list"
 }
 
+validate_migration_group() {
+  local source_dir="$1"
+  local list="$2"
+  local migration
+  while IFS= read -r migration; do
+    [[ -n "$migration" ]] || continue
+    [[ -f "$source_dir/$migration" ]] || fail "Required migration source is missing: $migration"
+    validated_source_count=$((validated_source_count + 1))
+  done <<< "$list"
+}
+
+validate_migration_sources() {
+  local validated_source_count=0
+  validate_migration_group "$fixture_root/canonical_baseline" "$canonical_migrations"
+  validate_migration_group "$repo_root/supabase/migrations" "20261002000200_field_operational_day_auth.sql"
+  validate_migration_group "$repo_root/supabase/migrations" "$predecessor_migrations"
+  validate_migration_group "$repo_root/supabase/migrations" "$secure_migrations"
+  validate_migration_group "$repo_root/supabase/migrations" "$v4_migrations"
+  validate_migration_group "$repo_root/supabase/migrations" "$later_migrations"
+  [[ "$validated_source_count" == 26 ]] || fail "Expected 26 migration sources, validated $validated_source_count."
+  printf 'PASS preflight: validated all %s migration sources before database startup.\n' "$validated_source_count"
+}
+
+validate_migration_sources
+
 copy_support_group "$fixture_root/canonical_baseline" "$canonical_migrations"
 copy_migration "$repo_root/supabase/migrations" 20261002000200_field_operational_day_auth.sql
 assert_staged_count 14
@@ -249,19 +274,19 @@ cd "$repo_root"
 apply_migrations "$baseline_list"
 run_sql "synthetic hybrid seed" "$fixture_root/hybrid_cutover_seed.sql"
 
-for migration in $predecessor_migrations; do copy_migration "$repo_root/supabase/tests/fixtures/trakflit-ci/payment_free_predecessors" "$migration"; done
+for migration in $predecessor_migrations; do copy_migration "$repo_root/supabase/migrations" "$migration"; done
 assert_staged_count 20
 apply_migrations "$predecessor_versions"
 run_sql "legacy Storage seed" "$repo_root/supabase/tests/fixtures/secure_dual_waybill_legacy_storage_seed.sql"
 
-for migration in $secure_migrations; do copy_migration "$repo_root/supabase/tests/fixtures/trakflit-ci/dual_waybill" "$migration"; done
+for migration in $secure_migrations; do copy_migration "$repo_root/supabase/migrations" "$migration"; done
 assert_staged_count 22
 apply_migrations "$secure_versions"
 run_sql "historical registration receipt seed" "$repo_root/supabase/tests/fixtures/registration_legacy_receipts.sql"
-copy_migration "$repo_root/supabase/tests/fixtures/trakflit-ci/registration" 20261016000050_loading_receipt_v3_operation.sql
+copy_migration "$repo_root/supabase/migrations" 20261016000050_loading_receipt_v3_operation.sql
 assert_staged_count 23
 apply_migrations "$v3_versions"
-copy_migration "$repo_root/supabase/tests/fixtures/trakflit-ci/registration" 20261016000100_loading_registration_bank_capture.sql
+copy_migration "$repo_root/supabase/migrations" 20261016000100_loading_registration_bank_capture.sql
 assert_staged_count 24
 apply_migrations "$v4_versions"
 copy_migration "$repo_root/supabase/migrations" 20261018124936_restore_operations_trip_detail_payout.sql

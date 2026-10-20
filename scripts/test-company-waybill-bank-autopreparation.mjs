@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const migration = readFileSync('supabase/migrations/20261019151115_company_waybill_bank_snapshot_autopreparation.sql', 'utf8');
 const databaseTest = readFileSync('supabase/tests/database/loading_registration_bank_capture.sql', 'utf8');
@@ -75,6 +75,45 @@ assert.match(ciRunner, /supabase start --yes --exclude/);
 assert.match(ciRunner, /supabase migration up --local/);
 assert.match(ciRunner, /wait_event='advisory'/);
 assert.match(ciRunner, /run_transactional_suite/);
+assert.match(ciRunner, /for migration in \$predecessor_migrations; do copy_migration "\$repo_root\/supabase\/migrations" "\$migration"; done/);
+assert.match(ciRunner, /for migration in \$secure_migrations; do copy_migration "\$repo_root\/supabase\/migrations" "\$migration"; done/);
+assert.match(ciRunner, /copy_migration "\$repo_root\/supabase\/migrations" 20261016000050_loading_receipt_v3_operation\.sql/);
+assert.match(ciRunner, /copy_migration "\$repo_root\/supabase\/migrations" 20261016000100_loading_registration_bank_capture\.sql/);
+assert.doesNotMatch(ciRunner, /copy_migration "\$repo_root\/supabase\/tests\/fixtures\/trakflit-ci\/(?:payment_free_predecessors|dual_waybill|registration)"/);
+assert.match(ciRunner, /validate_migration_sources\n/);
+assert.match(ciRunner, /\[\[ "\$validated_source_count" == 26 \]\]/);
+assert.ok(ciRunner.indexOf('\nvalidate_migration_sources\n') < ciRunner.indexOf('supabase start --yes --exclude'));
+assert.match(ciRunner, /validate_migration_group "\$fixture_root\/canonical_baseline" "\$canonical_migrations"/);
+assert.match(ciRunner, /awk '\{ sub\(\/\\r\$\/, ""\); print \}'/);
+const migrationList = name => {
+  const match = ciRunner.match(new RegExp(`^${name}="([\\s\\S]*?)"`, 'm'));
+  assert.ok(match, `runner must define ${name}`);
+  return match[1].split('\n');
+};
+const migrationsRoot = 'supabase/migrations';
+const migrationSources = [
+  ...migrationList('canonical_migrations').map(name => `.ci-sql-support/supabase/tests/fixtures/trakflit-ci/canonical_baseline/${name}`),
+  `${migrationsRoot}/20261002000200_field_operational_day_auth.sql`,
+  ...['predecessor_migrations', 'secure_migrations', 'v4_migrations', 'later_migrations']
+    .flatMap(name => migrationList(name).map(migration => `${migrationsRoot}/${migration}`)),
+];
+assert.equal(migrationSources.length, 26, 'runner source inventory must include exactly 26 migrations');
+assert.equal(new Set(migrationSources).size, 26, 'runner source inventory must not contain duplicates');
+for (const source of migrationSources.filter(path => path.startsWith(`${migrationsRoot}/`))) {
+  assert.ok(existsSync(source), `deployable migration source must exist: ${source}`);
+}
+const normalizeSqlSnapshot = sql => {
+  const normalized = sql.replace(/\r\n/g, '\n');
+  return normalized.endsWith('\n') ? normalized : `${normalized}\n`;
+};
+const equalSqlSnapshot = (left, right) => normalizeSqlSnapshot(left) === normalizeSqlSnapshot(right);
+const sqlSnapshot = 'create function public.example() returns void as $$ select 1; $$ language sql;\n';
+assert.equal(equalSqlSnapshot(sqlSnapshot, sqlSnapshot), true, 'identical SQL snapshots must match');
+assert.equal(equalSqlSnapshot(sqlSnapshot, sqlSnapshot.replace(/\n/g, '\r\n')), true, 'LF and CRLF snapshots must match');
+assert.equal(equalSqlSnapshot(sqlSnapshot, sqlSnapshot.slice(0, -1)), true, 'a missing final newline must not change snapshot equality');
+assert.equal(equalSqlSnapshot(sqlSnapshot, sqlSnapshot.replace('select 1', 'select 2')), false, 'changed SQL statements must fail snapshot equality');
+assert.equal(equalSqlSnapshot("select 'pending';\n", "select 'ready';\n"), false, 'changed SQL values must fail snapshot equality');
+assert.equal(equalSqlSnapshot('grant execute on function public.example() to operations_manager;\n', 'grant execute on function public.example() to authenticated;\n'), false, 'changed permissions must fail snapshot equality');
 assert.match(ciRunner, /supabase stop --yes --no-backup/);
 assert.match(ciWorkflow, /feature\/company-waybill-bank-recovery/);
 assert.match(ciWorkflow, /persist-credentials: false/);
