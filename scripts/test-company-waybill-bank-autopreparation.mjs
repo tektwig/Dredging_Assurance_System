@@ -115,9 +115,11 @@ assert.match(databaseTest, /direct v3 registration is retired after the v4 cutov
 const secureSuiteIndex = ciRunner.indexOf('run_transactional_suite "secure dual-Waybill suite"');
 const fieldSuiteIndex = ciRunner.indexOf('run_transactional_suite "field-session authorization suite"');
 const v4SuiteIndex = ciRunner.indexOf('run_transactional_suite "V4 registration bank-capture suite"');
+const allVersionsIndex = ciRunner.indexOf('apply_migrations "$all_versions"');
+const migrationPreservationIndex = ciRunner.indexOf('PASS migration preserves historical records, Storage objects, and notification outbox.');
 const recoverySuiteIndex = ciRunner.indexOf('run_transactional_suite "bank snapshot automatic preparation and recovery assertions"');
 const concurrencySuiteIndex = ciRunner.indexOf('run_transactional_suite "concurrent bank-save assertions"');
-assert.ok(v4CheckpointIndex < secureSuiteIndex && secureSuiteIndex < fieldSuiteIndex && fieldSuiteIndex < v4SuiteIndex && v4SuiteIndex < recoverySuiteIndex && recoverySuiteIndex < concurrencySuiteIndex, 'post-V4 suites must retain their established order');
+assert.ok(v4CheckpointIndex < secureSuiteIndex && secureSuiteIndex < fieldSuiteIndex && fieldSuiteIndex < allVersionsIndex && allVersionsIndex < migrationPreservationIndex && migrationPreservationIndex < v4SuiteIndex && v4SuiteIndex < recoverySuiteIndex && recoverySuiteIndex < concurrencySuiteIndex, 'V4 registration assertions requiring the recovery contract must run after all migrations and preservation checks');
 assert.match(ciRunner, /for migration in \$predecessor_migrations; do copy_migration "\$repo_root\/supabase\/migrations" "\$migration"; done/);
 assert.match(ciRunner, /for migration in \$secure_migrations; do copy_migration "\$repo_root\/supabase\/migrations" "\$migration"; done/);
 assert.match(ciRunner, /copy_migration "\$repo_root\/supabase\/migrations" 20261016000050_loading_receipt_v3_operation\.sql/);

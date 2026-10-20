@@ -334,7 +334,6 @@ apply_migrations "$later_versions"
 
 run_transactional_suite "secure dual-Waybill suite" "$support_database_test_root/secure_dual_waybill.sql"
 run_transactional_suite "field-session authorization suite" "$repo_root/supabase/tests/database/field_operational_day_auth.sql"
-run_transactional_suite "V4 registration bank-capture suite" "$repo_root/supabase/tests/database/loading_registration_bank_capture.sql"
 
 run_sql "synthetic Company Waybill recovery seed" "$repo_root/supabase/tests/fixtures/company_waybill_bank_recovery/seed.sql"
 before_preservation=$(migration_preservation_fingerprint)
@@ -345,6 +344,7 @@ apply_migrations "$all_versions"
 [[ "$before_preservation" == "$(migration_preservation_fingerprint)" ]] || fail "Recovery migration changed immutable trips, invoices, legacy documents, driver/truck records, registration captures, notifications, or Storage objects."
 [[ "$outbox_before" == "$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select md5(coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb)::text) from public.notification_outbox x")" ]] || fail "Recovery migration modified notification-outbox records."
 printf 'PASS migration preserves historical records, Storage objects, and notification outbox.\n'
+run_transactional_suite "V4 registration bank-capture suite" "$repo_root/supabase/tests/database/loading_registration_bank_capture.sql"
 run_transactional_suite "bank snapshot automatic preparation and recovery assertions" "$repo_root/supabase/tests/database/company_waybill_bank_snapshot_autopreparation.sql"
 
 run_sql "concurrency gate setup" "$repo_root/supabase/tests/fixtures/company_waybill_bank_recovery/concurrency_gate.sql"
