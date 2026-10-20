@@ -362,15 +362,29 @@ commit;
 SQL
 }
 run_race_call cwbrace_a & race_a_pid=$!
-sleep 0.25
+gate_sleeping=0
+for attempt in $(seq 1 60); do
+  gate_sleeping=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select count(*) from pg_stat_activity where application_name='cwbrace_a' and wait_event_type='Timeout' and wait_event='PgSleep'")
+  [[ "$gate_sleeping" -ge 1 ]] && break
+  sleep 0.1
+done
+if [[ "$gate_sleeping" -lt 1 ]]; then
+  printf 'Concurrency gate state: ' >&2
+  docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select coalesce(string_agg(application_name||'|'||coalesce(state,'')||'|'||coalesce(wait_event_type,'')||'|'||coalesce(wait_event,''),';' order by application_name),'no race sessions') from pg_stat_activity where application_name in ('cwbrace_a','cwbrace_b')" >&2 || true
+  kill "$race_a_pid" 2>/dev/null || true
+  wait "$race_a_pid" 2>/dev/null || true
+  fail "First concurrent request did not reach the synthetic receipt sleep gate."
+fi
 run_race_call cwbrace_b & race_b_pid=$!
 waiting=0
-for attempt in $(seq 1 45); do
+for attempt in $(seq 1 60); do
   waiting=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select count(*) from pg_stat_activity where application_name in ('cwbrace_a','cwbrace_b') and wait_event_type='Lock' and wait_event='advisory'")
   [[ "$waiting" -ge 1 ]] && break
   sleep 0.1
 done
 if [[ "$waiting" -lt 1 ]]; then
+  printf 'Race session state: ' >&2
+  docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select coalesce(string_agg(application_name||'|'||coalesce(state,'')||'|'||coalesce(wait_event_type,'')||'|'||coalesce(wait_event,''),';' order by application_name),'no race sessions') from pg_stat_activity where application_name in ('cwbrace_a','cwbrace_b')" >&2 || true
   kill "$race_a_pid" "$race_b_pid" 2>/dev/null || true
   wait "$race_a_pid" 2>/dev/null || true
   wait "$race_b_pid" 2>/dev/null || true

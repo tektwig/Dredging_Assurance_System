@@ -92,7 +92,13 @@ assert.match(concurrencyGateCleanup, /drop trigger if exists zz_ci_company_bank_
 assert.match(ciRunner, /refs\/heads\/feature\/company-waybill-bank-recovery/);
 assert.match(ciRunner, /supabase start --yes --exclude/);
 assert.match(ciRunner, /supabase migration up --local/);
-assert.match(ciRunner, /wait_event='advisory'/);
+const concurrencyFirstCallIndex = ciRunner.indexOf('run_race_call cwbrace_a & race_a_pid=$!');
+const concurrencyGateWaitIndex = ciRunner.indexOf("application_name='cwbrace_a' and wait_event_type='Timeout' and wait_event='PgSleep'");
+const concurrencySecondCallIndex = ciRunner.indexOf('run_race_call cwbrace_b & race_b_pid=$!');
+assert.ok(concurrencyFirstCallIndex < concurrencyGateWaitIndex && concurrencyGateWaitIndex < concurrencySecondCallIndex, 'second concurrent request must start only after the first reaches the receipt gate');
+assert.match(ciRunner, /wait_event_type='Lock' and wait_event='advisory'/);
+assert.match(ciRunner, /Concurrency gate state:/);
+assert.match(ciRunner, /Race session state:/);
 assert.match(ciRunner, /run_transactional_suite/);
 const fingerprintFunction = ciRunner.match(/fingerprint\(\) \{([\s\S]*?)\n\}/)?.[1];
 assert.ok(fingerprintFunction, 'runner must define the persistent-state fingerprint function');
