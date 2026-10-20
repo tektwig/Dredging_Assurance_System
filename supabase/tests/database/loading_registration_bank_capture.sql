@@ -583,8 +583,11 @@ select pg_temp.assert_true((select count(*)=1 from public.get_operations_waybill
   where state.driver_pdf_status='pending' and state.company_pdf_status='pending'
     and state.bank_verification_state='verified' and state.latest_bank_snapshot_version=1),
   'bank save leaves Driver PDF independent and exposes Company processing state');
-select pg_temp.assert_true((public.get_operations_missing_bank_waybills()->>'count')='0',
-  'resolved Waybill automatically leaves the Action Required queue');
+select pg_temp.assert_true((select queue.value->>'count'='1'
+  and queue.value->'items' @> '[{"invoice_number":"WB-2026-000043"}]'::jsonb
+  and not (queue.value->'items' @> '[{"invoice_number":"WB-2099-999999998"}]'::jsonb)
+  from (select public.get_operations_missing_bank_waybills() as value) queue),
+  'resolved Waybill leaves only WB-2026-000043 in the Action Required queue');
 select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoice_bank_detail_events event
   join public.trip_closure_invoice_bank_submissions submission on submission.id=event.submission_id
   where submission.invoice_id='d6000000-0000-0000-0000-000000000002'
