@@ -66,6 +66,9 @@ assert.match(dashboard, /MissingBankActionCard[\s\S]*?\/operations\/waybills\/\$
 
 assert.match(recoverySeed, /WB-2026-'\|\|lpad\(value::text,6,'0'\)/);
 assert.match(recoverySeed, /private\.loading_registration_bank_captures/);
+assert.match(loadingAlignmentMigration, /assigned_at timestamptz not null default clock_timestamp\(\)/);
+assert.match(recoverySeed, /from public\.user_site_assignments[\s\S]*?ended_at is null order by assigned_at desc limit 1/);
+assert.doesNotMatch(recoverySeed, /from public\.user_site_assignments[\s\S]*?order by created_at desc/);
 assert.match(recoverySeed, /'WB-2026-000043'/);
 assert.match(recoveryAssertions, /historical recovery creates invoice snapshots from the correct driver captures/);
 assert.match(recoveryAssertions, /no fabricated verification/);

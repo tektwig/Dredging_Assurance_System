@@ -89,7 +89,7 @@ cross join lateral (
   select id from public.user_site_assignments
   where profile_id='e0000000-0000-4000-8000-000000000002'
     and site_id='e1000000-0000-4000-8000-000000000001'
-    and ended_at is null order by created_at desc limit 1
+    and ended_at is null order by assigned_at desc limit 1
 ) assignment;
 alter table public.trips enable trigger user;
 
