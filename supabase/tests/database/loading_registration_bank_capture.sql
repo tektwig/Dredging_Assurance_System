@@ -588,6 +588,7 @@ select pg_temp.assert_true((select queue.value->>'count'='1'
   and not (queue.value->'items' @> '[{"invoice_number":"WB-2099-999999998"}]'::jsonb)
   from (select public.get_operations_missing_bank_waybills() as value) queue),
   'resolved Waybill leaves only WB-2026-000043 in the Action Required queue');
+reset role;
 select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoice_bank_detail_events event
   join public.trip_closure_invoice_bank_submissions submission on submission.id=event.submission_id
   where submission.invoice_id='d6000000-0000-0000-0000-000000000002'
@@ -607,11 +608,13 @@ select pg_temp.assert_true(pg_temp.registration_side_effect_counts()->>'notifica
   (select value->>'count' from bank_test_state where key='notification_count_before'),
   'bank saving does not enqueue notification delivery or send email as a side effect');
 
+set local role authenticated;
 insert into bank_test_state
 select 'same_request_replay',to_jsonb(saved)
 from public.save_waybill_company_bank_details(
   'd6000000-0000-0000-0000-000000000002','d8000000-0000-0000-0000-000000000004',
   'Synthetic Test Bank','Synthetic Missing Bank Driver','0987654321') saved;
+reset role;
 select pg_temp.assert_true((select value->>'snapshot_version'='1'
   and value->>'unchanged'='true' from bank_test_state where key='same_request_replay')
   and (select count(*)=1 from public.trip_closure_invoice_bank_snapshots
@@ -621,6 +624,7 @@ select pg_temp.assert_true((select value->>'snapshot_version'='1'
     where submission.invoice_id='d6000000-0000-0000-0000-000000000002'
       and event.event_type='bank_details_saved'),
   'same request replay is idempotent and creates no duplicate snapshot or audit event');
+set local role authenticated;
 select pg_temp.expect_sqlstate($q$select * from public.save_waybill_company_bank_details(
   'd6000000-0000-0000-0000-000000000002','d8000000-0000-0000-0000-000000000004',
   'Different Bank','Synthetic Missing Bank Driver','0987654321')$q$,'P4091');

@@ -45,6 +45,8 @@ assert.match(databaseTest, /same request replay is idempotent/);
 assert.match(databaseTest, /failed audit insert rolls back all bank save writes/);
 assert.match(databaseTest, /value->>'count'='2'[\s\S]*?WB-2099-999999998[\s\S]*?WB-2026-000043[\s\S]*?Action Required queue contains exactly the two seeded closed Waybills without registration captures/);
 assert.match(databaseTest, /queue\.value->>'count'='1'[\s\S]*?WB-2026-000043[\s\S]*?WB-2099-999999998[\s\S]*?resolved Waybill leaves only WB-2026-000043 in the Action Required queue/);
+assert.match(databaseTest, /resolved Waybill leaves only WB-2026-000043 in the Action Required queue'\);\s*reset role;\s*select pg_temp\.assert_true\(\(select count\(\*\)=1 from public\.trip_closure_invoice_bank_detail_events/);
+assert.match(databaseTest, /set local role authenticated;\s*insert into bank_test_state\s*select 'same_request_replay'[\s\S]*?reset role;\s*select pg_temp\.assert_true\([\s\S]*?same request replay is idempotent/);
 assert.match(databaseTest, /bank saving does not enqueue notification delivery or send email as a side effect/);
 assert.match(databaseTest, /Company PDF snapshot receives only the invoice-specific saved bank version/);
 assert.match(databaseTest, /correction preserves prior snapshot and creates only a new Company PDF version/);
