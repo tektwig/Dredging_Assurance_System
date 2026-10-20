@@ -355,7 +355,7 @@ run_race_call() {
   local log_file="$runner_temp/$project_id-$app_name.log"
   local status_file="$runner_temp/$project_id-$app_name.exit"
   local client_status
-  if docker exec --env "PGAPPNAME=$app_name" "$db_container" psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -U postgres -d postgres >"$log_file" 2>&1 <<'SQL'
+  if docker exec -i --env "PGAPPNAME=$app_name" "$db_container" psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -U postgres -d postgres >"$log_file" 2>&1 <<'SQL'
 begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub','e0000000-0000-4000-8000-000000000003',true);

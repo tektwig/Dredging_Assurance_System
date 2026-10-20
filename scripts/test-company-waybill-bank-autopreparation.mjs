@@ -115,6 +115,7 @@ assert.match(ciRunner, /Concurrency gate state:/);
 assert.match(ciRunner, /Race session state:/);
 assert.match(ciRunner, /concurrency leaves the notification outbox/);
 assert.match(ciRunner, /run_transactional_suite/);
+assert.match(ciRunner, /docker exec -i --env "PGAPPNAME=\$app_name" "\$db_container" psql/, 'race SQL heredoc must be sent to the container through docker exec stdin');
 const fingerprintFunction = ciRunner.match(/fingerprint\(\) \{([\s\S]*?)\n\}/)?.[1];
 assert.ok(fingerprintFunction, 'runner must define the persistent-state fingerprint function');
 assert.match(fingerprintFunction, /to_regclass\('private\.loading_registration_bank_captures'\) is not null/);
