@@ -244,6 +244,12 @@ run_sql() {
 }
 
 fingerprint() {
+  local receipt_table_exists
+  local receipt_fingerprint_field=""
+  receipt_table_exists=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select to_regclass('private.waybill_company_bank_save_receipts') is not null")
+  if [[ "$receipt_table_exists" == "t" ]]; then
+    receipt_fingerprint_field="'receipts',(select coalesce(jsonb_agg(to_jsonb(x) order by x.actor_id,x.request_id),'[]'::jsonb) from private.waybill_company_bank_save_receipts x),"
+  fi
   docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
     select md5(jsonb_build_object(
       'users',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from auth.users x),
@@ -265,7 +271,7 @@ fingerprint() {
       'submissions',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_bank_submissions x),
       'snapshots',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_bank_snapshots x),
       'events',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_bank_detail_events x),
-      'receipts',(select coalesce(jsonb_agg(to_jsonb(x) order by x.actor_id,x.request_id),'[]'::jsonb) from private.waybill_company_bank_save_receipts x),
+      ${receipt_fingerprint_field}
       'storage',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from storage.objects x)
     )::text)"
 }
