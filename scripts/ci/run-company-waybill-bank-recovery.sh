@@ -408,6 +408,7 @@ wait_for_pg_state() {
   local app_name="$1"
   local event_type="$2"
   local event_name="$3"
+  local observer_app="cwbrmon_${app_name}_${event_name}"
   local observer_log="$runner_temp/$project_id-observer-$app_name-$event_name.log"
   local observer_sql="$project_root/wait-for-race-state.sql"
   printf "select set_config('ci.expected_app','%s',false);\nselect set_config('ci.expected_event_type','%s',false);\nselect set_config('ci.expected_event','%s',false);\n" \
@@ -422,6 +423,7 @@ declare
   v_session_seen boolean := false;
 begin
   loop
+    perform pg_catalog.pg_stat_clear_snapshot();
     if exists (
       select 1 from pg_catalog.pg_stat_activity
       where application_name=v_expected_app
@@ -447,11 +449,42 @@ begin
 end;
 $wait$;
 SQL
-  docker exec -i "$db_container" psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -U postgres -d postgres \
+  docker exec --env "PGAPPNAME=$observer_app" -i "$db_container" psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -U postgres -d postgres \
     -f - <"$observer_sql" >"$observer_log" 2>&1
 }
+
+wait_for_observer_start() {
+  local observer_app="$1"
+  local active
+  for attempt in $(seq 1 120); do
+    active=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+      -c "select count(*) from pg_catalog.pg_stat_activity where application_name='$observer_app' and state='active'")
+    if [[ "$active" -ge 1 ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+wait_for_pg_state cwbrace_a Timeout PgSleep & gate_observer_pid=$!
+if ! wait_for_observer_start cwbrmon_cwbrace_a_PgSleep; then
+  printf 'Gate observer did not become active before the first race client.\n' >&2
+  stop_race_client gate-observer "$gate_observer_pid"
+  redact_log <"$runner_temp/$project_id-observer-cwbrace_a-PgSleep.log" | grep -E '^(ERROR:|DETAIL:|HINT:|FATAL:|psql: error:)' | tail -n 20 >&2 || true
+  fail "Could not start the PostgreSQL gate observer."
+fi
+concurrency_outbox_before=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "select md5(coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb)::text) from public.notification_outbox x")
+concurrency_driver_pdf_before=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "select md5(coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb)::text) from public.trip_closure_invoice_pdf_copies x where x.invoice_id='e7000000-0000-4000-8000-000000000043' and x.copy_kind='driver'")
 run_race_call cwbrace_a & race_a_pid=$!
-if ! wait_for_pg_state cwbrace_a Timeout PgSleep; then
+if wait "$gate_observer_pid"; then
+  gate_observer_status=0
+else
+  gate_observer_status=$?
+fi
+if [[ "$gate_observer_status" -ne 0 ]]; then
   printf 'Concurrency gate state: ' >&2
   docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select coalesce(string_agg(application_name||'|'||coalesce(state,'')||'|'||coalesce(wait_event_type,'')||'|'||coalesce(wait_event,''),';' order by application_name),'no race sessions') from pg_stat_activity where application_name in ('cwbrace_a','cwbrace_b')" >&2 || true
   printf 'Gate observer diagnostics:\n' >&2
@@ -461,8 +494,22 @@ if ! wait_for_pg_state cwbrace_a Timeout PgSleep; then
   fail "First concurrent request did not reach the synthetic receipt sleep gate."
 fi
 printf 'PASS first concurrent request reached the synthetic receipt sleep gate.\n'
+wait_for_pg_state cwbrace_b Lock advisory & lock_observer_pid=$!
+if ! wait_for_observer_start cwbrmon_cwbrace_b_advisory; then
+  printf 'Lock observer did not become active before the second race client.\n' >&2
+  race_client_diagnostics cwbrace_a
+  stop_race_client cwbrace_a "$race_a_pid"
+  stop_race_client lock-observer "$lock_observer_pid"
+  redact_log <"$runner_temp/$project_id-observer-cwbrace_b-advisory.log" | grep -E '^(ERROR:|DETAIL:|HINT:|FATAL:|psql: error:)' | tail -n 20 >&2 || true
+  fail "Could not start the PostgreSQL lock observer."
+fi
 run_race_call cwbrace_b & race_b_pid=$!
-if ! wait_for_pg_state cwbrace_b Lock advisory; then
+if wait "$lock_observer_pid"; then
+  lock_observer_status=0
+else
+  lock_observer_status=$?
+fi
+if [[ "$lock_observer_status" -ne 0 ]]; then
   printf 'Race session state: ' >&2
   docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select coalesce(string_agg(application_name||'|'||coalesce(state,'')||'|'||coalesce(wait_event_type,'')||'|'||coalesce(wait_event,''),';' order by application_name),'no race sessions') from pg_stat_activity where application_name in ('cwbrace_a','cwbrace_b')" >&2 || true
   printf 'Lock observer diagnostics:\n' >&2
@@ -494,6 +541,13 @@ if [[ "$race_b_status" -ne 0 ]]; then
   race_client_diagnostics cwbrace_b
   fail "Second concurrent bank-save request failed (exit=$race_b_status)."
 fi
+concurrency_outbox_after=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "select md5(coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb)::text) from public.notification_outbox x")
+concurrency_driver_pdf_after=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c "select md5(coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb)::text) from public.trip_closure_invoice_pdf_copies x where x.invoice_id='e7000000-0000-4000-8000-000000000043' and x.copy_kind='driver'")
+[[ "$concurrency_outbox_before" == "$concurrency_outbox_after" ]] || fail "Concurrent bank saving modified notification-outbox records."
+[[ "$concurrency_driver_pdf_before" == "$concurrency_driver_pdf_after" ]] || fail "Concurrent bank saving modified the Driver PDF record."
+printf 'PASS concurrency leaves the notification outbox and Driver PDF unchanged.\n'
 printf 'PASS concurrent RPC calls overlapped; a competing session waited on the invoice advisory lock.\n'
 run_sql "concurrency gate cleanup" "$repo_root/supabase/tests/fixtures/company_waybill_bank_recovery/concurrency_gate_cleanup.sql"
 run_transactional_suite "concurrent bank-save assertions" "$repo_root/supabase/tests/database/company_waybill_bank_concurrency.sql"
