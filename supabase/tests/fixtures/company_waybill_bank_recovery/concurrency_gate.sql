@@ -6,7 +6,7 @@ as $$
 begin
   if new.invoice_id='e7000000-0000-4000-8000-000000000043'::uuid
     and new.request_id='e9000000-0000-4000-8000-000000000001'::uuid then
-    perform pg_catalog.pg_sleep(6);
+    perform pg_catalog.pg_sleep(12);
   end if;
   return new;
 end;

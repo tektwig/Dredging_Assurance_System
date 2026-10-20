@@ -31,7 +31,7 @@ cleanup() {
       "$runner_temp"/cwbr-*) [[ ! -d "$project_root" ]] || rm -rf -- "$project_root" ;;
       *) printf 'Refusing cleanup outside the unique runner temp directory.\n' >&2 ;;
     esac
-    find "$runner_temp" -maxdepth 1 -type f -name "$project_id-*.log" -delete
+    find "$runner_temp" -maxdepth 1 -type f \( -name "$project_id-*.log" -o -name "$project_id-*.exit" \) -delete
   fi
   exit "$result"
 }
@@ -43,6 +43,8 @@ redact_log() {
     -e 's/sb_(publishable|secret)_[A-Za-z0-9_-]+/[REDACTED_SUPABASE_KEY]/g' \
     -e 's/(password|secret|token|api[_ -]?key|anon[_ -]?key|service[_ -]?role[_ -]?key)([[:space:]]*[:=][[:space:]]*)[^[:space:],;]+/\1\2[REDACTED]/Ig' \
     -e 's#(postgres(ql)?://)[^[:space:]]+#\1[REDACTED_CONNECTION_STRING]#Ig' \
+    -e 's/CI Concurrent Bank/[REDACTED_BANK_NAME]/Ig' \
+    -e 's/Synthetic recovery driver 43/[REDACTED_ACCOUNT_NAME]/Ig' \
     -e 's/[0-9]{10,}/[REDACTED_NUMBER]/g' \
     -e 's/[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}/[REDACTED_EMAIL]/g'
 }
@@ -349,9 +351,11 @@ run_transactional_suite "bank snapshot automatic preparation and recovery assert
 
 run_sql "concurrency gate setup" "$repo_root/supabase/tests/fixtures/company_waybill_bank_recovery/concurrency_gate.sql"
 run_race_call() {
-  app_name="$1"
-  log_file="$runner_temp/$project_id-$app_name.log"
-  docker exec --env "PGAPPNAME=$app_name" "$db_container" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d postgres >"$log_file" 2>&1 <<'SQL'
+  local app_name="$1"
+  local log_file="$runner_temp/$project_id-$app_name.log"
+  local status_file="$runner_temp/$project_id-$app_name.exit"
+  local client_status
+  if docker exec --env "PGAPPNAME=$app_name" "$db_container" psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -U postgres -d postgres >"$log_file" 2>&1 <<'SQL'
 begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub','e0000000-0000-4000-8000-000000000003',true);
@@ -360,38 +364,136 @@ select * from public.save_waybill_company_bank_details(
   'CI Concurrent Bank','Synthetic recovery driver 43','9300000043');
 commit;
 SQL
+  then
+    client_status=0
+  else
+    client_status=$?
+  fi
+  printf '%s\n' "$client_status" >"$status_file"
+  return "$client_status"
+}
+race_client_diagnostics() {
+  local app_name="$1"
+  local log_file="$runner_temp/$project_id-$app_name.log"
+  local status_file="$runner_temp/$project_id-$app_name.exit"
+  if [[ -f "$status_file" ]]; then
+    printf 'Race client %s exit status: %s\n' "$app_name" "$(cat "$status_file")" >&2
+  else
+    printf 'Race client %s exit status: still running (no exit marker)\n' "$app_name" >&2
+  fi
+  if [[ -s "$log_file" ]]; then
+    printf 'Race client %s redacted PostgreSQL diagnostics:\n' "$app_name" >&2
+    redact_log <"$log_file" | grep -E '^(ERROR:|DETAIL:|HINT:|FATAL:|psql: error:)' | tail -n 20 >&2 || true
+  else
+    printf 'Race client %s captured no PostgreSQL error output.\n' "$app_name" >&2
+  fi
+}
+
+stop_race_client() {
+  local app_name="$1"
+  local client_pid="$2"
+  local wait_status
+  if kill -0 "$client_pid" 2>/dev/null; then
+    kill "$client_pid" 2>/dev/null || true
+  fi
+  if wait "$client_pid"; then
+    wait_status=0
+  else
+    wait_status=$?
+  fi
+  printf 'Race client %s process wait status: %s\n' "$app_name" "$wait_status" >&2
+}
+
+wait_for_pg_state() {
+  local app_name="$1"
+  local event_type="$2"
+  local event_name="$3"
+  local observer_log="$runner_temp/$project_id-observer-$app_name-$event_name.log"
+  local observer_sql="$project_root/wait-for-race-state.sql"
+  printf "select set_config('ci.expected_app','%s',false);\nselect set_config('ci.expected_event_type','%s',false);\nselect set_config('ci.expected_event','%s',false);\n" \
+    "$app_name" "$event_type" "$event_name" >"$observer_sql"
+  cat >>"$observer_sql" <<'SQL'
+do $wait$
+declare
+  v_expected_app text := current_setting('ci.expected_app');
+  v_expected_event_type text := current_setting('ci.expected_event_type');
+  v_expected_event text := current_setting('ci.expected_event');
+  v_deadline timestamptz := clock_timestamp() + interval '30 seconds';
+  v_session_seen boolean := false;
+begin
+  loop
+    if exists (
+      select 1 from pg_catalog.pg_stat_activity
+      where application_name=v_expected_app
+        and wait_event_type=v_expected_event_type
+        and wait_event=v_expected_event
+    ) then
+      raise notice 'Observed expected PostgreSQL session wait state.';
+      return;
+    end if;
+    if exists (
+      select 1 from pg_catalog.pg_stat_activity
+      where application_name=v_expected_app
+    ) then
+      v_session_seen:=true;
+    elsif v_session_seen then
+      raise exception 'Observed race session exited before the expected wait state' using errcode='P0001';
+    end if;
+    if clock_timestamp()>=v_deadline then
+      raise exception 'Timed out waiting for the expected race session wait state' using errcode='P0001';
+    end if;
+    perform pg_catalog.pg_sleep(0.05);
+  end loop;
+end;
+$wait$;
+SQL
+  docker exec -i "$db_container" psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -U postgres -d postgres \
+    -f - <"$observer_sql" >"$observer_log" 2>&1
 }
 run_race_call cwbrace_a & race_a_pid=$!
-gate_sleeping=0
-for attempt in $(seq 1 60); do
-  gate_sleeping=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select count(*) from pg_stat_activity where application_name='cwbrace_a' and wait_event_type='Timeout' and wait_event='PgSleep'")
-  [[ "$gate_sleeping" -ge 1 ]] && break
-  sleep 0.1
-done
-if [[ "$gate_sleeping" -lt 1 ]]; then
+if ! wait_for_pg_state cwbrace_a Timeout PgSleep; then
   printf 'Concurrency gate state: ' >&2
   docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select coalesce(string_agg(application_name||'|'||coalesce(state,'')||'|'||coalesce(wait_event_type,'')||'|'||coalesce(wait_event,''),';' order by application_name),'no race sessions') from pg_stat_activity where application_name in ('cwbrace_a','cwbrace_b')" >&2 || true
-  kill "$race_a_pid" 2>/dev/null || true
-  wait "$race_a_pid" 2>/dev/null || true
+  printf 'Gate observer diagnostics:\n' >&2
+  redact_log <"$runner_temp/$project_id-observer-cwbrace_a-PgSleep.log" | grep -E '^(ERROR:|DETAIL:|HINT:|FATAL:|psql: error:)' | tail -n 20 >&2 || true
+  race_client_diagnostics cwbrace_a
+  stop_race_client cwbrace_a "$race_a_pid"
   fail "First concurrent request did not reach the synthetic receipt sleep gate."
 fi
+printf 'PASS first concurrent request reached the synthetic receipt sleep gate.\n'
 run_race_call cwbrace_b & race_b_pid=$!
-waiting=0
-for attempt in $(seq 1 60); do
-  waiting=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select count(*) from pg_stat_activity where application_name in ('cwbrace_a','cwbrace_b') and wait_event_type='Lock' and wait_event='advisory'")
-  [[ "$waiting" -ge 1 ]] && break
-  sleep 0.1
-done
-if [[ "$waiting" -lt 1 ]]; then
+if ! wait_for_pg_state cwbrace_b Lock advisory; then
   printf 'Race session state: ' >&2
   docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select coalesce(string_agg(application_name||'|'||coalesce(state,'')||'|'||coalesce(wait_event_type,'')||'|'||coalesce(wait_event,''),';' order by application_name),'no race sessions') from pg_stat_activity where application_name in ('cwbrace_a','cwbrace_b')" >&2 || true
-  kill "$race_a_pid" "$race_b_pid" 2>/dev/null || true
-  wait "$race_a_pid" 2>/dev/null || true
-  wait "$race_b_pid" 2>/dev/null || true
-  fail "Concurrent calls did not demonstrate an advisory-lock waiter."
+  printf 'Lock observer diagnostics:\n' >&2
+  redact_log <"$runner_temp/$project_id-observer-cwbrace_b-advisory.log" | grep -E '^(ERROR:|DETAIL:|HINT:|FATAL:|psql: error:)' | tail -n 20 >&2 || true
+  race_client_diagnostics cwbrace_a
+  race_client_diagnostics cwbrace_b
+  stop_race_client cwbrace_a "$race_a_pid"
+  stop_race_client cwbrace_b "$race_b_pid"
+  fail "Second concurrent request did not wait on the invoice advisory lock."
 fi
-wait "$race_a_pid" || fail "First concurrent bank-save request failed."
-wait "$race_b_pid" || fail "Second concurrent bank-save request failed."
+printf 'PASS second concurrent request waited on the invoice advisory lock.\n'
+if wait "$race_a_pid"; then
+  race_a_status=0
+else
+  race_a_status=$?
+fi
+if [[ "$race_a_status" -ne 0 ]]; then
+  race_client_diagnostics cwbrace_a
+  race_client_diagnostics cwbrace_b
+  fail "First concurrent bank-save request failed (exit=$race_a_status)."
+fi
+if wait "$race_b_pid"; then
+  race_b_status=0
+else
+  race_b_status=$?
+fi
+if [[ "$race_b_status" -ne 0 ]]; then
+  race_client_diagnostics cwbrace_a
+  race_client_diagnostics cwbrace_b
+  fail "Second concurrent bank-save request failed (exit=$race_b_status)."
+fi
 printf 'PASS concurrent RPC calls overlapped; a competing session waited on the invoice advisory lock.\n'
 run_sql "concurrency gate cleanup" "$repo_root/supabase/tests/fixtures/company_waybill_bank_recovery/concurrency_gate_cleanup.sql"
 run_transactional_suite "concurrent bank-save assertions" "$repo_root/supabase/tests/database/company_waybill_bank_concurrency.sql"
