@@ -80,9 +80,39 @@ assert.match(ciRunner, /for migration in \$secure_migrations; do copy_migration 
 assert.match(ciRunner, /copy_migration "\$repo_root\/supabase\/migrations" 20261016000050_loading_receipt_v3_operation\.sql/);
 assert.match(ciRunner, /copy_migration "\$repo_root\/supabase\/migrations" 20261016000100_loading_registration_bank_capture\.sql/);
 assert.doesNotMatch(ciRunner, /copy_migration "\$repo_root\/supabase\/tests\/fixtures\/trakflit-ci\/(?:payment_free_predecessors|dual_waybill|registration)"/);
+assert.match(ciRunner, /run_sql "legacy Storage seed" "\$support_fixture_root\/secure_dual_waybill_legacy_storage_seed\.sql"/);
+assert.match(ciRunner, /run_sql "historical registration receipt seed" "\$support_fixture_root\/registration_legacy_receipts\.sql"/);
+assert.match(ciRunner, /run_transactional_suite "hybrid cutover assertions" "\$support_fixture_root\/hybrid_cutover_assertions\.sql"/);
+assert.match(ciRunner, /run_transactional_suite "secure dual-Waybill suite" "\$support_database_test_root\/secure_dual_waybill\.sql"/);
+assert.doesNotMatch(ciRunner, /\$repo_root\/supabase\/tests\/(?:fixtures\/(?:secure_dual_waybill_legacy_storage_seed|registration_legacy_receipts|hybrid_cutover_assertions)|database\/secure_dual_waybill)\.sql/);
 assert.match(ciRunner, /validate_migration_sources\n/);
 assert.match(ciRunner, /\[\[ "\$validated_source_count" == 26 \]\]/);
+assert.match(ciRunner, /validate_sql_sources\n/);
+assert.ok(ciRunner.indexOf('\nvalidate_sql_sources\n') < ciRunner.indexOf('supabase start --yes --exclude'));
+const sqlPreflight = ciRunner.match(/local -a required_sql_files=\(([\s\S]*?)\r?\n  \)/);
+assert.ok(sqlPreflight, 'runner must explicitly preflight required SQL inputs');
+const expectedSqlInputs = [
+  '$fixture_root/hybrid_cutover_seed.sql',
+  '$support_fixture_root/secure_dual_waybill_legacy_storage_seed.sql',
+  '$support_fixture_root/registration_legacy_receipts.sql',
+  '$support_fixture_root/hybrid_cutover_assertions.sql',
+  '$support_database_test_root/secure_dual_waybill.sql',
+  '$repo_root/supabase/tests/database/field_operational_day_auth.sql',
+  '$repo_root/supabase/tests/database/loading_registration_bank_capture.sql',
+  '$repo_root/supabase/tests/fixtures/company_waybill_bank_recovery/seed.sql',
+  '$repo_root/supabase/tests/database/company_waybill_bank_snapshot_autopreparation.sql',
+  '$repo_root/supabase/tests/fixtures/company_waybill_bank_recovery/concurrency_gate.sql',
+  '$repo_root/supabase/tests/fixtures/company_waybill_bank_recovery/concurrency_gate_cleanup.sql',
+  '$repo_root/supabase/tests/database/company_waybill_bank_concurrency.sql',
+];
+assert.equal([...sqlPreflight[1].matchAll(/"[^"]+\.sql"/g)].length, expectedSqlInputs.length);
+for (const input of expectedSqlInputs) assert.ok(sqlPreflight[1].includes(`"${input}"`), `SQL preflight must include ${input}`);
+for (const input of expectedSqlInputs.filter(path => path.startsWith('$repo_root/'))) {
+  assert.ok(existsSync(input.replace('$repo_root/', '')), `repository SQL input must exist: ${input}`);
+}
 assert.ok(ciRunner.indexOf('\nvalidate_migration_sources\n') < ciRunner.indexOf('supabase start --yes --exclude'));
+assert.match(ciRunner, /sha256sum --check supabase\/tests\/fixtures\/trakflit-ci\/MIGRATION_SHA256SUMS/);
+assert.ok(ciRunner.indexOf('sha256sum --check') < ciRunner.indexOf('supabase start --yes --exclude'));
 assert.match(ciRunner, /validate_migration_group "\$fixture_root\/canonical_baseline" "\$canonical_migrations"/);
 assert.match(ciRunner, /awk '\{ sub\(\/\\r\$\/, ""\); print \}'/);
 const migrationList = name => {
@@ -116,6 +146,8 @@ assert.equal(equalSqlSnapshot("select 'pending';\n", "select 'ready';\n"), false
 assert.equal(equalSqlSnapshot('grant execute on function public.example() to operations_manager;\n', 'grant execute on function public.example() to authenticated;\n'), false, 'changed permissions must fail snapshot equality');
 assert.match(ciRunner, /supabase stop --yes --no-backup/);
 assert.match(ciWorkflow, /feature\/company-waybill-bank-recovery/);
+assert.match(ciWorkflow, /ref: 16bf4ec5286f8ed5efc225da5456b95fbb7ba4dd/);
+assert.match(ciWorkflow, /test "\$\(git -C \.ci-sql-support rev-parse HEAD\)" = "16bf4ec5286f8ed5efc225da5456b95fbb7ba4dd"/);
 assert.match(ciWorkflow, /persist-credentials: false/);
 assert.doesNotMatch(ciWorkflow, /SUPABASE_ACCESS_TOKEN:|SUPABASE_DB_PASSWORD:|service_role_key:/i);
 

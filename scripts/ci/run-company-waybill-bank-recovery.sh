@@ -6,7 +6,10 @@ repo_root="$GITHUB_WORKSPACE"
 runner_temp="$RUNNER_TEMP"
 project_id="cwbr-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 project_root="$runner_temp/$project_id"
-fixture_root="$repo_root/.ci-sql-support/supabase/tests/fixtures/trakflit-ci"
+support_root="$repo_root/.ci-sql-support"
+fixture_root="$support_root/supabase/tests/fixtures/trakflit-ci"
+support_fixture_root="$support_root/supabase/tests/fixtures"
+support_database_test_root="$support_root/supabase/tests/database"
 migration_dir="$project_root/supabase/migrations"
 start_log="$runner_temp/$project_id-start.log"
 start_attempted=false
@@ -147,6 +150,29 @@ validate_migration_sources() {
   printf 'PASS preflight: validated all %s migration sources before database startup.\n' "$validated_source_count"
 }
 
+validate_sql_sources() {
+  local sql_file
+  local -a required_sql_files=(
+    "$fixture_root/hybrid_cutover_seed.sql"
+    "$support_fixture_root/secure_dual_waybill_legacy_storage_seed.sql"
+    "$support_fixture_root/registration_legacy_receipts.sql"
+    "$support_fixture_root/hybrid_cutover_assertions.sql"
+    "$support_database_test_root/secure_dual_waybill.sql"
+    "$repo_root/supabase/tests/database/field_operational_day_auth.sql"
+    "$repo_root/supabase/tests/database/loading_registration_bank_capture.sql"
+    "$repo_root/supabase/tests/fixtures/company_waybill_bank_recovery/seed.sql"
+    "$repo_root/supabase/tests/database/company_waybill_bank_snapshot_autopreparation.sql"
+    "$repo_root/supabase/tests/fixtures/company_waybill_bank_recovery/concurrency_gate.sql"
+    "$repo_root/supabase/tests/fixtures/company_waybill_bank_recovery/concurrency_gate_cleanup.sql"
+    "$repo_root/supabase/tests/database/company_waybill_bank_concurrency.sql"
+  )
+  for sql_file in "${required_sql_files[@]}"; do
+    [[ -f "$sql_file" ]] || fail "Required SQL fixture or test suite is missing: $sql_file"
+  done
+  printf 'PASS preflight: validated all %s SQL fixtures and test suites before database startup.\n' "${#required_sql_files[@]}"
+}
+
+validate_sql_sources
 validate_migration_sources
 
 copy_support_group "$fixture_root/canonical_baseline" "$canonical_migrations"
@@ -277,12 +303,12 @@ run_sql "synthetic hybrid seed" "$fixture_root/hybrid_cutover_seed.sql"
 for migration in $predecessor_migrations; do copy_migration "$repo_root/supabase/migrations" "$migration"; done
 assert_staged_count 20
 apply_migrations "$predecessor_versions"
-run_sql "legacy Storage seed" "$repo_root/supabase/tests/fixtures/secure_dual_waybill_legacy_storage_seed.sql"
+run_sql "legacy Storage seed" "$support_fixture_root/secure_dual_waybill_legacy_storage_seed.sql"
 
 for migration in $secure_migrations; do copy_migration "$repo_root/supabase/migrations" "$migration"; done
 assert_staged_count 22
 apply_migrations "$secure_versions"
-run_sql "historical registration receipt seed" "$repo_root/supabase/tests/fixtures/registration_legacy_receipts.sql"
+run_sql "historical registration receipt seed" "$support_fixture_root/registration_legacy_receipts.sql"
 copy_migration "$repo_root/supabase/migrations" 20261016000050_loading_receipt_v3_operation.sql
 assert_staged_count 23
 apply_migrations "$v3_versions"
@@ -293,8 +319,8 @@ copy_migration "$repo_root/supabase/migrations" 20261018124936_restore_operation
 assert_staged_count 25
 apply_migrations "$later_versions"
 
-run_transactional_suite "hybrid cutover assertions" "$repo_root/supabase/tests/fixtures/hybrid_cutover_assertions.sql"
-run_transactional_suite "secure dual-Waybill suite" "$repo_root/supabase/tests/database/secure_dual_waybill.sql"
+run_transactional_suite "hybrid cutover assertions" "$support_fixture_root/hybrid_cutover_assertions.sql"
+run_transactional_suite "secure dual-Waybill suite" "$support_database_test_root/secure_dual_waybill.sql"
 run_transactional_suite "field-session authorization suite" "$repo_root/supabase/tests/database/field_operational_day_auth.sql"
 run_transactional_suite "V4 registration bank-capture suite" "$repo_root/supabase/tests/database/loading_registration_bank_capture.sql"
 
