@@ -660,9 +660,22 @@ SQL
 
   race_release_ok=$(docker exec -i "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -f - <<SQL
 begin;
+select notification.id::text as race_a_id,notification.lease_token::text as race_a_lease_token
+from public.notification_outbox notification
+where notification.id='$race_a_id'::uuid and notification.status='processing'
+  and notification.lease_token is not null and notification.lease_until>clock_timestamp()
+\\gset
+select notification.id::text as race_b_id,notification.lease_token::text as race_b_lease_token
+from public.notification_outbox notification
+where notification.id='$race_b_id'::uuid and notification.status='processing'
+  and notification.lease_token is not null and notification.lease_until>clock_timestamp()
+\\gset
 set local role service_role;
-select bool_and(public.finish_trip_notification(notification.id,notification.lease_token,false,null,'isolated CI lease release'))
-from public.notification_outbox notification where notification.id in ('$race_a_id'::uuid,'$race_b_id'::uuid);
+select public.finish_trip_notification(:'race_a_id'::uuid,:'race_a_lease_token'::uuid,false,null,'isolated CI lease release') as race_a_released
+\\gset
+select public.finish_trip_notification(:'race_b_id'::uuid,:'race_b_lease_token'::uuid,false,null,'isolated CI lease release') as race_b_released
+\\gset
+select (:'race_a_released'::boolean and :'race_b_released'::boolean);
 commit;
 SQL
   )
