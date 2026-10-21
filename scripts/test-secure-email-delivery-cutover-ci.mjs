@@ -85,6 +85,16 @@ assert(canaryFixture.includes('public.authorize_waybill_synthetic_email_canary_t
 assert(canaryFixture.includes('public.register_loading_participant_v4'));
 assert(canaryFixture.includes('public.save_waybill_company_bank_details'));
 assert(canaryFixture.includes('public.claim_waybill_synthetic_canary_pdf_jobs'));
+assert(canaryFixture.includes("v_trip_id_matches:=coalesce(v_response#>>'{trip,id}'=p_trip_id::text,false)"),
+  'canary closure assertions must verify the RPC trip identity');
+assert(canaryFixture.includes("v_waybill_invoice_present:=coalesce((v_response->'waybill') ? 'invoice_number',false)"),
+  'canary closure assertions must tolerate the canonical RPC response without a Waybill field');
+assert(canaryFixture.includes("where invoice.trip_id=p_trip_id and invoice.invoice_number=v_invoice_number"),
+  'an optional RPC Waybill number must match its database invoice');
+assert(canaryFixture.includes("where trip.id=current_setting('test.phase3b_trip_id')::uuid"),
+  'reserved invoice assertions must use the exact synthetic trip ID');
+assert(canaryFixture.includes('reserved trip has exactly one matching invoice with the reserved number and matching closure timestamps'),
+  'reserved invoice identity, number, and closure timestamps must be database-verified');
 assert(canaryFixture.includes('public.finish_driver_waybill_pdf_job'));
 assert(canaryFixture.includes('public.finish_company_waybill_pdf_job'));
 assert(canaryFixture.includes('vault.create_secret'));

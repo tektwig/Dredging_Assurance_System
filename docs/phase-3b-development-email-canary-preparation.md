@@ -12,7 +12,11 @@ Normal PDF claims exclude only `WB-9999-999999`; a separate service-role RPC cla
 
 The post-cutover provisioning RPC requires an active reserved-invoice canary and both latest eligible PDFs. It creates exactly two invoice-bound `waybill_ready` rows with fixed `.invalid` recipients; advisory locking, duplicate validation and immutable outbox guards reject duplicate or unrelated inserts. Regular email reconciliation/claims remain blocked while a canary is armed. Disarm refuses active leases; expiry recovery touches only the reserved synthetic jobs and safely disarms the run.
 
-CI uses only synthetic `storage.objects` metadata; it does not call external Storage. Edge worker tests mock HTTP/Storage and do not call Resend or any email provider. The GitHub Actions SQL run is still pending; no DEVELOPMENT or PRODUCTION operation has occurred.
+## CI closure response contract and schema parity
+
+The pinned CI migration chain uses the canonical `20260925000400_offloading_alignment` response contract: `close_trip_v2` returns `ok`, `request_id`, trip identity/status, capture data, and the notification flag, but does not return `waybill.invoice_number`. The later `20260925000500_waybill_backend_extension` adds a `waybill.invoice_number` response field. Canary fixture assertions therefore require success, matching request ID and trip identity, and closed status from the RPC; when the optional Waybill field is present, it must match the expected number. Invoice number, invoice-to-trip association, and closure timestamps are verified directly against `trip_closure_invoices` and `trips` for both reserved and ordinary closures. This CI compatibility does not establish the deployed Development function contract. Before deployment, perform a separate read-only parity check of the live `public.close_trip_v2` definition and confirm whether its response includes `waybill.invoice_number`; do not change the pinned migration baseline to mask a schema difference.
+
+CI uses only synthetic `storage.objects` metadata; it does not call external Storage. Edge worker tests mock HTTP/Storage and do not call Resend or any email provider. The workflow does not connect to DEVELOPMENT or PRODUCTION.
 
 ## Findings before implementation (historical)
 
