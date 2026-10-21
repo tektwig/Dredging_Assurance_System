@@ -58,6 +58,18 @@ Deno.serve(async (request: Request) => {
     return new Response('Worker not configured', { status: 503 });
   }
   if (deliveryEnabledSetting !== 'true') return new Response('Notification delivery is disabled', { status: 503 });
+  const canaryEnabledSetting = env('WAYBILL_NOTIFICATION_CANARY_ENABLED');
+  if (canaryEnabledSetting !== '' && canaryEnabledSetting !== 'true' && canaryEnabledSetting !== 'false') {
+    return new Response('Worker not configured', { status: 503 });
+  }
+  const canaryEnabled = canaryEnabledSetting === 'true';
+  const canaryInvoiceId = env('WAYBILL_NOTIFICATION_CANARY_INVOICE_ID').toLowerCase();
+  const canaryUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  if ((!canaryEnabled && canaryInvoiceId !== '')
+    || (canaryEnabled && (!canaryUuidPattern.test(canaryInvoiceId)
+      || recipientSinkSetting !== 'true' || !isDevelopmentProjectUrl(env('SUPABASE_URL'))))) {
+    return new Response('Worker not configured', { status: 503 });
+  }
   const config: WorkerConfig = {
     supabaseUrl: env('SUPABASE_URL'),
     serviceRoleKey: env('SUPABASE_SERVICE_ROLE_KEY'),
@@ -66,6 +78,8 @@ Deno.serve(async (request: Request) => {
     waybillClientEmail: isValidEmailAddress(env('WAYBILL_CLIENT_EMAIL')) ? env('WAYBILL_CLIENT_EMAIL') : null,
     recipientSinkEnabled: recipientSinkSetting === 'true',
     deliveryEnabled: true,
+    canaryEnabled,
+    canaryInvoiceId: canaryEnabled ? canaryInvoiceId : null,
   };
   if (!config.supabaseUrl || !config.serviceRoleKey || !config.resendApiKey || !config.sender) {
     return new Response('Worker not configured', { status: 503 });

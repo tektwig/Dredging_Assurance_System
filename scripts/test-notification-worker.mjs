@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 
 const workerSource = readFileSync('supabase/functions/process-trip-notifications/worker.ts', 'utf8');
+const handlerSource = readFileSync('supabase/functions/process-trip-notifications/index.ts', 'utf8');
 const compiled = ts.transpileModule(workerSource, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
 });
@@ -64,6 +65,7 @@ const parseBody = options => typeof options.body === 'string' ? JSON.parse(optio
 
 function mockFetch({
   jobs = [],
+  canaryJobs = jobs,
   metadata = new Map(),
   pdfResponse = () => new Response(pdf, { headers: { 'content-type': 'application/pdf' } }),
   providerResponse = () => json({ id: 'resend-message-id' }),
@@ -76,6 +78,7 @@ function mockFetch({
     calls.push({ url: url.toString(), path: url.pathname, options, body });
     if (url.pathname.endsWith('/rpc/enqueue_waybill_ready_notifications')) return json(0);
     if (url.pathname.endsWith('/rpc/claim_waybill_notifications')) return json(jobs);
+    if (url.pathname.endsWith('/rpc/claim_waybill_notification_canary')) return json(canaryJobs);
     if (url.pathname.endsWith('/rpc/get_waybill_notification_pdf')) {
       const row = metadata.get(body.p_notification_id);
       return json(row ? [row] : []);
@@ -246,24 +249,80 @@ assert.equal(ackFailureResult.unacknowledged, 1);
 assert.equal(ackFailureResult.sent, 0);
 console.log('PASS failed lease acknowledgement remains unacknowledged for safe expiry/reclaim');
 
-const recipientSinkMock = mockFetch({ jobs: [driverJob], metadata: new Map([[driverJob.id, driverPdfMetadata]]) });
+const canaryInvoiceId = '99999999-9999-4999-8999-999999999999';
+const syntheticCanaryJob = {
+  ...driverJob,
+  payload: { ...driverJob.payload, invoice_id: canaryInvoiceId, invoice_number: 'WB-9999-999999' },
+};
+const syntheticCanaryPdfMetadata = {
+  ...driverPdfMetadata,
+  invoice_id: canaryInvoiceId,
+  invoice_number: 'WB-9999-999999',
+  storage_path: '9999/WB-9999-999999.pdf',
+};
+const recipientSinkMock = mockFetch({ canaryJobs: [syntheticCanaryJob], metadata: new Map([[driverJob.id, syntheticCanaryPdfMetadata]]) });
 const sinkResult = await processNotifications({
   ...config,
   supabaseUrl: 'https://pidxlopbxlapfmakmtjt.supabase.co',
   recipientSinkEnabled: true,
+  canaryEnabled: true,
+  canaryInvoiceId,
 }, 1, recipientSinkMock.fetch);
 const sinkMessage = recipientSinkMock.calls.find(call => call.url === 'https://api.resend.com/emails');
 assert.equal(sinkResult.sent, 1);
 assert.deepEqual(sinkMessage.body.to, ['tektwig@gmail.com']);
 assert(!('cc' in sinkMessage.body) && !('bcc' in sinkMessage.body));
+assert.deepEqual(recipientSinkMock.calls.filter(call => call.path.includes('/rpc/')).map(call => call.path.split('/').at(-1)), [
+  'claim_waybill_notification_canary', 'get_waybill_notification_pdf', 'finish_trip_notification',
+]);
+assert.deepEqual(recipientSinkMock.calls[0].body, {
+  p_sender: config.sender, p_invoice_id: canaryInvoiceId,
+  p_company_recipient: config.waybillClientEmail, p_limit: 1,
+});
+const mismatchedCanaryJob = { ...syntheticCanaryJob, payload: { ...syntheticCanaryJob.payload, invoice_id: '88888888-8888-4888-8888-888888888888' } };
+const mismatchedCanary = mockFetch({ canaryJobs: [mismatchedCanaryJob] });
+const mismatchedResult = await processNotifications({
+  ...config,
+  supabaseUrl: 'https://pidxlopbxlapfmakmtjt.supabase.co',
+  recipientSinkEnabled: true,
+  canaryEnabled: true,
+  canaryInvoiceId,
+}, 1, mismatchedCanary.fetch);
+assert.equal(mismatchedResult.unacknowledged, 1);
+assert.equal(mismatchedCanary.calls.some(call => call.path.endsWith('/get_waybill_notification_pdf')), false);
+assert.equal(mismatchedCanary.calls.some(call => call.path.endsWith('/finish_trip_notification')), false);
+assert.equal(mismatchedCanary.calls.some(call => call.url === 'https://api.resend.com/emails'), false);
+const wrongNumberCanary = mockFetch({
+  canaryJobs: [{ ...syntheticCanaryJob, payload: { ...syntheticCanaryJob.payload, invoice_number: 'WB-2026-000041' } }],
+});
+const wrongNumberResult = await processNotifications({
+  ...config,
+  supabaseUrl: 'https://pidxlopbxlapfmakmtjt.supabase.co',
+  recipientSinkEnabled: true,
+  canaryEnabled: true,
+  canaryInvoiceId,
+}, 1, wrongNumberCanary.fetch);
+assert.equal(wrongNumberResult.unacknowledged, 1);
+assert.equal(wrongNumberCanary.calls.some(call => call.path.endsWith('/get_waybill_notification_pdf')), false);
+assert.equal(wrongNumberCanary.calls.some(call => call.url === 'https://api.resend.com/emails'), false);
+for (const invalidConfig of [
+  { ...config, supabaseUrl: 'https://pidxlopbxlapfmakmtjt.supabase.co', recipientSinkEnabled: true },
+  { ...config, recipientSinkEnabled: true, canaryEnabled: true, canaryInvoiceId },
+  { ...config, supabaseUrl: 'https://pidxlopbxlapfmakmtjt.supabase.co', canaryEnabled: true, canaryInvoiceId },
+]) {
+  const invalidCanary = mockFetch();
+  await assert.rejects(() => processNotifications(invalidConfig, 1, invalidCanary.fetch));
+  assert.equal(invalidCanary.calls.length, 0);
+}
 const blockedSink = mockFetch();
 await assert.rejects(() => processNotifications({ ...config, recipientSinkEnabled: true }, 1, blockedSink.fetch));
 assert.equal(blockedSink.calls.length, 0);
-console.log('PASS development sink reroutes to the fixed sink; non-development use is refused before database access');
+console.log('PASS isolated canary claims only its selected invoice, routes only to the fixed sink, and fails closed on mismatches');
 
 const migration = readFileSync('supabase/migrations/20261013000300_secure_notification_payloads.sql', 'utf8');
 const foundationMigration = readFileSync('supabase/migrations/20261013000200_secure_dual_waybill_foundation.sql', 'utf8');
 const cutoverMigration = readFileSync('supabase/migrations/20261009000000_payment_free_waybill_cutover.sql', 'utf8');
+const emailCutoverMigration = readFileSync('supabase/migrations/20261021000000_secure_waybill_email_delivery_cutover.sql', 'utf8');
 const claimStart = migration.indexOf('create or replace function public.claim_waybill_notifications');
 const claimEnd = migration.indexOf('$$;', claimStart);
 const claimDefinition = migration.slice(claimStart, claimEnd);
@@ -299,6 +358,33 @@ for (const retiredName of ['claim_trip_notifications', 'get_waybill_ready_pdf', 
   assert(!workerSource.includes(retiredName), `secure worker must not invoke retired RPC ${retiredName}`);
 }
 console.log('PASS SQL contract statically restricts notification claims to eligible latest secure copies and excludes trip_closed');
+assert(emailCutoverMigration.includes("'WB-2026-000041','WB-2026-000042','WB-2026-000043','WB-2026-000044','WB-2026-000045'"));
+assert(emailCutoverMigration.includes("'2026-10-20T21:34:05.976714Z'::timestamptz"));
+assert(emailCutoverMigration.includes('private.waybill_email_regular_delivery_allowed(i.id,i.trip_id)'));
+assert(emailCutoverMigration.includes('private.waybill_email_canary_delivery_allowed(invoice.id,invoice.trip_id)'));
+assert(emailCutoverMigration.includes('before insert or update or delete on public.notification_outbox'));
+assert(emailCutoverMigration.includes('before truncate on public.notification_outbox'));
+assert(emailCutoverMigration.includes('revoke insert,update,delete,truncate on table public.notification_outbox from public,anon,authenticated,service_role'));
+assert(emailCutoverMigration.includes('waybill_email_allowlist_truncate_immutable'));
+assert(emailCutoverMigration.includes('waybill_email_allowlist_row_immutable'));
+assert(emailCutoverMigration.includes("new.payload is distinct from old.payload"));
+assert(emailCutoverMigration.includes("if old.event_type<>'waybill_ready'"));
+assert(emailCutoverMigration.includes("n.event_type='waybill_ready'"));
+assert(emailCutoverMigration.includes("notification.event_type in ('trip_closed','waybill_ready')"));
+assert(emailCutoverMigration.includes("and notification.status='processing'"));
+assert(emailCutoverMigration.includes('grant execute on function public.claim_waybill_notification_canary(text,uuid,text,integer) to service_role'));
+assert(emailCutoverMigration.includes("p.proname in ('claim_trip_notifications','retry_trip_notification')"));
+assert(emailCutoverMigration.includes("or v_invoice_number<>'WB-9999-999999'"));
+assert(emailCutoverMigration.includes("and invoice.invoice_number='WB-9999-999999'"));
+assert(emailCutoverMigration.includes("or (invoice.invoice_number<>'WB-9999-999999'"));
+assert(workerSource.includes("invoice_number !== 'WB-9999-999999'"));
+assert(handlerSource.includes("env('WAYBILL_NOTIFICATION_CANARY_ENABLED')"));
+assert(handlerSource.includes("env('WAYBILL_NOTIFICATION_CANARY_INVOICE_ID')"));
+assert(handlerSource.includes("recipientSinkSetting !== 'true'"));
+assert(workerSource.includes("'claim_waybill_notification_canary'"));
+assert(workerSource.includes('config.recipientSinkEnabled && (!canaryEnabled'));
+assert(workerSource.includes("(job.payload as Record<string, unknown>).invoice_id !== canaryInvoiceId"));
+console.log('PASS cutover scopes history/future queues and retires legacy notification paths; canary is invoice-bound and service-role-only');
 
 const expiredLeaseJob = { ...driverJob, lease_until: new Date(Date.now() - 60_000).toISOString() };
 const expiredLeaseMock = mockFetch({ jobs: [expiredLeaseJob] });
@@ -307,3 +393,7 @@ assert.equal(expiredLeaseResult.sent, 0);
 assert.equal(expiredLeaseMock.calls.some(call => call.path.endsWith('/get_waybill_notification_pdf')), false);
 assert.equal(expiredLeaseMock.calls.some(call => call.path.endsWith('/rpc/finish_trip_notification')), false);
 console.log('PASS expired claim response cannot fetch or send an attachment; lease expiry/reclaim stays database-bound');
+assert(handlerSource.includes("deliveryEnabledSetting !== 'true' && deliveryEnabledSetting !== 'false'"));
+assert(handlerSource.includes("if (deliveryEnabledSetting !== 'true')"));
+assert(handlerSource.includes("canaryEnabledSetting !== '' && canaryEnabledSetting !== 'true' && canaryEnabledSetting !== 'false'"));
+console.log('PASS missing or invalid delivery configuration remains disabled before queue access');

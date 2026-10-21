@@ -6,6 +6,8 @@ export interface WorkerConfig {
   waybillClientEmail: string | null;
   recipientSinkEnabled: boolean;
   deliveryEnabled: boolean;
+  canaryEnabled?: boolean;
+  canaryInvoiceId?: string | null;
 }
 
 interface NotificationJob {
@@ -142,8 +144,15 @@ export async function processNotifications(config: WorkerConfig, batchLimit = 1,
   }
   const waybillClientEmail = config.waybillClientEmail && isValidEmailAddress(config.waybillClientEmail)
     ? config.waybillClientEmail : null;
-  if (config.recipientSinkEnabled && !isDevelopmentProjectUrl(config.supabaseUrl)) {
-    throw new Error('Recipient sink is restricted to the DEVELOPMENT project');
+  const canaryEnabled = config.canaryEnabled === true;
+  const canaryInvoiceId = config.canaryInvoiceId?.trim().toLowerCase() ?? '';
+  if ((!canaryEnabled && canaryInvoiceId !== '')
+    || (canaryEnabled && (!uuidPattern.test(canaryInvoiceId)
+      || !config.recipientSinkEnabled || !isDevelopmentProjectUrl(config.supabaseUrl)))) {
+    throw new Error('Notification canary configuration is invalid');
+  }
+  if (config.recipientSinkEnabled && (!canaryEnabled || !isDevelopmentProjectUrl(config.supabaseUrl))) {
+    throw new Error('Recipient sink is restricted to an isolated DEVELOPMENT canary');
   }
 
   const rpc = async <T>(name: string, body: unknown): Promise<T> => {
@@ -162,18 +171,28 @@ export async function processNotifications(config: WorkerConfig, batchLimit = 1,
   };
 
   let reconciliationFailed = false;
-  try {
-    await rpc<number>('enqueue_waybill_ready_notifications', {
+  let claimedJobs: unknown;
+  if (canaryEnabled) {
+    claimedJobs = await rpc<unknown>('claim_waybill_notification_canary', {
+      p_sender: config.sender,
+      p_invoice_id: canaryInvoiceId,
       p_company_recipient: waybillClientEmail,
+      p_limit: batchLimit,
     });
-  } catch {
-    reconciliationFailed = true;
-  }
+  } else {
+    try {
+      await rpc<number>('enqueue_waybill_ready_notifications', {
+        p_company_recipient: waybillClientEmail,
+      });
+    } catch {
+      reconciliationFailed = true;
+    }
 
-  const claimedJobs = await rpc<unknown>('claim_waybill_notifications', {
-    p_sender: config.sender,
-    p_limit: batchLimit,
-  });
+    claimedJobs = await rpc<unknown>('claim_waybill_notifications', {
+      p_sender: config.sender,
+      p_limit: batchLimit,
+    });
+  }
   if (!Array.isArray(claimedJobs)) throw new Error('Notification claim response is invalid');
 
   let sent = 0;
@@ -182,6 +201,11 @@ export async function processNotifications(config: WorkerConfig, batchLimit = 1,
   await Promise.all(claimedJobs.map(async value => {
     const job = parseJob(value);
     if (!job) {
+      unacknowledged++;
+      return;
+    }
+    if (canaryEnabled && ((job.payload as Record<string, unknown>).invoice_id !== canaryInvoiceId
+      || (job.payload as Record<string, unknown>).invoice_number !== 'WB-9999-999999')) {
       unacknowledged++;
       return;
     }
