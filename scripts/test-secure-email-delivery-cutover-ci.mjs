@@ -97,6 +97,17 @@ assert(canaryFixture.includes("snapshot.source_kind='registration_capture'"));
 assert(canaryFixture.includes("company_copy.status='pending'"));
 assert(canaryFixture.includes("company_copy.bank_snapshot_id=snapshot.id"));
 assert(canaryFixture.includes('blocked Company claim leaves status, attempts and lease unchanged'));
+const unverifiedClaimAssertion = canaryFixture.indexOf('unverified Company bank snapshot cannot be claimed');
+const unverifiedStateAssertion = canaryFixture.indexOf('blocked Company claim leaves status, attempts and lease unchanged');
+const driverClaimRpc = canaryFixture.indexOf("current_setting('test.phase3b_invoice_id')::uuid,'driver')", unverifiedStateAssertion);
+assert(unverifiedClaimAssertion >= 0 && unverifiedStateAssertion > unverifiedClaimAssertion,
+  'the unverified Company claim must be checked before inspecting its saved state');
+assert(canaryFixture.slice(unverifiedClaimAssertion, unverifiedStateAssertion).includes('reset role;'),
+  'privileged claim context must be reset before inspecting the postgres-owned before-state table');
+assert(driverClaimRpc > unverifiedStateAssertion,
+  'the subsequent invoice-scoped Driver claim must remain present');
+assert(canaryFixture.slice(unverifiedStateAssertion, driverClaimRpc).includes('set local role service_role;'),
+  'service_role must be restored before the subsequent invoice-scoped Driver claim');
 assert(canaryFixture.includes('verified Company v2 is eligible only through the reserved canary path'));
 assert(canaryFixture.includes("v_trip_id_matches:=coalesce(v_response#>>'{trip,id}'=p_trip_id::text,false)"),
   'canary closure assertions must verify the RPC trip identity');

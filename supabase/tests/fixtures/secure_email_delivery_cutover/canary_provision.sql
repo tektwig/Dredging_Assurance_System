@@ -365,6 +365,7 @@ select pg_temp.canary_assert(not exists (
   select 1 from public.claim_waybill_synthetic_canary_pdf_jobs(
     current_setting('test.phase3b_invoice_id')::uuid,'company')
 ),'unverified Company bank snapshot cannot be claimed');
+reset role;
 select pg_temp.canary_assert((
   select count(*)=1 and bool_and(copy.status=before_row.status
     and copy.attempts=before_row.attempts
@@ -373,6 +374,7 @@ select pg_temp.canary_assert((
   from phase3b_unverified_company_copy_before before_row
   join public.trip_closure_invoice_pdf_copies copy on copy.id=before_row.id
 ),'blocked Company claim leaves status, attempts and lease unchanged');
+set local role service_role;
 insert into phase3b_pdf_claims
 select 'driver',job.* from public.claim_waybill_synthetic_canary_pdf_jobs(
   current_setting('test.phase3b_invoice_id')::uuid,'driver') job;
