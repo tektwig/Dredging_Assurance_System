@@ -7,6 +7,45 @@ begin
 end;
 $$;
 
+create function pg_temp.canary_assert_close_response(
+  p_closure_kind text,p_request_id uuid,p_expected_invoice_number text,p_expect_non_reserved boolean default false
+) returns void language plpgsql as $$
+declare
+  v_response jsonb;
+  v_ok text;
+  v_code text;
+  v_request_id_matches boolean;
+  v_trip_status text;
+  v_invoice_number text;
+  v_invoice_matches boolean;
+begin
+  select response into v_response from phase3b_close_responses where closure_kind=p_closure_kind;
+  v_ok:=v_response->>'ok';
+  v_code:=v_response->>'code';
+  v_request_id_matches:=coalesce(v_response->>'request_id'=p_request_id::text,false);
+  v_trip_status:=v_response#>>'{trip,status}';
+  v_invoice_number:=v_response#>>'{waybill,invoice_number}';
+  v_invoice_matches:=case
+    when p_expect_non_reserved then v_invoice_number is not null and v_invoice_number<>'WB-9999-999999'
+    else v_invoice_number is not distinct from p_expected_invoice_number
+  end;
+
+  if coalesce(v_ok='true',false) and v_request_id_matches
+    and v_trip_status='closed' and v_invoice_matches then
+    raise notice 'ASSERTION PASS: % synthetic closure response contract',p_closure_kind;
+    return;
+  end if;
+
+  raise exception 'Synthetic closure response diagnostic: closure_kind=% response.ok=% response.code=% request_id_matches=% trip.status=% waybill.invoice_number=%',
+    case when p_closure_kind in ('reserved','ordinary') then p_closure_kind else '<invalid-kind>' end,
+    case when v_ok in ('true','false') then v_ok else '<missing-or-invalid>' end,
+    case when v_code is null then '<none>' when v_code ~ '^[A-Z0-9_]{1,64}$' then v_code else '<invalid-format>' end,
+    v_request_id_matches,
+    case when v_trip_status ~ '^[a-z_]{1,32}$' then v_trip_status else '<missing-or-invalid>' end,
+    case when v_invoice_number ~ '^[A-Z0-9-]{1,64}$' then v_invoice_number else '<missing-or-invalid>' end;
+end;
+$$;
+
 create function pg_temp.canary_expect_sqlstate(p_statement text,p_expected text,p_message text)
 returns void language plpgsql as $$
 declare v_state text;
@@ -224,13 +263,8 @@ select 'reserved',public.close_trip_v2(
   'MANUAL',statement_timestamp(),null,null,null
 );
 reset role;
-select pg_temp.canary_assert((
-  select response->>'ok'='true'
-    and response->>'request_id'='c3000000-0000-4000-8000-000000000003'
-    and response#>>'{trip,status}'='closed'
-    and response#>>'{waybill,invoice_number}'='WB-9999-999999'
-  from phase3b_close_responses where closure_kind='reserved'
-),'reserved synthetic trip closure succeeds and returns its exact reserved Waybill number');
+select pg_temp.canary_assert_close_response(
+  'reserved','c3000000-0000-4000-8000-000000000003','WB-9999-999999');
 
 set local role authenticated;
 insert into phase3b_close_responses(closure_kind,response)
@@ -241,14 +275,8 @@ select 'ordinary',public.close_trip_v2(
   'MANUAL',statement_timestamp(),null,null,null
 );
 reset role;
-select pg_temp.canary_assert((
-  select response->>'ok'='true'
-    and response->>'request_id'='c3000000-0000-4000-8000-000000000006'
-    and response#>>'{trip,status}'='closed'
-    and response#>>'{waybill,invoice_number}' is not null
-    and response#>>'{waybill,invoice_number}'<>'WB-9999-999999'
-  from phase3b_close_responses where closure_kind='ordinary'
-),'ordinary negative-control trip closure succeeds with a non-reserved invoice number');
+select pg_temp.canary_assert_close_response(
+  'ordinary','c3000000-0000-4000-8000-000000000006',null,true);
 select pg_temp.canary_assert((
   select count(*)=1
     and bool_and(invoice.invoice_number<>'WB-9999-999999'
