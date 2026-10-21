@@ -16,6 +16,7 @@ assert(workflow.includes('feature/secure-email-delivery-cutover'));
 assert(workflow.includes('permissions:\n  contents: read'));
 assert(workflow.includes('RUN_SECURE_EMAIL_CUTOVER: "true"'));
 assert(workflow.includes('ref: 16bf4ec5286f8ed5efc225da5456b95fbb7ba4dd'));
+assert(workflow.includes('cd .ci-sql-support\n            sha256sum --check supabase/tests/fixtures/trakflit-ci/MIGRATION_SHA256SUMS'));
 assert(workflow.includes('version: 2.120.0'));
 assert(!workflow.includes('secrets.'));
 assert(!workflow.includes('pidxlopbxlapfmakmtjt'));

@@ -53,7 +53,10 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/feature/secure-email-delivery-cutover"
           test "$(git -C .ci-sql-support rev-parse HEAD)" = "16bf4ec5286f8ed5efc225da5456b95fbb7ba4dd"
-          sha256sum --check .ci-sql-support/supabase/tests/fixtures/trakflit-ci/MIGRATION_SHA256SUMS >/dev/null
+          (
+            cd .ci-sql-support
+            sha256sum --check supabase/tests/fixtures/trakflit-ci/MIGRATION_SHA256SUMS >/dev/null
+          )
           node --version
           node -e "if (Number(process.versions.node.split('.')[0]) < 20) process.exit(1)"
           npm ci --no-audit --no-fund
