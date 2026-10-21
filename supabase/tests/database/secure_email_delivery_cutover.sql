@@ -125,11 +125,38 @@ select pg_temp.assert_true(not has_table_privilege('service_role','private.waybi
 
 select public.enqueue_waybill_ready_notifications('synthetic-company@example.invalid');
 select pg_temp.assert_true(not exists (
-  select 1 from public.notification_outbox notification
-  join public.trip_closure_invoices invoice on invoice.trip_id=notification.trip_id
-  where invoice.invoice_number in ('WB-2026-000039','WB-2026-000040') and notification.event_type='waybill_ready'
-    and notification.status in ('pending','processing')
-),'reconciliation cannot create or unblock delivery for excluded WB-2026-000040');
+  select 1 from excluded_notification_snapshot before_row
+  left join public.notification_outbox after_row on after_row.id=before_row.id
+  where after_row.id is null or before_row.row_data is distinct from to_jsonb(after_row)
+) and not exists (
+  select 1 from public.notification_outbox after_row
+  join public.trip_closure_invoices invoice on invoice.trip_id=after_row.trip_id
+  left join excluded_notification_snapshot before_row on before_row.id=after_row.id
+  where invoice.invoice_number in ('WB-2026-000039','WB-2026-000040') and before_row.id is null
+) and (
+  select count(*) from excluded_notification_snapshot
+)= (
+  select count(*) from public.notification_outbox after_row
+  join public.trip_closure_invoices invoice on invoice.trip_id=after_row.trip_id
+  where invoice.invoice_number in ('WB-2026-000039','WB-2026-000040')
+),'reconciliation creates no excluded rows, unblocks none, and preserves every complete historical notification row');
+select pg_temp.assert_true(
+  exists (select 1 from excluded_notification_snapshot where row_data->>'status'='pending')
+  and exists (select 1 from excluded_notification_snapshot where row_data->>'status'='sent')
+  and (
+    select count(*) from excluded_notification_snapshot where row_data->>'status'='pending'
+  )=(
+    select count(*) from excluded_notification_snapshot before_row
+    join public.notification_outbox after_row on after_row.id=before_row.id
+    where before_row.row_data->>'status'='pending' and after_row.status='pending'
+  )
+  and (
+    select count(*) from excluded_notification_snapshot where row_data->>'status'='sent'
+  )=(
+    select count(*) from excluded_notification_snapshot before_row
+    join public.notification_outbox after_row on after_row.id=before_row.id
+    where before_row.row_data->>'status'='sent' and after_row.status='sent'
+  ),'previously pending and sent excluded notifications retain their original states');
 
 create temporary table regular_claims on commit drop as
 select id,trip_id,audience,lease_token from public.claim_waybill_notifications('secure-email-sql-test',2);
@@ -155,9 +182,20 @@ select pg_temp.assert_true((
 ),'an already-sent excluded historical notification remains sent');
 select pg_temp.assert_true(not exists (
   select 1 from excluded_notification_snapshot before_row
-  join public.notification_outbox after_row on after_row.id=before_row.id
-  where before_row.row_data is distinct from to_jsonb(after_row)
-),'all excluded Waybill 040 notification fields remain unchanged after reconciliation and claim');
+  left join public.notification_outbox after_row on after_row.id=before_row.id
+  where after_row.id is null or before_row.row_data is distinct from to_jsonb(after_row)
+) and not exists (
+  select 1 from public.notification_outbox after_row
+  join public.trip_closure_invoices invoice on invoice.trip_id=after_row.trip_id
+  left join excluded_notification_snapshot before_row on before_row.id=after_row.id
+  where invoice.invoice_number in ('WB-2026-000039','WB-2026-000040') and before_row.id is null
+) and (
+  select count(*) from excluded_notification_snapshot
+)= (
+  select count(*) from public.notification_outbox after_row
+  join public.trip_closure_invoices invoice on invoice.trip_id=after_row.trip_id
+  where invoice.invoice_number in ('WB-2026-000039','WB-2026-000040')
+),'all excluded notification rows and fields remain unchanged after reconciliation and claim');
 
 select pg_temp.assert_sqlstate(
   'update public.notification_outbox set last_error=''must not mutate'' where id=(select notification.id from public.notification_outbox notification join public.trip_closure_invoices invoice on invoice.trip_id=notification.trip_id where invoice.invoice_number in (''WB-2026-000039'',''WB-2026-000040'') limit 1)',
