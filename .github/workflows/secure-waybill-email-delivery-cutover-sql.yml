@@ -1,0 +1,79 @@
+name: Secure Waybill email delivery cutover SQL
+
+on:
+  push:
+    branches:
+      - feature/secure-email-delivery-cutover
+    paths:
+      - ".github/workflows/secure-waybill-email-delivery-cutover-sql.yml"
+      - "scripts/ci/run-company-waybill-bank-recovery.sh"
+      - "scripts/test-secure-email-delivery-cutover-ci.mjs"
+      - "scripts/test-company-waybill-bank-autopreparation.mjs"
+      - "scripts/test-notification-worker.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "supabase/functions/process-trip-notifications/**"
+      - "supabase/migrations/**"
+      - "supabase/tests/database/secure_email_delivery_cutover.sql"
+      - "supabase/tests/fixtures/secure_email_delivery_cutover/**"
+      - "docs/secure-waybill-email-delivery-cutover.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: secure-waybill-email-cutover-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sql-integration:
+    name: Disposable PostgreSQL 17 email-cutover integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "true"
+    steps:
+      - name: Check out feature source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Check out checksum-pinned SQL baseline and fixtures
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: 16bf4ec5286f8ed5efc225da5456b95fbb7ba4dd
+          path: .ci-sql-support
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify runner and pinned support identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/feature/secure-email-delivery-cutover"
+          test "$(git -C .ci-sql-support rev-parse HEAD)" = "16bf4ec5286f8ed5efc225da5456b95fbb7ba4dd"
+          sha256sum --check .ci-sql-support/supabase/tests/fixtures/trakflit-ci/MIGRATION_SHA256SUMS >/dev/null
+          node --version
+          node -e "if (Number(process.versions.node.split('.')[0]) < 20) process.exit(1)"
+          npm ci --no-audit --no-fund
+          node scripts/test-secure-email-delivery-cutover-ci.mjs
+          node scripts/test-notification-worker.mjs
+          node scripts/test-company-waybill-bank-autopreparation.mjs
+          npm run typecheck
+          npm run build
+
+      - name: Verify Docker and pinned Supabase CLI
+        uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+        with:
+          version: 2.120.0
+
+      - name: Run isolated baseline, migrations, and SQL assertions
+        shell: bash
+        env:
+          RUN_SECURE_EMAIL_CUTOVER: "true"
+        run: |
+          set -euo pipefail
+          docker info --format '{{.ServerVersion}}' >/dev/null
+          test "$(supabase --version)" = "2.120.0"
+          bash scripts/ci/run-company-waybill-bank-recovery.sh

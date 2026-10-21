@@ -4,7 +4,17 @@ umask 077
 
 repo_root="$GITHUB_WORKSPACE"
 runner_temp="$RUNNER_TEMP"
-project_id="cwbr-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+secure_email_cutover="${RUN_SECURE_EMAIL_CUTOVER:-false}"
+project_prefix="cwbr"
+expected_branch="refs/heads/feature/company-waybill-bank-recovery"
+if [[ "$secure_email_cutover" == true ]]; then
+  project_prefix="sedc"
+  expected_branch="refs/heads/feature/secure-email-delivery-cutover"
+elif [[ "$secure_email_cutover" != false ]]; then
+  printf 'ERROR: RUN_SECURE_EMAIL_CUTOVER must be true or false.\n' >&2
+  exit 1
+fi
+project_id="$project_prefix-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 project_root="$runner_temp/$project_id"
 support_root="$repo_root/.ci-sql-support"
 fixture_root="$support_root/supabase/tests/fixtures/trakflit-ci"
@@ -28,7 +38,7 @@ cleanup() {
       supabase stop --yes --no-backup --workdir "$project_root" >/dev/null 2>&1
     fi
     case "$project_root" in
-      "$runner_temp"/cwbr-*) [[ ! -d "$project_root" ]] || rm -rf -- "$project_root" ;;
+      "$runner_temp"/cwbr-*|"$runner_temp"/sedc-*) [[ ! -d "$project_root" ]] || rm -rf -- "$project_root" ;;
       *) printf 'Refusing cleanup outside the unique runner temp directory.\n' >&2 ;;
     esac
     find "$runner_temp" -maxdepth 1 -type f \( -name "$project_id-*.log" -o -name "$project_id-*.exit" \) -delete
@@ -44,13 +54,15 @@ redact_log() {
     -e 's/(password|secret|token|api[_ -]?key|anon[_ -]?key|service[_ -]?role[_ -]?key)([[:space:]]*[:=][[:space:]]*)[^[:space:],;]+/\1\2[REDACTED]/Ig' \
     -e 's#(postgres(ql)?://)[^[:space:]]+#\1[REDACTED_CONNECTION_STRING]#Ig' \
     -e 's/CI Concurrent Bank/[REDACTED_BANK_NAME]/Ig' \
+    -e 's/CI Synthetic Bank/[REDACTED_BANK_NAME]/Ig' \
+    -e 's/CI Synthetic Account/[REDACTED_ACCOUNT_NAME]/Ig' \
     -e 's/Synthetic recovery driver 43/[REDACTED_ACCOUNT_NAME]/Ig' \
     -e 's/[0-9]{10,}/[REDACTED_NUMBER]/g' \
     -e 's/[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}/[REDACTED_EMAIL]/g'
 }
 
 [[ -n "$GITHUB_RUN_ID" && -n "$GITHUB_RUN_ATTEMPT" && -n "$GITHUB_WORKSPACE" && -n "$RUNNER_TEMP" ]] || fail "GitHub runner identity is incomplete."
-[[ "$GITHUB_REF" == refs/heads/feature/company-waybill-bank-recovery ]] || fail "This workflow only runs on the authorized feature branch."
+[[ "$GITHUB_REF" == "$expected_branch" ]] || fail "This workflow only runs on its authorized feature branch."
 [[ "$project_id" =~ ^[a-z0-9-]{1,40}$ ]] || fail "Temporary Supabase project ID is invalid."
 [[ ! -e "$project_root" ]] || fail "Unique temporary project path already exists."
 [[ -d "$fixture_root" ]] || fail "Pinned SQL support fixture is missing."
@@ -148,7 +160,14 @@ validate_migration_sources() {
   validate_migration_group "$repo_root/supabase/migrations" "$secure_migrations"
   validate_migration_group "$repo_root/supabase/migrations" "$v4_migrations"
   validate_migration_group "$repo_root/supabase/migrations" "$later_migrations"
-  [[ "$validated_source_count" == 26 ]] || fail "Expected 26 migration sources, validated $validated_source_count."
+  if [[ "$secure_email_cutover" == true ]]; then
+    validate_migration_group "$repo_root/supabase/migrations" "20261021000000_secure_waybill_email_delivery_cutover.sql"
+    [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/seed.sql" ]] || fail "Secure email cutover seed fixture is missing."
+    [[ -f "$repo_root/supabase/tests/database/secure_email_delivery_cutover.sql" ]] || fail "Secure email cutover SQL suite is missing."
+    [[ "$validated_source_count" == 27 ]] || fail "Expected 27 migration sources for secure email cutover, validated $validated_source_count."
+  else
+    [[ "$validated_source_count" == 26 ]] || fail "Expected 26 migration sources, validated $validated_source_count."
+  fi
   printf 'PASS preflight: validated all %s migration sources before database startup.\n' "$validated_source_count"
 }
 
@@ -171,6 +190,10 @@ validate_sql_sources() {
   for sql_file in "${required_sql_files[@]}"; do
     [[ -f "$sql_file" ]] || fail "Required SQL fixture or test suite is missing: $sql_file"
   done
+  if [[ "$secure_email_cutover" == true ]]; then
+    [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/seed.sql" ]] || fail "Secure email cutover seed fixture is missing."
+    [[ -f "$repo_root/supabase/tests/database/secure_email_delivery_cutover.sql" ]] || fail "Secure email cutover SQL suite is missing."
+  fi
   printf 'PASS preflight: validated all %s SQL fixtures and test suites before database startup.\n' "${#required_sql_files[@]}"
 }
 
@@ -250,6 +273,8 @@ fingerprint() {
   local capture_fingerprint_field=""
   local receipt_table_exists
   local receipt_fingerprint_field=""
+  local canary_table_exists
+  local canary_fingerprint_field=""
   capture_table_exists=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select to_regclass('private.loading_registration_bank_captures') is not null")
   if [[ "$capture_table_exists" == "t" ]]; then
     capture_fingerprint_field="'captures',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from private.loading_registration_bank_captures x),"
@@ -257,6 +282,10 @@ fingerprint() {
   receipt_table_exists=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select to_regclass('private.waybill_company_bank_save_receipts') is not null")
   if [[ "$receipt_table_exists" == "t" ]]; then
     receipt_fingerprint_field="'receipts',(select coalesce(jsonb_agg(to_jsonb(x) order by x.actor_id,x.request_id),'[]'::jsonb) from private.waybill_company_bank_save_receipts x),"
+  fi
+  canary_table_exists=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "select to_regclass('private.waybill_notification_canary_runs') is not null")
+  if [[ "$canary_table_exists" == "t" ]]; then
+    canary_fingerprint_field="'notification_canary_runs',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from private.waybill_notification_canary_runs x),"
   fi
   docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
     select md5(jsonb_build_object(
@@ -280,6 +309,7 @@ fingerprint() {
       'snapshots',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_bank_snapshots x),
       'events',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_bank_detail_events x),
       ${receipt_fingerprint_field}
+      ${canary_fingerprint_field}
       'storage',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from storage.objects x)
     )::text)"
 }
@@ -552,4 +582,74 @@ printf 'PASS concurrent RPC calls overlapped; a competing session waited on the 
 run_sql "concurrency gate cleanup" "$repo_root/supabase/tests/fixtures/company_waybill_bank_recovery/concurrency_gate_cleanup.sql"
 run_transactional_suite "concurrent bank-save assertions" "$repo_root/supabase/tests/database/company_waybill_bank_concurrency.sql"
 
-printf 'PASS all disposable Company Waybill bank-recovery SQL suites completed (project=%s, migrations=26).\n' "$project_id"
+if [[ "$secure_email_cutover" == true ]]; then
+  run_sql "secure email delivery synthetic seed" "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/seed.sql"
+  email_outbox_before=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select md5(coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb)::text) from public.notification_outbox x")
+  email_audit_before=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select md5(coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb)::text) from public.audit_log x")
+  copy_migration "$repo_root/supabase/migrations" 20261021000000_secure_waybill_email_delivery_cutover.sql
+  assert_staged_count 27
+  apply_migrations "$all_versions,20261021000000"
+  email_outbox_after=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select md5(coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb)::text) from public.notification_outbox x")
+  email_audit_after=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select md5(coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb)::text) from public.audit_log x")
+  [[ "$email_outbox_before" == "$email_outbox_after" ]] || fail "Email cutover migration changed notification outbox records."
+  [[ "$email_audit_before" == "$email_audit_after" ]] || fail "Email cutover migration changed historical audit records."
+  printf 'PASS email cutover migration preserved every seeded notification and audit row.\n'
+  run_transactional_suite "secure email delivery cutover assertions" "$repo_root/supabase/tests/database/secure_email_delivery_cutover.sql"
+
+  replay_log="$runner_temp/$project_id-email-migration-replay.log"
+  replay_before=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select md5(jsonb_build_object('notifications',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.notification_outbox x),'audit',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.audit_log x))::text)")
+  if docker exec -i "$db_container" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres -f - \
+      <"$repo_root/supabase/migrations/20261021000000_secure_waybill_email_delivery_cutover.sql" >"$replay_log" 2>&1; then
+    fail "Cutover migration unexpectedly replayed instead of rejecting an already-installed schema."
+  fi
+  grep -qi 'already exists' "$replay_log" || { redact_log <"$replay_log" | tail -n 25 >&2; fail "Migration replay failed for an unexpected reason."; }
+  replay_after=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select md5(jsonb_build_object('notifications',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.notification_outbox x),'audit',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.audit_log x))::text)")
+  [[ "$replay_before" == "$replay_after" ]] || fail "Rejected migration replay modified notification or audit history."
+  printf 'PASS migration replay is rejected before changes; notification and audit fingerprints remain unchanged.\n'
+
+  race_invoice_id='e7000000-0000-4000-8000-000000000046'
+  race_job_id=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select n.id from public.notification_outbox n where n.event_type='waybill_ready' and n.audience='driver' and n.payload->>'invoice_id'='$race_invoice_id' and n.status='pending'")
+  [[ "$race_job_id" =~ ^[0-9a-f-]{36}$ ]] || fail "Synthetic future Driver notification for concurrency test is missing."
+  race_a="sedc-a-$GITHUB_RUN_ID"
+  race_b="sedc-b-$GITHUB_RUN_ID"
+  race_a_log="$runner_temp/$project_id-$race_a.log"
+  race_b_log="$runner_temp/$project_id-$race_b.log"
+  docker exec -i --env "PGAPPNAME=$race_a" "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    >"$race_a_log" 2>&1 <<SQL &
+begin;
+select id from public.claim_waybill_notifications('secure-email-race-a',1);
+select pg_sleep(4);
+commit;
+SQL
+  race_a_pid=$!
+  if ! wait_for_pg_state "$race_a" Timeout PgSleep; then
+    race_client_diagnostics "$race_a"
+    stop_race_client "$race_a" "$race_a_pid"
+    fail "First secure notification claim did not enter the concurrency hold."
+  fi
+  docker exec -i --env "PGAPPNAME=$race_b" "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    >"$race_b_log" 2>&1 <<'SQL'
+select id from public.claim_waybill_notifications('secure-email-race-b',1);
+SQL
+  race_b_status=$?
+  if wait "$race_a_pid"; then race_a_status=0; else race_a_status=$?; fi
+  [[ "$race_a_status" == 0 && "$race_b_status" == 0 ]] || fail "Concurrent secure notification claims failed (a=$race_a_status,b=$race_b_status)."
+  race_a_id=$(grep -Eo '^[0-9a-f-]{36}$' "$race_a_log" | head -n 1)
+  race_b_id=$(grep -Eo '^[0-9a-f-]{36}$' "$race_b_log" | head -n 1)
+  [[ -n "$race_a_id" && -n "$race_b_id" && "$race_a_id" != "$race_b_id" ]] || fail "Concurrent claim sessions did not receive distinct notification rows."
+  race_invoice_count=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select count(*) from public.notification_outbox n join public.trip_closure_invoices i on i.trip_id=n.trip_id where n.id in ('$race_a_id','$race_b_id') and n.event_type='waybill_ready' and (i.invoice_number in ('WB-2026-000041','WB-2026-000042','WB-2026-000043','WB-2026-000044','WB-2026-000045') or (i.closed_at>'2026-10-20T21:34:05.976714Z'::timestamptz and i.invoice_number<>'WB-9999-999999'))")
+  [[ "$race_invoice_count" == 2 ]] || fail "Concurrent claims escaped the approved historical/future scope."
+  printf 'PASS concurrent email claims overlapped and returned distinct eligible notifications.\n'
+  apply_migrations "$all_versions,20261021000000"
+  printf 'PASS secure email cutover completed in isolated PostgreSQL 17 (project=%s, migrations=27).\n' "$project_id"
+else
+  printf 'PASS all disposable Company Waybill bank-recovery SQL suites completed (project=%s, migrations=26).\n' "$project_id"
+fi

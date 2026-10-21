@@ -15,7 +15,7 @@ const concurrencyAssertions = readFileSync('supabase/tests/database/company_wayb
 const recoverySeed = readFileSync('supabase/tests/fixtures/company_waybill_bank_recovery/seed.sql', 'utf8');
 const concurrencyGate = readFileSync('supabase/tests/fixtures/company_waybill_bank_recovery/concurrency_gate.sql', 'utf8');
 const concurrencyGateCleanup = readFileSync('supabase/tests/fixtures/company_waybill_bank_recovery/concurrency_gate_cleanup.sql', 'utf8');
-const ciRunner = readFileSync('scripts/ci/run-company-waybill-bank-recovery.sh', 'utf8');
+const ciRunner = readFileSync('scripts/ci/run-company-waybill-bank-recovery.sh', 'utf8').replace(/\r\n/g, '\n');
 const ciWorkflow = readFileSync('.github/workflows/company-waybill-bank-recovery-sql.yml', 'utf8');
 
 assert.match(migration, /create function private\.snapshot_registration_bank_capture_for_invoice\(p_invoice_id uuid\)[\s\S]*?security definer set search_path = ''/);
