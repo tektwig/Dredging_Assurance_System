@@ -51,7 +51,8 @@ with approved(invoice_number,closed_at) as (
 update public.trip_closure_invoices invoice
 set opened_at=approved.closed_at-interval '2 hours',
     closed_at=approved.closed_at,
-    issued_at=approved.closed_at
+    issued_at=approved.closed_at,
+    driver_email='synthetic-driver@example.invalid'
 from approved where invoice.invoice_number=approved.invoice_number;
 
 insert into public.daily_registrations(id,truck_id,initial_driver_id,operational_date,registered_at,registered_by)
@@ -133,10 +134,6 @@ join public.sites loading_site on loading_site.id=trip.loading_site_id
 join public.sites offloading_site on offloading_site.id=trip.offloading_site_id
 join public.profiles loading_profile on loading_profile.id=trip.opened_by
 join public.profiles offloading_profile on offloading_profile.id=trip.closed_by;
-
-update public.trip_closure_invoices invoice
-set driver_email=case when invoice.invoice_number='WB-2026-000045' then null else 'synthetic-driver@example.invalid' end
-where invoice.invoice_number between 'WB-2026-000039' and 'WB-2026-000046';
 
 create temporary table email_cutover_snapshot_targets on commit drop as
 select invoice.id,invoice.trip_id,row_number() over(order by invoice.invoice_number)::integer as sequence
