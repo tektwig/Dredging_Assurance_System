@@ -7,6 +7,10 @@ begin
 end;
 $$;
 
+alter table public.daily_registrations disable trigger user;
+alter table public.trips disable trigger user;
+alter table public.trip_closure_invoices disable trigger prevent_trip_invoice_mutation;
+
 with approved(invoice_number,closed_at) as (
   values
     ('WB-2026-000040','2026-10-15T21:34:05.976714Z'::timestamptz),
@@ -14,7 +18,26 @@ with approved(invoice_number,closed_at) as (
     ('WB-2026-000042','2026-10-17T21:34:05.976714Z'::timestamptz),
     ('WB-2026-000043','2026-10-18T21:34:05.976714Z'::timestamptz)
 )
-update public.trips trip set closed_at=approved.closed_at
+update public.daily_registrations registration
+set registered_at=approved.closed_at-interval '3 hours',
+    operational_date=((approved.closed_at-interval '3 hours') at time zone 'Africa/Lagos')::date
+from public.trip_closure_invoices invoice
+join public.trips trip on trip.id=invoice.trip_id
+join approved using(invoice_number)
+where registration.id=trip.daily_registration_id;
+
+with approved(invoice_number,closed_at) as (
+  values
+    ('WB-2026-000040','2026-10-15T21:34:05.976714Z'::timestamptz),
+    ('WB-2026-000041','2026-10-16T21:34:05.976714Z'::timestamptz),
+    ('WB-2026-000042','2026-10-17T21:34:05.976714Z'::timestamptz),
+    ('WB-2026-000043','2026-10-18T21:34:05.976714Z'::timestamptz)
+)
+update public.trips trip
+set opened_at=approved.closed_at-interval '2 hours',
+    closed_at=approved.closed_at,
+    created_at=approved.closed_at-interval '2 hours',
+    updated_at=approved.closed_at
 from public.trip_closure_invoices invoice join approved using(invoice_number)
 where trip.id=invoice.trip_id;
 
@@ -26,7 +49,9 @@ with approved(invoice_number,closed_at) as (
     ('WB-2026-000043','2026-10-18T21:34:05.976714Z'::timestamptz)
 )
 update public.trip_closure_invoices invoice
-set closed_at=approved.closed_at,issued_at=approved.closed_at
+set opened_at=approved.closed_at-interval '2 hours',
+    closed_at=approved.closed_at,
+    issued_at=approved.closed_at
 from approved where invoice.invoice_number=approved.invoice_number;
 
 insert into public.daily_registrations(id,truck_id,initial_driver_id,operational_date,registered_at,registered_by)
@@ -37,7 +62,6 @@ values
   ('e5000000-0000-4000-8000-000000000046','e4000000-0000-4000-8000-000000000043','e3000000-0000-4000-8000-000000000043','2026-10-12','2026-10-12T12:00:00Z','e0000000-0000-4000-8000-000000000002'),
   ('e5000000-0000-4000-8000-000000999999','e4000000-0000-4000-8000-000000000043','e3000000-0000-4000-8000-000000000043','2026-10-13','2026-10-13T12:00:00Z','e0000000-0000-4000-8000-000000000002');
 
-alter table public.trips disable trigger user;
 insert into public.trips(
   id,trip_number,truck_id,driver_id,daily_registration_id,loading_site_id,offloading_site_id,
   status,quantity_tonnes,opened_at,opened_by,closed_at,closed_by,
@@ -59,7 +83,29 @@ from (values
 ) ids(trip_id,trip_number,registration_id,closed_at)
 cross join public.trips template
 where template.trip_number='BANKREC-TRIP-43';
+
 alter table public.trips enable trigger user;
+alter table public.daily_registrations enable trigger user;
+alter table public.trip_closure_invoices enable trigger prevent_trip_invoice_mutation;
+
+select pg_temp.assert_true(not exists (
+  select 1 from pg_catalog.pg_trigger
+  where tgrelid in ('public.daily_registrations'::regclass,'public.trips'::regclass,'public.trip_closure_invoices'::regclass)
+    and not tgisinternal and tgenabled='D'
+),'all test-seed trigger bypasses are restored before fixture commit');
+select pg_temp.assert_true((
+  select count(*)=4 and bool_and(
+    trip.status='closed' and trip.opened_at<trip.closed_at
+    and invoice.opened_at=trip.opened_at and invoice.closed_at=trip.closed_at
+    and invoice.issued_at>=invoice.closed_at
+    and registration.registered_at<trip.opened_at
+    and registration.operational_date=(registration.registered_at at time zone 'Africa/Lagos')::date
+  )
+  from public.trip_closure_invoices invoice
+  join public.trips trip on trip.id=invoice.trip_id
+  join public.daily_registrations registration on registration.id=trip.daily_registration_id
+  where invoice.invoice_number in ('WB-2026-000040','WB-2026-000041','WB-2026-000042','WB-2026-000043')
+),'retimed historical fixture trips, invoices and registrations are chronologically consistent');
 
 insert into public.trip_closure_invoices(
   id,invoice_number,trip_id,trip_number,truck_id,truck_registration,truck_type,
@@ -178,6 +224,42 @@ select pg_temp.assert_true((
   select count(*)=5 from public.trip_closure_invoices
   where invoice_number in ('WB-2026-000041','WB-2026-000042','WB-2026-000043','WB-2026-000044','WB-2026-000045')
 ),'the exact five approved invoice numbers exist before migration');
+select pg_temp.assert_true((
+  select count(*)=5 and bool_and(
+    trip.status='closed' and trip.opened_at<trip.closed_at
+    and invoice.opened_at=trip.opened_at and invoice.closed_at=trip.closed_at
+    and invoice.issued_at>=invoice.closed_at
+    and registration.registered_at<trip.opened_at
+    and registration.operational_date=(registration.registered_at at time zone 'Africa/Lagos')::date
+  )
+  from public.trip_closure_invoices invoice
+  join public.trips trip on trip.id=invoice.trip_id
+  join public.daily_registrations registration on registration.id=trip.daily_registration_id
+  where invoice.invoice_number in ('WB-2026-000041','WB-2026-000042','WB-2026-000043','WB-2026-000044','WB-2026-000045')
+),'all five approved historical trips and invoices have matching chronologically valid timestamps');
+with approved(invoice_number,closed_at) as (
+  values
+    ('WB-2026-000041','2026-10-16T21:34:05.976714Z'::timestamptz),
+    ('WB-2026-000042','2026-10-17T21:34:05.976714Z'::timestamptz),
+    ('WB-2026-000043','2026-10-18T21:34:05.976714Z'::timestamptz),
+    ('WB-2026-000044','2026-10-19T21:34:05.976714Z'::timestamptz),
+    ('WB-2026-000045','2026-10-20T21:34:05.976714Z'::timestamptz)
+)
+select pg_temp.assert_true((
+  select count(*)=5 and bool_and(invoice.closed_at=approved.closed_at and trip.closed_at=approved.closed_at)
+  from approved
+  join public.trip_closure_invoices invoice using(invoice_number)
+  join public.trips trip on trip.id=invoice.trip_id
+),'the five fixed historical invoices match their approved timestamps and latest cutoff');
+select pg_temp.assert_true((
+  select count(*)=1 and bool_and(
+    trip.closed_at>'2026-10-20T21:34:05.976714Z'::timestamptz
+    and invoice.closed_at=trip.closed_at and invoice.issued_at>=invoice.closed_at
+  )
+  from public.trip_closure_invoices invoice
+  join public.trips trip on trip.id=invoice.trip_id
+  where invoice.invoice_number='WB-2026-000046' and trip.status='closed'
+),'the future synthetic trip is strictly after the approved cutoff with a matching invoice closure');
 select pg_temp.assert_true((
   select count(*)=1 from public.trip_closure_invoices where invoice_number='WB-9999-999999'
 ),'the reserved synthetic canary invoice number satisfies the database invoice constraint');
