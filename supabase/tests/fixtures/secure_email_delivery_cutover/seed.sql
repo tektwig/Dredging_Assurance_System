@@ -60,8 +60,7 @@ values
   ('e5000000-0000-4000-8000-000000000039','e4000000-0000-4000-8000-000000000043','e3000000-0000-4000-8000-000000000043','2026-10-09','2026-10-09T12:00:00Z','e0000000-0000-4000-8000-000000000002'),
   ('e5000000-0000-4000-8000-000000000044','e4000000-0000-4000-8000-000000000043','e3000000-0000-4000-8000-000000000043','2026-10-10','2026-10-10T12:00:00Z','e0000000-0000-4000-8000-000000000002'),
   ('e5000000-0000-4000-8000-000000000045','e4000000-0000-4000-8000-000000000043','e3000000-0000-4000-8000-000000000043','2026-10-11','2026-10-11T12:00:00Z','e0000000-0000-4000-8000-000000000002'),
-  ('e5000000-0000-4000-8000-000000000046','e4000000-0000-4000-8000-000000000043','e3000000-0000-4000-8000-000000000043','2026-10-12','2026-10-12T12:00:00Z','e0000000-0000-4000-8000-000000000002'),
-  ('e5000000-0000-4000-8000-000000999999','e4000000-0000-4000-8000-000000000043','e3000000-0000-4000-8000-000000000043','2026-10-13','2026-10-13T12:00:00Z','e0000000-0000-4000-8000-000000000002');
+  ('e5000000-0000-4000-8000-000000000046','e4000000-0000-4000-8000-000000000043','e3000000-0000-4000-8000-000000000043','2026-10-12','2026-10-12T12:00:00Z','e0000000-0000-4000-8000-000000000002');
 
 insert into public.trips(
   id,trip_number,truck_id,driver_id,daily_registration_id,loading_site_id,offloading_site_id,
@@ -79,8 +78,7 @@ from (values
   ('e6000000-0000-4000-8000-000000000039'::uuid,'EMAIL-CUTOVER-039','e5000000-0000-4000-8000-000000000039'::uuid,'2026-10-14T21:34:05.976714Z'::timestamptz),
   ('e6000000-0000-4000-8000-000000000044'::uuid,'EMAIL-CUTOVER-044','e5000000-0000-4000-8000-000000000044'::uuid,'2026-10-19T21:34:05.976714Z'::timestamptz),
   ('e6000000-0000-4000-8000-000000000045'::uuid,'EMAIL-CUTOVER-045','e5000000-0000-4000-8000-000000000045'::uuid,'2026-10-20T21:34:05.976714Z'::timestamptz),
-  ('e6000000-0000-4000-8000-000000000046'::uuid,'EMAIL-CUTOVER-046','e5000000-0000-4000-8000-000000000046'::uuid,'2026-10-20T21:34:06.976714Z'::timestamptz),
-  ('e6000000-0000-4000-8000-000000999999'::uuid,'EMAIL-CUTOVER-CANARY','e5000000-0000-4000-8000-000000999999'::uuid,'2026-10-20T21:39:05.976714Z'::timestamptz)
+  ('e6000000-0000-4000-8000-000000000046'::uuid,'EMAIL-CUTOVER-046','e5000000-0000-4000-8000-000000000046'::uuid,'2026-10-20T21:34:06.976714Z'::timestamptz)
 ) ids(trip_id,trip_number,registration_id,closed_at)
 cross join public.trips template
 where template.trip_number='BANKREC-TRIP-43';
@@ -126,8 +124,7 @@ from (values
   ('e7000000-0000-4000-8000-000000000039'::uuid,'WB-2026-000039','e6000000-0000-4000-8000-000000000039'::uuid),
   ('e7000000-0000-4000-8000-000000000044'::uuid,'WB-2026-000044','e6000000-0000-4000-8000-000000000044'::uuid),
   ('e7000000-0000-4000-8000-000000000045'::uuid,'WB-2026-000045','e6000000-0000-4000-8000-000000000045'::uuid),
-  ('e7000000-0000-4000-8000-000000000046'::uuid,'WB-2026-000046','e6000000-0000-4000-8000-000000000046'::uuid),
-  ('e7000000-0000-4000-8000-000000999999'::uuid,'WB-9999-999999','e6000000-0000-4000-8000-000000999999'::uuid)
+  ('e7000000-0000-4000-8000-000000000046'::uuid,'WB-2026-000046','e6000000-0000-4000-8000-000000000046'::uuid)
 ) ids(invoice_id,invoice_number,trip_id)
 join public.trips trip on trip.id=ids.trip_id
 join public.sites loading_site on loading_site.id=trip.loading_site_id
@@ -138,7 +135,7 @@ join public.profiles offloading_profile on offloading_profile.id=trip.closed_by;
 create temporary table email_cutover_snapshot_targets on commit drop as
 select invoice.id,invoice.trip_id,row_number() over(order by invoice.invoice_number)::integer as sequence
 from public.trip_closure_invoices invoice
-where invoice.invoice_number in ('WB-2026-000043','WB-2026-000044','WB-2026-000045','WB-9999-999999')
+where invoice.invoice_number in ('WB-2026-000043','WB-2026-000044','WB-2026-000045')
   and not exists (select 1 from public.trip_closure_invoice_bank_snapshots snapshot where snapshot.invoice_id=invoice.id);
 
 insert into public.trip_closure_invoice_bank_submissions(
@@ -177,7 +174,7 @@ update public.trip_closure_invoice_pdf_copies copy
 set status='ready',ready_at=statement_timestamp(),failed_at=null,last_error_code=null
 from public.trip_closure_invoices invoice
 where copy.invoice_id=invoice.id and copy.copy_kind='driver'
-  and invoice.invoice_number in ('WB-2026-000039','WB-2026-000040','WB-2026-000041','WB-2026-000042','WB-2026-000043','WB-2026-000044','WB-2026-000045','WB-2026-000046','WB-9999-999999');
+  and invoice.invoice_number in ('WB-2026-000039','WB-2026-000040','WB-2026-000041','WB-2026-000042','WB-2026-000043','WB-2026-000044','WB-2026-000045','WB-2026-000046');
 
 update public.trip_closure_invoice_pdf_copies copy
 set status='ready',ready_at=statement_timestamp(),failed_at=null,last_error_code=null,
@@ -185,7 +182,7 @@ set status='ready',ready_at=statement_timestamp(),failed_at=null,last_error_code
 from public.trip_closure_invoices invoice
 join public.trip_closure_invoice_bank_snapshots snapshot on snapshot.invoice_id=invoice.id and snapshot.trip_id=invoice.trip_id
 where copy.invoice_id=invoice.id and copy.copy_kind='company'
-  and invoice.invoice_number in ('WB-2026-000040','WB-2026-000041','WB-2026-000042','WB-2026-000043','WB-2026-000044','WB-2026-000045','WB-2026-000046','WB-9999-999999');
+  and invoice.invoice_number in ('WB-2026-000040','WB-2026-000041','WB-2026-000042','WB-2026-000043','WB-2026-000044','WB-2026-000045','WB-2026-000046');
 
 select public.enqueue_waybill_ready_notifications('synthetic-company@example.invalid');
 
@@ -203,13 +200,6 @@ set status='sent',attempts=1,first_attempt_at=statement_timestamp()-interval '1 
 from public.trip_closure_invoices invoice
 where notification.trip_id=invoice.trip_id and notification.event_type='waybill_ready'
   and notification.audience='client' and invoice.invoice_number='WB-2026-000040';
-
-update public.notification_outbox notification
-set status='processing',attempts=2,first_attempt_at=statement_timestamp()-interval '10 minutes',
-  lease_token='f8000000-0000-4000-8000-000000000041',lease_until=statement_timestamp()-interval '1 minute'
-from public.trip_closure_invoices invoice
-where notification.trip_id=invoice.trip_id and notification.event_type='waybill_ready'
-  and notification.audience='driver' and invoice.invoice_number='WB-2026-000041';
 
 insert into public.notification_outbox(trip_id,event_type,audience,delivery_sequence,recipients,payload,status)
 select invoice.trip_id,'trip_closed','finance',0,array['synthetic-legacy@example.invalid'],
@@ -257,9 +247,9 @@ select pg_temp.assert_true((
   join public.trips trip on trip.id=invoice.trip_id
   where invoice.invoice_number='WB-2026-000046' and trip.status='closed'
 ),'the future synthetic trip is strictly after the approved cutoff with a matching invoice closure');
-select pg_temp.assert_true((
-  select count(*)=1 from public.trip_closure_invoices where invoice_number='WB-9999-999999'
-),'the reserved synthetic canary invoice number satisfies the database invoice constraint');
+select pg_temp.assert_true(not exists (
+  select 1 from public.trip_closure_invoices where invoice_number='WB-9999-999999'
+),'the reserved synthetic invoice is not preseeded before the cutover migration');
 select pg_temp.assert_true((
   select count(*)=1 from public.trip_closure_invoices where invoice_number='WB-2026-000039'
 ),'an older Waybill exists as an explicit negative-scope fixture');

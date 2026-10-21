@@ -13,10 +13,14 @@ on:
       - "package.json"
       - "package-lock.json"
       - "supabase/functions/process-trip-notifications/**"
+      - "supabase/functions/process-waybill-pdfs/**"
       - "supabase/migrations/**"
       - "supabase/tests/database/secure_email_delivery_cutover.sql"
+      - "supabase/tests/database/secure_synthetic_email_canary.sql"
       - "supabase/tests/fixtures/secure_email_delivery_cutover/**"
       - "docs/secure-waybill-email-delivery-cutover.md"
+      - "docs/phase-3b-development-email-canary-preparation.md"
+      - "scripts/test-waybill-pdf-worker.mjs"
   workflow_dispatch:
 
 permissions:
@@ -63,6 +67,7 @@ jobs:
           node scripts/test-secure-email-delivery-cutover-ci.mjs
           node scripts/test-notification-worker.mjs
           node scripts/test-company-waybill-bank-autopreparation.mjs
+          node scripts/test-waybill-pdf-worker.mjs
           npm run typecheck
           npm run build
 

@@ -37,6 +37,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 const maxRpcAttempts = 3;
 const rpcRetryBaseDelayMs = 100;
+const syntheticCanaryProjectRef = 'pidxlopbxlapfmakmtjt';
+const syntheticCanaryInvoiceNumber = 'WB-9999-999999';
 
 const validText = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 
@@ -137,17 +139,52 @@ async function uploadSecurePdf(
     body: pdf as unknown as BodyInit,
     signal: AbortSignal.timeout(30_000),
   });
-  if (response.ok) return;
-  if (response.status !== 400 && response.status !== 409 && response.status !== 412) {
+  if (!response.ok && response.status !== 400 && response.status !== 409 && response.status !== 412) {
     throw new Error('Secure Storage upload failed');
   }
-  const existing = await http(url, {
-    method: 'HEAD',
+  if (!response.ok) {
+    const existing = await http(url, {
+      method: 'GET',
+      headers: { apikey: config.serviceRoleKey, Authorization: `Bearer ${config.serviceRoleKey}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!existing.ok || existing.headers.get('content-type')?.split(';')[0].trim() !== 'application/pdf') {
+      throw new Error('Existing secure PDF object could not be confirmed');
+    }
+    const existingBytes = new Uint8Array(await existing.arrayBuffer());
+    if (existingBytes.length < 5 || new TextDecoder().decode(existingBytes.subarray(0, 5)) !== '%PDF-') {
+      throw new Error('Existing secure PDF object is not a valid PDF');
+    }
+    if (existingBytes.length !== pdf.length || existingBytes.some((value, index) => value !== pdf[index])) {
+      throw new Error('Existing secure PDF content did not match the generated document');
+    }
+    return;
+  }
+  const stored = await http(url, {
+    method: 'GET',
     headers: { apikey: config.serviceRoleKey, Authorization: `Bearer ${config.serviceRoleKey}` },
     signal: AbortSignal.timeout(15_000),
   });
-  if (!existing.ok || existing.headers.get('content-type')?.split(';')[0].trim() !== 'application/pdf') {
-    throw new Error('Existing secure PDF object could not be confirmed');
+  if (!stored.ok || stored.headers.get('content-type')?.split(';')[0].trim() !== 'application/pdf') {
+    throw new Error('Uploaded secure PDF object could not be verified');
+  }
+  const storedBytes = new Uint8Array(await stored.arrayBuffer());
+  if (storedBytes.length < 5 || new TextDecoder().decode(storedBytes.subarray(0, 5)) !== '%PDF-'
+    || storedBytes.length !== pdf.length || storedBytes.some((value, index) => value !== pdf[index])) {
+    throw new Error('Uploaded secure PDF content did not match the generated document');
+  }
+}
+
+function assertCanaryProject(config: WorkerConfig) {
+  let projectUrl: URL;
+  try {
+    projectUrl = new URL(config.supabaseUrl);
+  } catch {
+    throw new Error('Synthetic PDF canary requires the approved Supabase project');
+  }
+  if (projectUrl.protocol !== 'https:' || projectUrl.hostname !== `${syntheticCanaryProjectRef}.supabase.co`
+    || projectUrl.pathname !== '/' || projectUrl.search || projectUrl.hash) {
+    throw new Error('Synthetic PDF canary requires the approved Supabase project');
   }
 }
 
@@ -156,6 +193,7 @@ export async function processWaybillPdfs(
   generators: PdfGenerators,
   batchLimit = 1,
   http: typeof fetch = fetch,
+  options: { syntheticCanaryInvoiceId?: string } = {},
 ) {
   if (!Number.isInteger(batchLimit) || batchLimit < 1 || batchLimit > 2) {
     throw new Error('Invalid secure Waybill PDF batch limit');
@@ -165,6 +203,14 @@ export async function processWaybillPdfs(
     Authorization: `Bearer ${config.serviceRoleKey}`,
     'Content-Type': 'application/json',
   };
+  const syntheticCanaryInvoiceId = options.syntheticCanaryInvoiceId;
+  if (syntheticCanaryInvoiceId !== undefined) {
+    assertCanaryProject(config);
+    if (!uuidPattern.test(syntheticCanaryInvoiceId)) {
+      throw new Error('Synthetic PDF canary invoice is invalid');
+    }
+    batchLimit = 1;
+  }
   const rpc = async <T>(name: string, body: unknown): Promise<T> => {
     for (let attempt = 0; attempt < maxRpcAttempts; attempt++) {
       const response = await http(`${config.supabaseUrl}/rest/v1/rpc/${name}`, {
@@ -203,8 +249,12 @@ export async function processWaybillPdfs(
   const processSecureCopy = async (copyKind: CopyKind) => {
     let jobs: unknown[];
     try {
-      const claimRpc = copyKind === 'driver' ? 'claim_driver_waybill_pdf_jobs' : 'claim_company_waybill_pdf_jobs';
-      const response = await rpc<unknown>(claimRpc, { p_limit: batchLimit });
+      const claimRpc = syntheticCanaryInvoiceId
+        ? 'claim_waybill_synthetic_canary_pdf_jobs'
+        : copyKind === 'driver' ? 'claim_driver_waybill_pdf_jobs' : 'claim_company_waybill_pdf_jobs';
+      const response = await rpc<unknown>(claimRpc, syntheticCanaryInvoiceId
+        ? { p_invoice_id: syntheticCanaryInvoiceId, p_copy_kind: copyKind }
+        : { p_limit: batchLimit });
       if (!Array.isArray(response)) throw new Error('Invalid secure claim response');
       jobs = response;
     } catch {
@@ -217,6 +267,11 @@ export async function processWaybillPdfs(
     for (const value of jobs) {
       const job = parseWaybillPdfJob(value);
       if (!job) {
+        result.unacknowledged++;
+        continue;
+      }
+      if (syntheticCanaryInvoiceId
+        && (job.invoice_id !== syntheticCanaryInvoiceId || job.invoice_number !== syntheticCanaryInvoiceNumber)) {
         result.unacknowledged++;
         continue;
       }

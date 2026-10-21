@@ -10,6 +10,7 @@ const workerJavaScript = ts.transpileModule(workerSource, {
 const { processWaybillPdfs } = await import(`data:text/javascript;base64,${Buffer.from(workerJavaScript).toString('base64')}`);
 
 const config = { supabaseUrl: 'https://synthetic-project.example.invalid', serviceRoleKey: 'server-only-test-key' };
+const canaryConfig = { supabaseUrl: 'https://pidxlopbxlapfmakmtjt.supabase.co', serviceRoleKey: 'server-only-test-key' };
 const driverJob = {
   copy_id: '44444444-4444-4444-8444-444444444444',
   invoice_id: '22222222-2222-4222-8222-222222222222',
@@ -33,18 +34,24 @@ const secureSnapshot = {
 const json = (value, status = 200, headers = {}) => new Response(JSON.stringify(value), {
   status, headers: { 'content-type': 'application/json', ...headers },
 });
-const pdfBytes = new Uint8Array([37, 80, 68, 70]);
+const pdfBytes = new TextEncoder().encode('%PDF-1.7\nsynthetic-test-only\n%%EOF\n');
 
 async function runWorker({
   driverJobs = [], companyJobs = [], driverSnapshot = secureSnapshot,
   companySnapshot = { ...secureSnapshot, driver_phone: null, bank_name: 'Synthetic Bank',
     account_name: 'Synthetic Account', account_number: '1234567890' },
-  failSecureStorage = false, conflictSecureStorage = false, staleDriverLease = false, invalidDriverPath = false,
-  driverClaimResponses = null,
+  failSecureStorage = false, failCompanyStorage = false, conflictSecureStorage = false,
+  staleDriverLease = false, staleCompanyLease = false, invalidDriverPath = false,
+  driverClaimResponses = null, canaryInvoiceId = null, canaryDriverJobs = [], canaryCompanyJobs = [],
+  canaryWrongInvoice = false, canaryWrongProject = false, canaryDriverPath = null,
+  canaryCompanyPath = null, missingDriverSnapshot = false, missingCompanySnapshot = false,
+  mismatchedExistingPdf = false,
 } = {}) {
   const calls = [];
   const rendered = { driver: [], company: [] };
   const claimAttempts = { driver: 0, company: 0 };
+  const uploaded = new Map();
+  const selectedConfig = canaryWrongProject ? config : canaryConfig;
   const http = async (input, init = {}) => {
     const url = new URL(String(input));
     const method = init.method ?? 'GET';
@@ -64,28 +71,58 @@ async function runWorker({
         claimAttempts.company++;
         return json(companyJobs);
       }
+      if (name === 'claim_waybill_synthetic_canary_pdf_jobs') {
+        const jobs = body.p_copy_kind === 'driver' ? canaryDriverJobs : canaryCompanyJobs;
+        const altered = canaryWrongInvoice ? jobs.map(job => ({ ...job, invoice_id: driverJob.invoice_id,
+          invoice_number: driverJob.invoice_number })) : jobs;
+        const selectedCanaryPath = body.p_copy_kind === 'driver' ? canaryDriverPath : canaryCompanyPath;
+        const withPath = selectedCanaryPath
+          ? altered.map(job => ({ ...job, storage_path: selectedCanaryPath })) : altered;
+        return json(withPath);
+      }
       if (name === 'get_driver_waybill_pdf_snapshot') {
+        if (missingDriverSnapshot) return json(null);
         return json({ ...driverSnapshot, driver_phone: 'MUST_NOT_REACH_DRIVER_RENDERER',
           bank_name: 'MUST_NOT_REACH_DRIVER_RENDERER', account_name: 'MUST_NOT_REACH_DRIVER_RENDERER',
           account_number: '1111111111' });
       }
-      if (name === 'get_company_waybill_pdf_snapshot') return json(companySnapshot);
+      if (name === 'get_company_waybill_pdf_snapshot') return json(missingCompanySnapshot ? null : companySnapshot);
       if (name === 'finish_driver_waybill_pdf_job') return json(!staleDriverLease);
-      if (name === 'finish_company_waybill_pdf_job') return json(true);
+      if (name === 'finish_company_waybill_pdf_job') return json(!staleCompanyLease);
       throw new Error(`Unexpected RPC ${name}`);
     }
     calls.push({ name: 'storage', url: url.toString(), method, headers });
     if (failSecureStorage && url.pathname.includes('/waybill-driver-copies/')) return new Response('private failure', { status: 503 });
+    if (failCompanyStorage && url.pathname.includes('/waybill-company-copies/')) return new Response('private failure', { status: 503 });
     if (conflictSecureStorage && method === 'POST' && url.pathname.includes('/waybill-driver-copies/')) {
       return new Response('already exists', { status: 409 });
     }
-    if (method === 'HEAD') return new Response(null, { status: 200, headers: { 'content-type': 'application/pdf' } });
-    return new Response(null, { status: 201 });
+    if (method === 'POST') {
+      if (conflictSecureStorage && url.pathname.includes('/waybill-driver-copies/')) {
+        uploaded.set(url.pathname, pdfBytes);
+        return new Response('already exists', { status: 409 });
+      }
+      uploaded.set(url.pathname, new Uint8Array(init.body));
+      return new Response(null, { status: 201 });
+    }
+    if (method === 'GET') {
+      const bytes = mismatchedExistingPdf
+        ? new TextEncoder().encode('%PDF-1.7\nwrong-synthetic-object\n%%EOF\n')
+        : uploaded.get(url.pathname) ?? pdfBytes;
+      return new Response(bytes, { status: 200, headers: { 'content-type': 'application/pdf' } });
+    }
+    return new Response(null, { status: 405 });
   };
-  const counts = await processWaybillPdfs(config, {
-    driver: async snapshot => { rendered.driver.push(snapshot); return pdfBytes; },
-    company: async snapshot => { rendered.company.push(snapshot); return pdfBytes; },
-  }, 2, http);
+  let counts;
+  try {
+    counts = await processWaybillPdfs(selectedConfig, {
+      driver: async snapshot => { rendered.driver.push(snapshot); return pdfBytes; },
+      company: async snapshot => { rendered.company.push(snapshot); return pdfBytes; },
+    }, 2, http, canaryInvoiceId ? { syntheticCanaryInvoiceId: canaryInvoiceId } : {});
+  } catch (error) {
+    if (!canaryWrongProject) throw error;
+    return { counts: null, calls, rendered, claimAttempts, error };
+  }
   return { counts, calls, rendered, claimAttempts };
 }
 
@@ -164,8 +201,10 @@ assert(secureSuccess.calls.some(call => call.name === 'get_driver_waybill_pdf_sn
 assert(secureSuccess.calls.some(call => call.name === 'get_company_waybill_pdf_snapshot'
   && call.body.p_copy_id === companyJob.copy_id && call.body.p_lease_token === companyJob.lease_token));
 const secureUploads = secureSuccess.calls.filter(call => call.name === 'storage');
-assert.equal(secureUploads.length, 2);
-assert(secureUploads.every(call => call.method === 'POST' && call.headers.get('x-upsert') === 'false'));
+assert.equal(secureUploads.filter(call => call.method === 'POST').length, 2);
+assert.equal(secureUploads.filter(call => call.method === 'GET').length, 2);
+const secureUploadPosts = secureUploads.filter(call => call.method === 'POST');
+assert(secureUploadPosts.every(call => call.headers.get('x-upsert') === 'false'));
 assert(secureUploads.some(call => call.url.includes('/waybill-driver-copies/2026/WB-2026-000123.pdf')));
 assert(secureUploads.some(call => call.url.includes('/waybill-company-copies/2026/WB-2026-000123-company-v2.pdf')));
 assert.equal(JSON.stringify(secureSuccess.counts).includes('1234567890'), false);
@@ -185,7 +224,9 @@ const invalidCompany = await runWorker({
 assert.equal(invalidCompany.counts.ready, 1);
 assert.equal(invalidCompany.counts.deferred, 1);
 assert.equal(invalidCompany.rendered.company.length, 0);
-assert.equal(invalidCompany.calls.filter(call => call.name === 'storage').length, 1);
+assert.deepEqual(invalidCompany.calls.filter(call => call.name === 'storage')
+  .map(call => [call.method, new URL(call.url).pathname.includes('/waybill-driver-copies/')]),
+[['POST', true], ['GET', true]]);
 assert(invalidCompany.calls.some(call => call.name === 'finish_company_waybill_pdf_job'
   && call.body.p_failure_code === 'invalid_snapshot' && call.body.p_succeeded === false));
 console.log('PASS incomplete company snapshot fails only the company job without uploading banking data');
@@ -203,10 +244,18 @@ console.log('PASS stale lease acknowledgement is counted as unacknowledged');
 
 const conflict = await runWorker({ driverJobs: [driverJob], conflictSecureStorage: true });
 const conflictStorage = conflict.calls.filter(call => call.name === 'storage');
-assert.deepEqual(conflictStorage.map(call => call.method), ['POST', 'HEAD']);
+assert.deepEqual(conflictStorage.map(call => call.method), ['POST', 'GET']);
 assert.equal(conflictStorage[0].headers.get('x-upsert'), 'false');
 assert.equal(conflict.counts.ready, 1);
 console.log('PASS secure object conflicts confirm an existing PDF and never overwrite it');
+
+const mismatchedConflict = await runWorker({ driverJobs: [driverJob], conflictSecureStorage: true,
+  mismatchedExistingPdf: true });
+assert.equal(mismatchedConflict.counts.deferred, 1);
+assert.equal(mismatchedConflict.counts.ready, 0);
+assert(mismatchedConflict.calls.some(call => call.name === 'finish_driver_waybill_pdf_job'
+  && call.body.p_failure_code === 'storage_upload_failed'));
+console.log('PASS a conflicting but different PDF object is not marked ready');
 
 const unsafePath = await runWorker({ driverJobs: [driverJob], invalidDriverPath: true });
 assert.equal(unsafePath.rendered.driver.length, 0);
@@ -214,6 +263,111 @@ assert.equal(unsafePath.calls.some(call => call.name === 'get_driver_waybill_pdf
 assert(unsafePath.calls.some(call => call.name === 'finish_driver_waybill_pdf_job'
   && call.body.p_failure_code === 'invalid_snapshot'));
 console.log('PASS unsafe bucket paths are rejected before snapshot access or Storage upload');
+
+const canaryInvoiceId = '99999999-9999-4999-8999-999999999999';
+const canaryDriverJob = { ...driverJob, invoice_id: canaryInvoiceId,
+  invoice_number: 'WB-9999-999999', storage_path: '9999/WB-9999-999999.pdf' };
+const canaryCompanyJob = { ...companyJob, invoice_id: canaryInvoiceId,
+  invoice_number: 'WB-9999-999999', storage_path: '9999/WB-9999-999999-company-v2.pdf' };
+const scopedCanary = await runWorker({ canaryInvoiceId, canaryDriverJobs: [canaryDriverJob],
+  canaryCompanyJobs: [canaryCompanyJob],
+  driverSnapshot: { ...secureSnapshot, invoice_number: 'WB-9999-999999' },
+  companySnapshot: { ...secureSnapshot, invoice_number: 'WB-9999-999999', driver_phone: null,
+    bank_name: 'Synthetic Bank', account_name: 'Synthetic Account', account_number: '1234567890' } });
+assert.equal(scopedCanary.counts.ready, 2);
+assert.equal(scopedCanary.claimAttempts.driver, 0);
+assert.equal(scopedCanary.calls.filter(call => call.name === 'claim_waybill_synthetic_canary_pdf_jobs').length, 2);
+assert(scopedCanary.calls.filter(call => call.name === 'claim_waybill_synthetic_canary_pdf_jobs')
+  .every(call => call.body.p_invoice_id === canaryInvoiceId));
+assert.equal(scopedCanary.calls.some(call => call.name === 'claim_driver_waybill_pdf_jobs'
+  || call.name === 'claim_company_waybill_pdf_jobs'), false);
+assert.equal(scopedCanary.calls.filter(call => call.name === 'storage' && call.method === 'POST').length, 2);
+console.log('PASS canary mode claims only the explicitly selected synthetic invoice and verifies uploaded PDF bytes');
+
+const wrongCanaryInvoice = await runWorker({ canaryInvoiceId, canaryDriverJobs: [canaryDriverJob],
+  canaryCompanyJobs: [], canaryWrongInvoice: true });
+assert.equal(wrongCanaryInvoice.counts.unacknowledged, 1);
+assert.equal(wrongCanaryInvoice.calls.some(call => call.name === 'get_driver_waybill_pdf_snapshot'
+  || call.name === 'finish_driver_waybill_pdf_job' || call.name === 'storage'), false);
+console.log('PASS canary worker rejects an unrelated claimed invoice without snapshot, upload, or acknowledgement');
+
+const wrongCanaryPath = await runWorker({ canaryInvoiceId, canaryDriverJobs: [canaryDriverJob],
+  canaryCompanyJobs: [], canaryDriverPath: '2026/unrelated.pdf' });
+assert.equal(wrongCanaryPath.calls.some(call => call.name === 'get_driver_waybill_pdf_snapshot'
+  || call.name === 'storage'), false);
+assert.equal(wrongCanaryPath.calls.some(call => call.name === 'finish_driver_waybill_pdf_job'
+  && call.body.p_failure_code === 'invalid_snapshot'), true);
+console.log('PASS canary worker rejects an unexpected storage path before touching Storage');
+
+const wrongCanaryCompanyPath = await runWorker({ canaryInvoiceId, canaryDriverJobs: [],
+  canaryCompanyJobs: [canaryCompanyJob], canaryCompanyPath: '9999/unrelated-company.pdf' });
+assert.equal(wrongCanaryCompanyPath.calls.some(call => call.name === 'get_company_waybill_pdf_snapshot'
+  || call.name === 'storage'), false);
+assert(wrongCanaryCompanyPath.calls.some(call => call.name === 'finish_company_waybill_pdf_job'
+  && call.body.p_failure_code === 'invalid_snapshot'));
+console.log('PASS canary worker rejects an unexpected Company storage path before snapshot access or Storage');
+
+const unrelatedCanaryResult = await runWorker({ canaryInvoiceId, canaryDriverJobs: [driverJob], canaryCompanyJobs: [] });
+assert.equal(unrelatedCanaryResult.counts.unacknowledged, 1);
+assert.equal(unrelatedCanaryResult.calls.some(call => call.name === 'storage'
+  || call.name === 'finish_driver_waybill_pdf_job'), false);
+console.log('PASS unrelated claim results remain untouched in canary mode');
+
+const failedCanaryUpload = await runWorker({ canaryInvoiceId, canaryDriverJobs: [canaryDriverJob],
+  canaryCompanyJobs: [], failSecureStorage: true,
+  driverSnapshot: { ...secureSnapshot, invoice_number: 'WB-9999-999999' } });
+assert.equal(failedCanaryUpload.counts.deferred, 1);
+assert(failedCanaryUpload.calls.some(call => call.name === 'finish_driver_waybill_pdf_job'
+  && call.body.p_failure_code === 'storage_upload_failed'));
+console.log('PASS canary upload failures retain retryable lease handling');
+
+const missingCanarySnapshot = await runWorker({ canaryInvoiceId, canaryDriverJobs: [canaryDriverJob],
+  canaryCompanyJobs: [], missingDriverSnapshot: true });
+assert.equal(missingCanarySnapshot.counts.deferred, 1);
+assert.equal(missingCanarySnapshot.calls.some(call => call.name === 'storage'), false);
+assert(missingCanarySnapshot.calls.some(call => call.name === 'finish_driver_waybill_pdf_job'
+  && call.body.p_failure_code === 'snapshot_unavailable' && call.body.p_succeeded === false));
+console.log('PASS missing canary PDF snapshots remain retryable and never reach Storage');
+
+const missingCanaryCompanySnapshot = await runWorker({ canaryInvoiceId, canaryDriverJobs: [],
+  canaryCompanyJobs: [canaryCompanyJob], missingCompanySnapshot: true });
+assert.equal(missingCanaryCompanySnapshot.counts.deferred, 1);
+assert.equal(missingCanaryCompanySnapshot.calls.some(call => call.name === 'storage'), false);
+assert(missingCanaryCompanySnapshot.calls.some(call => call.name === 'finish_company_waybill_pdf_job'
+  && call.body.p_failure_code === 'snapshot_unavailable' && call.body.p_succeeded === false));
+console.log('PASS a missing canary Company snapshot remains retryable and never reaches Storage');
+
+const incompleteCanaryAck = await runWorker({ canaryInvoiceId, canaryDriverJobs: [canaryDriverJob],
+  canaryCompanyJobs: [], staleDriverLease: true,
+  driverSnapshot: { ...secureSnapshot, invoice_number: 'WB-9999-999999' } });
+assert.equal(incompleteCanaryAck.counts.unacknowledged, 1);
+assert.equal(incompleteCanaryAck.counts.ready, 0);
+assert.equal(incompleteCanaryAck.calls.filter(call => call.name === 'finish_driver_waybill_pdf_job').length, 1);
+console.log('PASS incomplete canary lease acknowledgement is not reported as ready');
+
+const failedCanaryCompanyUpload = await runWorker({ canaryInvoiceId, canaryDriverJobs: [],
+  canaryCompanyJobs: [canaryCompanyJob], failCompanyStorage: true,
+  companySnapshot: { ...secureSnapshot, invoice_number: 'WB-9999-999999', driver_phone: null,
+    bank_name: 'Synthetic Bank', account_name: 'Synthetic Account', account_number: '1234567890' } });
+assert.equal(failedCanaryCompanyUpload.counts.deferred, 1);
+assert(failedCanaryCompanyUpload.calls.some(call => call.name === 'finish_company_waybill_pdf_job'
+  && call.body.p_failure_code === 'storage_upload_failed'));
+console.log('PASS canary Company upload failure retains retryable lease handling');
+
+const incompleteCanaryCompanyAck = await runWorker({ canaryInvoiceId, canaryDriverJobs: [],
+  canaryCompanyJobs: [canaryCompanyJob], staleCompanyLease: true,
+  companySnapshot: { ...secureSnapshot, invoice_number: 'WB-9999-999999', driver_phone: null,
+    bank_name: 'Synthetic Bank', account_name: 'Synthetic Account', account_number: '1234567890' } });
+assert.equal(incompleteCanaryCompanyAck.counts.unacknowledged, 1);
+assert.equal(incompleteCanaryCompanyAck.counts.ready, 0);
+assert.equal(incompleteCanaryCompanyAck.calls.filter(call => call.name === 'finish_company_waybill_pdf_job').length, 1);
+console.log('PASS incomplete canary Company lease acknowledgement is not reported as ready');
+
+const wrongCanaryProject = await runWorker({ canaryInvoiceId, canaryDriverJobs: [canaryDriverJob],
+  canaryCompanyJobs: [], canaryWrongProject: true });
+assert.equal(wrongCanaryProject.calls.some(call => call.name === 'claim_waybill_synthetic_canary_pdf_jobs'), false);
+assert.equal(wrongCanaryProject.calls.length, 0);
+console.log('PASS canary mode refuses an unapproved Supabase project before database or Storage requests');
 
 const legacyPreserved = await runWorker({ driverJobs: [driverJob] });
 assert.equal(legacyPreserved.counts.driver_claimed, 1);

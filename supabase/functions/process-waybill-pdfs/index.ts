@@ -10,9 +10,14 @@ const pdfGenerators: PdfGenerators = {
 
 const env = (name: string): string => Deno.env.get(name)?.trim() ?? '';
 
-async function readBatchLimit(request: Request): Promise<number | null> {
+interface WorkerRequestOptions {
+  limit: number;
+  syntheticCanaryInvoiceId?: string;
+}
+
+async function readWorkerRequest(request: Request): Promise<WorkerRequestOptions | null> {
   const bodyText = await request.text();
-  if (!bodyText.trim()) return 1;
+  if (!bodyText.trim()) return { limit: 1 };
 
   let body: unknown;
   try {
@@ -22,11 +27,19 @@ async function readBatchLimit(request: Request): Promise<number | null> {
   }
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
 
-  const limit = (body as Record<string, unknown>).limit;
-  if (limit === undefined) return 1;
-  return typeof limit === 'number' && Number.isInteger(limit) && limit >= 1 && limit <= 2
-    ? limit
-    : null;
+  const options = body as Record<string, unknown>;
+  if (Object.keys(options).some(key => !['limit', 'mode', 'invoice_id'].includes(key))) return null;
+  const limit = options.limit ?? 1;
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 2) return null;
+  if (options.mode === undefined && options.invoice_id === undefined) return { limit };
+  const selectedInvoiceId = env('WAYBILL_PDF_SYNTHETIC_CANARY_INVOICE_ID');
+  if (options.mode !== 'synthetic_canary'
+    || env('WAYBILL_PDF_SYNTHETIC_CANARY_ENABLED') !== 'true'
+    || typeof options.invoice_id !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(options.invoice_id)
+    || options.invoice_id !== selectedInvoiceId
+    || limit !== 1) return null;
+  return { limit: 1, syntheticCanaryInvoiceId: options.invoice_id };
 }
 
 async function secretMatches(actual: string, expected: string): Promise<boolean> {
@@ -54,9 +67,11 @@ Deno.serve(async (request: Request) => {
   };
   if (!config.supabaseUrl || !config.serviceRoleKey) return new Response('Worker not configured', { status: 503 });
   try {
-    const batchLimit = await readBatchLimit(request);
-    if (batchLimit === null) return new Response('Invalid batch limit', { status: 400 });
-    const result = await processWaybillPdfs(config, pdfGenerators, batchLimit);
+    const workerRequest = await readWorkerRequest(request);
+    if (workerRequest === null) return new Response('Invalid PDF worker request', { status: 400 });
+    const result = await processWaybillPdfs(config, pdfGenerators, workerRequest.limit, fetch, {
+      syntheticCanaryInvoiceId: workerRequest.syntheticCanaryInvoiceId,
+    });
     return Response.json(result);
   } catch {
     return new Response('Waybill PDF processing unavailable; queued work retained', { status: 503 });

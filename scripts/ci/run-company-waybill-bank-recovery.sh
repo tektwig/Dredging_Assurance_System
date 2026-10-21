@@ -162,9 +162,14 @@ validate_migration_sources() {
   validate_migration_group "$repo_root/supabase/migrations" "$later_migrations"
   if [[ "$secure_email_cutover" == true ]]; then
     validate_migration_group "$repo_root/supabase/migrations" "20261021000000_secure_waybill_email_delivery_cutover.sql"
+    validate_migration_group "$repo_root/supabase/migrations" "20261021133526_secure_synthetic_waybill_email_canary.sql"
     [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/seed.sql" ]] || fail "Secure email cutover seed fixture is missing."
     [[ -f "$repo_root/supabase/tests/database/secure_email_delivery_cutover.sql" ]] || fail "Secure email cutover SQL suite is missing."
-    [[ "$validated_source_count" == 27 ]] || fail "Expected 27 migration sources for secure email cutover, validated $validated_source_count."
+    [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_provision.sql" ]] || fail "Synthetic email canary provisioning fixture is missing."
+    [[ -f "$repo_root/supabase/tests/database/secure_synthetic_email_canary.sql" ]] || fail "Synthetic email canary SQL suite is missing."
+    [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate.sql" ]] || fail "Synthetic email concurrency gate fixture is missing."
+    [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate_cleanup.sql" ]] || fail "Synthetic email concurrency gate cleanup is missing."
+    [[ "$validated_source_count" == 28 ]] || fail "Expected 28 migration sources for secure email canary, validated $validated_source_count."
   else
     [[ "$validated_source_count" == 26 ]] || fail "Expected 26 migration sources, validated $validated_source_count."
   fi
@@ -193,6 +198,10 @@ validate_sql_sources() {
   if [[ "$secure_email_cutover" == true ]]; then
     [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/seed.sql" ]] || fail "Secure email cutover seed fixture is missing."
     [[ -f "$repo_root/supabase/tests/database/secure_email_delivery_cutover.sql" ]] || fail "Secure email cutover SQL suite is missing."
+    [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_provision.sql" ]] || fail "Synthetic email canary provisioning fixture is missing."
+    [[ -f "$repo_root/supabase/tests/database/secure_synthetic_email_canary.sql" ]] || fail "Synthetic email canary SQL suite is missing."
+    [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate.sql" ]] || fail "Synthetic email concurrency gate fixture is missing."
+    [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate_cleanup.sql" ]] || fail "Synthetic email concurrency gate cleanup is missing."
   fi
   printf 'PASS preflight: validated all %s SQL fixtures and test suites before database startup.\n' "${#required_sql_files[@]}"
 }
@@ -598,7 +607,7 @@ if [[ "$secure_email_cutover" == true ]]; then
   [[ "$email_outbox_before" == "$email_outbox_after" ]] || fail "Email cutover migration changed notification outbox records."
   [[ "$email_audit_before" == "$email_audit_after" ]] || fail "Email cutover migration changed historical audit records."
   printf 'PASS email cutover migration preserved every seeded notification and audit row.\n'
-  run_transactional_suite "secure email delivery cutover assertions" "$repo_root/supabase/tests/database/secure_email_delivery_cutover.sql"
+    run_transactional_suite "secure email delivery cutover assertions" "$repo_root/supabase/tests/database/secure_email_delivery_cutover.sql"
 
   replay_log="$runner_temp/$project_id-email-migration-replay.log"
   replay_before=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
@@ -648,8 +657,183 @@ SQL
     -c "select count(*) from public.notification_outbox n join public.trip_closure_invoices i on i.trip_id=n.trip_id where n.id in ('$race_a_id','$race_b_id') and n.event_type='waybill_ready' and (i.invoice_number in ('WB-2026-000041','WB-2026-000042','WB-2026-000043','WB-2026-000044','WB-2026-000045') or (i.closed_at>'2026-10-20T21:34:05.976714Z'::timestamptz and i.invoice_number<>'WB-9999-999999'))")
   [[ "$race_invoice_count" == 2 ]] || fail "Concurrent claims escaped the approved historical/future scope."
   printf 'PASS concurrent email claims overlapped and returned distinct eligible notifications.\n'
-  apply_migrations "$all_versions,20261021000000"
-  printf 'PASS secure email cutover completed in isolated PostgreSQL 17 (project=%s, migrations=27).\n' "$project_id"
+
+  race_release_ok=$(docker exec -i "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -f - <<SQL
+begin;
+set local role service_role;
+select bool_and(public.finish_trip_notification(notification.id,notification.lease_token,false,null,'isolated CI lease release'))
+from public.notification_outbox notification where notification.id in ('$race_a_id'::uuid,'$race_b_id'::uuid);
+commit;
+SQL
+  )
+  [[ "$race_release_ok" == t ]] || fail "Could not release both CI-only secure-email test leases."
+  race_release_state=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select count(*)=2 and bool_and(status='pending' and lease_token is null and lease_until is null) from public.notification_outbox where id in ('$race_a_id'::uuid,'$race_b_id'::uuid)")
+  [[ "$race_release_state" == t ]] || fail "CI-only secure-email claim fixtures remain in an unexpected state."
+
+  email_canary_outbox_before=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select md5(coalesce(jsonb_agg(to_jsonb(notification) order by notification.id),'[]'::jsonb)::text) from public.notification_outbox notification")
+  email_canary_audit_before=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select md5(coalesce(jsonb_agg(to_jsonb(audit) order by audit.id),'[]'::jsonb)::text) from public.audit_log audit")
+  copy_migration "$repo_root/supabase/migrations" 20261021133526_secure_synthetic_waybill_email_canary.sql
+  assert_staged_count 28
+  apply_migrations "$all_versions,20261021000000,20261021133526"
+  email_canary_outbox_after=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select md5(coalesce(jsonb_agg(to_jsonb(notification) order by notification.id),'[]'::jsonb)::text) from public.notification_outbox notification")
+  email_canary_audit_after=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select md5(coalesce(jsonb_agg(to_jsonb(audit) order by audit.id),'[]'::jsonb)::text) from public.audit_log audit")
+  [[ "$email_canary_outbox_before" == "$email_canary_outbox_after" ]] || fail "Synthetic canary migration changed notification-outbox rows."
+  [[ "$email_canary_audit_before" == "$email_canary_audit_after" ]] || fail "Synthetic canary migration changed historical audit rows."
+  printf 'PASS synthetic canary migration preserved every pre-existing notification and audit row.\n'
+
+  run_sql "synthetic email canary provisioning fixture" "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_provision.sql"
+  run_transactional_suite "synthetic email canary assertions" "$repo_root/supabase/tests/database/secure_synthetic_email_canary.sql"
+  run_sql "canary concurrency gate setup" "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate.sql"
+
+  canary_invoice_id=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select id from public.trip_closure_invoices where invoice_number='WB-9999-999999'")
+  canary_trip_id=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select trip_id from public.trip_closure_invoices where invoice_number='WB-9999-999999'")
+  [[ "$canary_invoice_id" =~ ^[0-9a-f-]{36}$ && "$canary_trip_id" =~ ^[0-9a-f-]{36}$ ]] || fail "The reserved synthetic email canary invoice is unavailable."
+  canary_outside_fingerprint=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select md5(coalesce(jsonb_agg(to_jsonb(notification) order by notification.id),'[]'::jsonb)::text) from public.notification_outbox notification where notification.trip_id<>'$canary_trip_id'::uuid")
+
+  run_canary_claim() {
+    local app_name="$1"
+    local log_file="$runner_temp/$project_id-$app_name.log"
+    local status_file="$runner_temp/$project_id-$app_name.exit"
+    local client_status
+    if docker exec -i --env "PGAPPNAME=$app_name" "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -f - >"$log_file" 2>&1 <<SQL
+begin;
+set local role service_role;
+select notification.id::text||'|'||notification.audience
+from public.claim_waybill_notification_canary('ci-canary-$GITHUB_RUN_ID','$canary_invoice_id','synthetic-company@example.invalid',1) notification;
+commit;
+SQL
+    then
+      client_status=0
+    else
+      client_status=$?
+    fi
+    printf '%s\n' "$client_status" >"$status_file"
+    return "$client_status"
+  }
+
+  canary_a="sedc-canary-a-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+  canary_b="sedc-canary-b-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+  wait_for_pg_state "$canary_a" Timeout PgSleep & canary_observer_a_pid=$!
+  if ! wait_for_observer_start "cwbrmon_${canary_a}_PgSleep"; then
+    stop_race_client "canary-observer-a" "$canary_observer_a_pid"
+    fail "Could not start the first canary PostgreSQL wait observer."
+  fi
+  run_canary_claim "$canary_a" & canary_a_pid=$!
+  if ! wait "$canary_observer_a_pid"; then
+    race_client_diagnostics "$canary_a"
+    stop_race_client "$canary_a" "$canary_a_pid"
+    fail "First canary claim did not reach the synthetic PostgreSQL sleep gate."
+  fi
+  wait_for_pg_state "$canary_b" Timeout PgSleep & canary_observer_b_pid=$!
+  if ! wait_for_observer_start "cwbrmon_${canary_b}_PgSleep"; then
+    race_client_diagnostics "$canary_a"
+    stop_race_client "$canary_a" "$canary_a_pid"
+    stop_race_client "canary-observer-b" "$canary_observer_b_pid"
+    fail "Could not start the second canary PostgreSQL wait observer."
+  fi
+  run_canary_claim "$canary_b" & canary_b_pid=$!
+  if ! wait "$canary_observer_b_pid"; then
+    race_client_diagnostics "$canary_a"
+    race_client_diagnostics "$canary_b"
+    stop_race_client "$canary_a" "$canary_a_pid"
+    stop_race_client "$canary_b" "$canary_b_pid"
+    fail "Second canary claim did not reach the synthetic PostgreSQL sleep gate."
+  fi
+  canary_overlap_count=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select count(*) from pg_catalog.pg_stat_activity where application_name in ('$canary_a','$canary_b') and state='active' and wait_event_type='Timeout' and wait_event='PgSleep'")
+  [[ "$canary_overlap_count" == 2 ]] || {
+    printf 'Canary overlap observer found %s simultaneously sleeping sessions.\n' "$canary_overlap_count" >&2
+    race_client_diagnostics "$canary_a"
+    race_client_diagnostics "$canary_b"
+    stop_race_client "$canary_a" "$canary_a_pid"
+    stop_race_client "$canary_b" "$canary_b_pid"
+    fail "Two independent canary database sessions did not overlap."
+  }
+  printf 'PASS two independent canary claim sessions overlapped in PostgreSQL.\n'
+  if wait "$canary_a_pid"; then canary_a_status=0; else canary_a_status=$?; fi
+  if wait "$canary_b_pid"; then canary_b_status=0; else canary_b_status=$?; fi
+  [[ "$canary_a_status" == 0 && "$canary_b_status" == 0 ]] || {
+    race_client_diagnostics "$canary_a"
+    race_client_diagnostics "$canary_b"
+    fail "Concurrent canary claims failed (a=$canary_a_status,b=$canary_b_status)."
+  }
+  canary_a_result=$(grep -Eo '^[0-9a-f-]{36}\|(driver|client)$' "$runner_temp/$project_id-$canary_a.log" | head -n 1)
+  canary_b_result=$(grep -Eo '^[0-9a-f-]{36}\|(driver|client)$' "$runner_temp/$project_id-$canary_b.log" | head -n 1)
+  [[ "$canary_a_result" =~ ^[0-9a-f-]{36}\|(driver|client)$ && "$canary_b_result" =~ ^[0-9a-f-]{36}\|(driver|client)$ ]] || fail "Concurrent canary clients returned malformed claim results."
+  canary_a_id="${canary_a_result%%|*}"
+  canary_b_id="${canary_b_result%%|*}"
+  canary_a_audience="${canary_a_result##*|}"
+  canary_b_audience="${canary_b_result##*|}"
+  [[ "$canary_a_id" != "$canary_b_id" && "$canary_a_audience" != "$canary_b_audience" ]] || fail "Concurrent canary claims were not distinct audience-specific records."
+  canary_claim_integrity=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select count(*)=2 and count(distinct audience)=2 and bool_and(status='processing' and lease_token is not null and lease_until>clock_timestamp() and payload->>'invoice_id'='$canary_invoice_id' and payload->>'invoice_number'='WB-9999-999999' and recipients=array[case audience when 'driver' then 'synthetic-driver@example.invalid' else 'synthetic-company@example.invalid' end]::text[]) from public.notification_outbox where id in ('$canary_a_id'::uuid,'$canary_b_id'::uuid)")
+  [[ "$canary_claim_integrity" == t ]] || fail "Concurrent canary claims escaped the reserved invoice or recipient scope."
+  canary_outside_after=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select md5(coalesce(jsonb_agg(to_jsonb(notification) order by notification.id),'[]'::jsonb)::text) from public.notification_outbox notification where notification.trip_id<>'$canary_trip_id'::uuid")
+  [[ "$canary_outside_fingerprint" == "$canary_outside_after" ]] || fail "Canary claims modified an unrelated or historical notification."
+  printf 'PASS concurrent canary leases are distinct, invoice-scoped, audience-isolated, and leave other outbox rows unchanged.\n'
+
+  canary_lease_wait=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select ceil(extract(epoch from max(lease_until)-clock_timestamp()))::integer from public.notification_outbox where id in ('$canary_a_id'::uuid,'$canary_b_id'::uuid) and status='processing'")
+  [[ "$canary_lease_wait" =~ ^[0-9]+$ && "$canary_lease_wait" -le 300 ]] || fail "Canary lease expiry could not be bounded safely."
+  if [[ "$canary_lease_wait" -gt 0 ]]; then sleep "$((canary_lease_wait + 1))"; fi
+  canary_recovered_count=$(docker exec -i "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -f - <<SQL
+set role service_role;
+select public.recover_expired_waybill_synthetic_email_canary('$canary_invoice_id'::uuid);
+SQL
+  )
+  [[ "$canary_recovered_count" == 2 ]] || fail "Expired canary recovery did not release exactly two synthetic leases."
+  canary_recovery_state=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select (select count(*)=2 and bool_and(status='pending' and lease_token is null and lease_until is null) from public.notification_outbox where trip_id='$canary_trip_id'::uuid and event_type='waybill_ready') and (select disarmed_at is not null from private.waybill_notification_canary_runs where invoice_id='$canary_invoice_id'::uuid order by armed_at desc limit 1)")
+  [[ "$canary_recovery_state" == t ]] || fail "Expired canary leases were not safely returned to pending and disarmed."
+  printf 'PASS expired canary lease recovery released exactly two jobs and disarmed the run without delivery.\n'
+
+  canary_second_run=$(docker exec -i "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -f - <<SQL
+set role service_role;
+select public.arm_waybill_synthetic_email_canary('$canary_invoice_id'::uuid,60);
+SQL
+  )
+  [[ "$canary_second_run" =~ ^[0-9a-f-]{36}$ ]] || fail "A second short-lived canary run could not be armed after recovery."
+  canary_disarm_result=$(docker exec -i "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -f - <<SQL
+set role service_role;
+select public.disarm_waybill_synthetic_email_canary('$canary_invoice_id'::uuid);
+SQL
+  )
+  [[ "$canary_disarm_result" == t ]] || fail "A canary with no active leases could not be safely disarmed."
+  printf 'PASS canary can be explicitly disarmed when no notification lease is active.\n'
+
+  canary_expiry_run=$(docker exec -i "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -f - <<SQL
+set role service_role;
+select public.arm_waybill_synthetic_email_canary('$canary_invoice_id'::uuid,60);
+SQL
+  )
+  [[ "$canary_expiry_run" =~ ^[0-9a-f-]{36}$ ]] || fail "Expired-run recovery fixture could not be armed."
+  canary_expiry_wait=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select greatest(0,ceil(extract(epoch from expires_at-clock_timestamp()))::integer) from private.waybill_notification_canary_runs where id='$canary_expiry_run'::uuid and disarmed_at is null")
+  [[ "$canary_expiry_wait" =~ ^[0-9]+$ && "$canary_expiry_wait" -le 60 ]] || fail "Canary expiration wait could not be bounded."
+  if [[ "$canary_expiry_wait" -gt 0 ]]; then sleep "$((canary_expiry_wait + 1))"; fi
+  canary_expiry_recovery=$(docker exec -i "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -f - <<SQL
+set role service_role;
+select public.recover_expired_waybill_synthetic_email_canary('$canary_invoice_id'::uuid);
+SQL
+  )
+  [[ "$canary_expiry_recovery" == 0 ]] || fail "Expired, unclaimed canary unexpectedly recovered notification rows."
+  canary_final_state=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
+    -c "select not exists(select 1 from private.waybill_notification_canary_runs where disarmed_at is null) and (select count(*)=2 and bool_and(status='pending' and lease_token is null and lease_until is null) from public.notification_outbox where trip_id='$canary_trip_id'::uuid and event_type='waybill_ready')")
+  [[ "$canary_final_state" == t ]] || fail "An expired, undisarmed canary still blocks recovery or changed its pending rows."
+  printf 'PASS expired undisarmed canary safely recovers and no longer blocks regular processing.\n'
+
+  run_sql "canary concurrency gate cleanup" "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate_cleanup.sql"
+  apply_migrations "$all_versions,20261021000000,20261021133526"
+  printf 'PASS complete secure email and synthetic canary SQL integration completed in isolated PostgreSQL 17 (project=%s, migrations=28).\n' "$project_id"
 else
   printf 'PASS all disposable Company Waybill bank-recovery SQL suites completed (project=%s, migrations=26).\n' "$project_id"
 fi

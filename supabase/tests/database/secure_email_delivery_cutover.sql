@@ -158,6 +158,13 @@ select pg_temp.assert_true(
     where before_row.row_data->>'status'='sent' and after_row.status='sent'
   ),'previously pending and sent excluded notifications retain their original states');
 
+update public.notification_outbox notification
+set status='processing',attempts=2,first_attempt_at=statement_timestamp()-interval '10 minutes',
+  lease_token='f8000000-0000-4000-8000-000000000041',lease_until=statement_timestamp()-interval '1 minute'
+from public.trip_closure_invoices invoice
+where notification.trip_id=invoice.trip_id and notification.event_type='waybill_ready'
+  and notification.audience='driver' and invoice.invoice_number='WB-2026-000041';
+
 create temporary table regular_claims on commit drop as
 select id,trip_id,audience,lease_token from public.claim_waybill_notifications('secure-email-sql-test',2);
 select pg_temp.assert_true((select count(*)=2 from regular_claims),
@@ -216,43 +223,23 @@ from regular_claims claimed;
 
 create temporary table canary_outbox_snapshot on commit drop as
 select id,to_jsonb(notification) as row_data from public.notification_outbox notification;
-insert into private.waybill_notification_canary_runs(invoice_id,trip_id,purpose,expires_at)
-values ('e7000000-0000-4000-8000-000000999999','e6000000-0000-4000-8000-000000999999',
-  'synthetic_development_test',statement_timestamp()+interval '10 minutes');
+select pg_temp.assert_true(not exists (
+  select 1 from public.trip_closure_invoices where invoice_number='WB-9999-999999'
+) and not exists (
+  select 1 from private.waybill_notification_canary_runs where disarmed_at is null
+),'cutover tests do not preseed or arm the reserved synthetic invoice before its forward provisioning migration');
 select pg_temp.assert_sqlstate(
-  'insert into private.waybill_notification_canary_runs(invoice_id,trip_id,purpose,expires_at) values (''e7000000-0000-4000-8000-000000000046'',''e6000000-0000-4000-8000-000000000046'',''synthetic_development_test'',statement_timestamp()+interval ''10 minutes'')',
+  'insert into private.waybill_notification_canary_runs(invoice_id,trip_id,purpose,expires_at) values (''e7000000-0000-4000-8000-000000000046'',''e6000000-0000-4000-8000-000000000046'',''synthetic_development_test'',statement_timestamp()+interval ''5 minutes'')',
   '42501','a canary cannot be armed for an operational future invoice');
 select pg_temp.assert_sqlstate(
   'select * from public.claim_waybill_notification_canary(''ci-sender'', ''e7000000-0000-4000-8000-000000000040'', ''synthetic-company@example.invalid'', 2)',
   '42501','canary claims cannot access excluded historical WB-2026-000040');
 select pg_temp.assert_true(public.enqueue_waybill_ready_notifications('synthetic-company@example.invalid')=0,
-  'regular reconciliation is blocked while the canary is armed');
-create temporary table regular_during_canary on commit drop as
-select id from public.claim_waybill_notifications('secure-email-normal-during-canary',2);
-select pg_temp.assert_true((select count(*)=0 from regular_during_canary),
-  'regular delivery claims cannot consume backlog during an armed canary');
+  'no regular reconciliation row is created for the absent reserved synthetic invoice');
 select pg_temp.assert_true(not exists (
   select 1 from canary_outbox_snapshot before_row join public.notification_outbox after_row on after_row.id=before_row.id
   where before_row.row_data is distinct from to_jsonb(after_row)
-),'arming and normal claim attempts do not mutate any notification while canary mode is active');
-
-create temporary table canary_claims on commit drop as
-select id,trip_id,audience,lease_token from public.claim_waybill_notification_canary(
-  'synthetic-development-sender','e7000000-0000-4000-8000-000000999999',
-  'synthetic-company@example.invalid',2);
-select pg_temp.assert_true((select count(*)=2 from canary_claims),
-  'canary claims its two eligible synthetic Driver and Company messages');
-select pg_temp.assert_true(not exists (
-  select 1 from canary_claims claimed join public.trip_closure_invoices invoice on invoice.trip_id=claimed.trip_id
-  where invoice.invoice_number<>'WB-9999-999999'
-),'every canary claim belongs to the one explicitly selected synthetic invoice');
-select pg_temp.assert_true((select count(distinct audience)=2 from canary_claims),
-  'canary independently processes Driver and Company notification audiences');
-select bool_and(public.finish_trip_notification(claimed.id,claimed.lease_token,false,null,'synthetic canary test'))
-from canary_claims claimed;
-update private.waybill_notification_canary_runs set disarmed_at=statement_timestamp() where disarmed_at is null;
-select pg_temp.assert_true(not exists (select 1 from private.waybill_notification_canary_runs where disarmed_at is null),
-  'canary run is disarmed after all test leases are acknowledged');
+),'unauthorized canary attempts do not mutate notification history before provisioning support is installed');
 
 select pg_temp.assert_true((
   select count(*)=1 from public.notification_outbox notification
