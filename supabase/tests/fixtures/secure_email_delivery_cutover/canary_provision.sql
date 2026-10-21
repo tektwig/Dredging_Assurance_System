@@ -335,15 +335,23 @@ select pg_temp.canary_assert(not exists (
   where invoice.id=current_setting('test.phase3b_invoice_id')::uuid and notification.event_type='waybill_ready'
 ),'reserved invoice bypasses legacy PDF and email queue creation only');
 select pg_temp.canary_assert((
-  select snapshot.verified_by is null and snapshot.verified_at is null
-    and company_copy.status='blocked_bank_details_unverified'
-    and company_copy.bank_snapshot_id is null
+  select count(*)=1 and bool_and(snapshot.source_kind='registration_capture'
+    and snapshot.source_registration_capture_id is not null
+    and snapshot.verified_by is null and snapshot.verified_at is null
+    and company_copy.status='pending'
+    and company_copy.bank_snapshot_id=snapshot.id)
   from public.trip_closure_invoice_bank_snapshots snapshot
   join public.trip_closure_invoice_pdf_copies company_copy
-    on company_copy.invoice_id=snapshot.invoice_id and company_copy.copy_kind='company' and company_copy.copy_version=1
+    on company_copy.invoice_id=snapshot.invoice_id and company_copy.trip_id=snapshot.trip_id
+      and company_copy.copy_kind='company' and company_copy.copy_version=1
   where snapshot.invoice_id=current_setting('test.phase3b_invoice_id')::uuid
     and snapshot.version=1
-),'registration banking data is captured in an unverified invoice snapshot and blocks Company PDF claims');
+),'registration capture creates an unverified version-1 snapshot referenced by a pending Company copy');
+create temporary table phase3b_unverified_company_copy_before on commit drop as
+select id,status,attempts,lease_token,lease_until
+from public.trip_closure_invoice_pdf_copies
+where invoice_id=current_setting('test.phase3b_invoice_id')::uuid
+  and copy_kind='company' and copy_version=1;
 select pg_temp.canary_assert((
   select driver_copy.status='pending' and driver_copy.bank_snapshot_id is null
     and driver_copy.notification_eligible
@@ -357,6 +365,14 @@ select pg_temp.canary_assert(not exists (
   select 1 from public.claim_waybill_synthetic_canary_pdf_jobs(
     current_setting('test.phase3b_invoice_id')::uuid,'company')
 ),'unverified Company bank snapshot cannot be claimed');
+select pg_temp.canary_assert((
+  select count(*)=1 and bool_and(copy.status=before_row.status
+    and copy.attempts=before_row.attempts
+    and copy.lease_token is not distinct from before_row.lease_token
+    and copy.lease_until is not distinct from before_row.lease_until)
+  from phase3b_unverified_company_copy_before before_row
+  join public.trip_closure_invoice_pdf_copies copy on copy.id=before_row.id
+),'blocked Company claim leaves status, attempts and lease unchanged');
 insert into phase3b_pdf_claims
 select 'driver',job.* from public.claim_waybill_synthetic_canary_pdf_jobs(
   current_setting('test.phase3b_invoice_id')::uuid,'driver') job;
@@ -395,7 +411,8 @@ select * from public.save_waybill_company_bank_details(
 reset role;
 select pg_temp.canary_assert((
   select snapshot.version=2 and snapshot.verified_by='c0000000-0000-4000-8000-000000000004'
-    and snapshot.verified_at is not null and company_copy.copy_version=2
+    and snapshot.verified_at is not null and snapshot.source_kind='operations_manager'
+    and company_copy.copy_version=2 and not company_copy.notification_eligible
     and company_copy.status='pending' and company_copy.bank_snapshot_id=snapshot.id
   from public.trip_closure_invoice_bank_snapshots snapshot
   join public.trip_closure_invoice_pdf_copies company_copy
@@ -431,6 +448,16 @@ reset role;
 select pg_temp.canary_assert(private.waybill_synthetic_email_canary_pdfs_ready(
   current_setting('test.phase3b_invoice_id')::uuid
 ),'both latest private PDF copies are ready with verified object metadata');
+select pg_temp.canary_assert((
+  select not company_copy.notification_eligible
+    and private.waybill_synthetic_email_canary_pdfs_ready(invoice.id)
+    and not private.waybill_email_regular_delivery_allowed(invoice.id,invoice.trip_id)
+  from public.trip_closure_invoices invoice
+  join public.trip_closure_invoice_pdf_copies company_copy
+    on company_copy.invoice_id=invoice.id and company_copy.trip_id=invoice.trip_id
+      and company_copy.copy_kind='company' and company_copy.copy_version=2
+  where invoice.id=current_setting('test.phase3b_invoice_id')::uuid
+),'verified Company v2 is eligible only through the reserved canary path and remains ineligible for normal delivery');
 set local role service_role;
 select public.arm_waybill_synthetic_email_canary(current_setting('test.phase3b_invoice_id')::uuid,60);
 select pg_temp.canary_assert(public.provision_waybill_synthetic_email_canary_notifications(

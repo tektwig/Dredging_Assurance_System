@@ -277,6 +277,16 @@ select pg_temp.canary_assert(not has_function_privilege('authenticated',
   'public.claim_waybill_notifications(text,integer)','EXECUTE')
   and has_function_privilege('service_role','public.claim_waybill_notifications(text,integer)','EXECUTE'),
   'regular claim RPC remains service-role-only');
+select pg_temp.canary_assert(
+  has_function_privilege('service_role','public.claim_waybill_notification_canary(text,uuid,text,integer)','EXECUTE')
+  and not has_function_privilege('anon','public.claim_waybill_notification_canary(text,uuid,text,integer)','EXECUTE')
+  and not has_function_privilege('authenticated','public.claim_waybill_notification_canary(text,uuid,text,integer)','EXECUTE')
+  and has_function_privilege('service_role','public.get_waybill_notification_pdf(uuid,uuid)','EXECUTE')
+  and not has_function_privilege('anon','public.get_waybill_notification_pdf(uuid,uuid)','EXECUTE')
+  and not has_function_privilege('authenticated','public.get_waybill_notification_pdf(uuid,uuid)','EXECUTE')
+  and not has_function_privilege('service_role',
+    'private.waybill_synthetic_canary_company_copy_allowed(uuid,uuid,integer,uuid)','EXECUTE'),
+  'the canary claim and attachment RPCs remain service-role-only and the exception helper is not directly callable');
 
 insert into canary_notification_claims
 select notification.id,notification.audience,(notification.payload->>'invoice_id')::uuid,
@@ -308,8 +318,29 @@ select pg_temp.canary_assert((
   cross join lateral public.get_waybill_notification_pdf(claim.id,claim.lease_token) attachment
   join public.trip_closure_invoice_pdf_copies copy
     on copy.invoice_id=claim.invoice_id and copy.copy_kind=attachment.copy_kind
-    and copy.status='ready' and copy.notification_eligible
+    and copy.status='ready'
+    and (copy.notification_eligible or (
+      claim.audience='client' and copy.copy_version=2
+      and not copy.notification_eligible
+      and private.waybill_email_canary_delivery_allowed(
+        claim.invoice_id,current_setting('test.phase3b_trip_id')::uuid)
+      and private.waybill_synthetic_canary_company_copy_allowed(
+        claim.invoice_id,current_setting('test.phase3b_trip_id')::uuid,
+        copy.copy_version,copy.bank_snapshot_id)
+    ))
 ),'each canary notification resolves only its audience-matched ready secure PDF without Driver bank data');
+select pg_temp.canary_assert(exists (
+  select 1 from canary_notification_claims claim
+  join public.trip_closure_invoice_pdf_copies copy
+    on copy.invoice_id=claim.invoice_id and copy.copy_kind='company' and copy.copy_version=2
+  join public.trip_closure_invoice_bank_snapshots snapshot
+    on snapshot.id=copy.bank_snapshot_id and snapshot.version=2
+  where claim.audience='client' and not copy.notification_eligible
+    and snapshot.source_kind='operations_manager'
+    and snapshot.verified_by is not null and snapshot.verified_at is not null
+    and private.waybill_email_canary_delivery_allowed(
+      claim.invoice_id,current_setting('test.phase3b_trip_id')::uuid)
+), 'canary delivers the verified synthetic Company v2 only via its isolated exception; the normal eligibility flag remains false');
 
 select pg_temp.canary_assert((select count(*)>0 from canary_outbox_before),
   'the seeded pre-cutover notification baseline is captured before canary operations');

@@ -75,6 +75,14 @@ assert(canaryMigration.includes("'synthetic-company@example.invalid'"));
 assert(canaryMigration.includes('claim_waybill_synthetic_canary_pdf_jobs'));
 assert(canaryMigration.includes('provision_waybill_synthetic_email_canary_notifications'));
 assert(canaryMigration.includes('recover_expired_waybill_synthetic_email_canary'));
+assert(canaryMigration.includes('private.waybill_synthetic_canary_company_copy_allowed'));
+assert(canaryMigration.includes('create or replace function public.claim_waybill_notification_canary'));
+assert(canaryMigration.includes('create or replace function public.get_waybill_notification_pdf'));
+assert(canaryMigration.includes("company_copy.notification_eligible=false"));
+assert(canaryMigration.includes("snapshot.source_kind='operations_manager'"));
+assert(canaryMigration.includes("snapshot.verified_by is not null and snapshot.verified_at is not null"));
+assert(!/set\s+notification_eligible\s*=\s*true/i.test(canaryMigration),
+  'canary eligibility must not mutate the global PDF notification flag');
 assert(canaryMigration.includes("pdf_copy.invoice_number<>'WB-9999-999999'"),
   'normal PDF claims must leave the reserved synthetic invoice to the invoice-scoped claim RPC');
 assert(!canaryFixture.includes('disable trigger'));
@@ -85,6 +93,11 @@ assert(canaryFixture.includes('public.authorize_waybill_synthetic_email_canary_t
 assert(canaryFixture.includes('public.register_loading_participant_v4'));
 assert(canaryFixture.includes('public.save_waybill_company_bank_details'));
 assert(canaryFixture.includes('public.claim_waybill_synthetic_canary_pdf_jobs'));
+assert(canaryFixture.includes("snapshot.source_kind='registration_capture'"));
+assert(canaryFixture.includes("company_copy.status='pending'"));
+assert(canaryFixture.includes("company_copy.bank_snapshot_id=snapshot.id"));
+assert(canaryFixture.includes('blocked Company claim leaves status, attempts and lease unchanged'));
+assert(canaryFixture.includes('verified Company v2 is eligible only through the reserved canary path'));
 assert(canaryFixture.includes("v_trip_id_matches:=coalesce(v_response#>>'{trip,id}'=p_trip_id::text,false)"),
   'canary closure assertions must verify the RPC trip identity');
 assert(canaryFixture.includes("v_waybill_invoice_present:=coalesce((v_response->'waybill') ? 'invoice_number',false)"),
@@ -105,6 +118,7 @@ assert(canarySuite.includes('pre-existing outbox rows retain their complete stat
 assert(canarySuite.includes('recover_expired_waybill_synthetic_email_canary'));
 assert(canarySuite.includes('normal PDF processing still claims an eligible non-canary Driver copy'));
 assert(canarySuite.includes('each canary notification resolves only its audience-matched ready secure PDF'));
+assert(canarySuite.includes('normal eligibility flag remains false'));
 assert(canarySuite.includes('all pre-existing outbox rows retain their complete status'));
 assert(!canarySuite.includes('all 76 pre-existing outbox rows'));
 assert(!canarySuite.includes('api.resend.com'));

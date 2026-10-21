@@ -362,6 +362,38 @@ $$;
 revoke all on function public.claim_waybill_synthetic_canary_pdf_jobs(uuid,text) from public,anon,authenticated,service_role;
 grant execute on function public.claim_waybill_synthetic_canary_pdf_jobs(uuid,text) to service_role;
 
+create function private.waybill_synthetic_canary_company_copy_allowed(
+  p_invoice_id uuid,p_trip_id uuid,p_copy_version integer,p_bank_snapshot_id uuid
+) returns boolean language sql stable security definer set search_path = '' as $$
+  select p_invoice_id is not null and p_trip_id is not null
+    and p_copy_version=2 and p_bank_snapshot_id is not null
+    and private.waybill_email_canary_environment_enabled()
+    and exists (
+      select 1 from public.trip_closure_invoices invoice
+      join public.trips trip on trip.id=invoice.trip_id
+        and trip.status='closed' and trip.closed_at=invoice.closed_at
+      join private.waybill_synthetic_email_canary_permits permit
+        on permit.trip_id=trip.id and permit.invoice_id=invoice.id and permit.consumed_at is not null
+      join public.trip_closure_invoice_pdf_copies company_copy
+        on company_copy.invoice_id=invoice.id and company_copy.trip_id=trip.id
+          and company_copy.copy_kind='company' and company_copy.copy_version=2
+      join public.trip_closure_invoice_bank_snapshots snapshot
+        on snapshot.id=company_copy.bank_snapshot_id and snapshot.invoice_id=invoice.id
+          and snapshot.trip_id=trip.id and snapshot.version=2
+      where invoice.id=p_invoice_id and invoice.trip_id=p_trip_id
+        and invoice.invoice_number='WB-9999-999999'
+        and invoice.closed_at>'2026-10-20T21:34:05.976714Z'::timestamptz
+        and company_copy.bank_snapshot_id=p_bank_snapshot_id
+        and company_copy.notification_eligible=false
+        and company_copy.status='ready' and company_copy.ready_at is not null
+        and company_copy.storage_bucket='waybill-company-copies'
+        and company_copy.storage_path=private.secure_waybill_copy_storage_path(
+          invoice.invoice_number,'company',company_copy.copy_version)
+        and snapshot.source_kind='operations_manager'
+        and snapshot.verified_by is not null and snapshot.verified_at is not null
+    );
+$$;
+
 create function private.waybill_synthetic_email_canary_pdfs_ready(p_invoice_id uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
   select private.waybill_email_canary_environment_enabled() and exists (
@@ -384,7 +416,9 @@ returns boolean language sql stable security definer set search_path = '' as $$
       and driver_copy.bank_snapshot_id is null
       and driver_copy.storage_bucket='waybill-driver-copies'
       and driver_copy.storage_path=private.secure_waybill_copy_storage_path(invoice.invoice_number,'driver',driver_copy.copy_version)
-      and company_copy.status='ready' and company_copy.ready_at is not null and company_copy.notification_eligible
+      and company_copy.status='ready' and company_copy.ready_at is not null
+      and (company_copy.notification_eligible or private.waybill_synthetic_canary_company_copy_allowed(
+        invoice.id,trip.id,company_copy.copy_version,company_copy.bank_snapshot_id))
       and company_copy.storage_bucket='waybill-company-copies'
       and company_copy.storage_path=private.secure_waybill_copy_storage_path(invoice.invoice_number,'company',company_copy.copy_version)
       and snapshot.verified_by is not null and snapshot.verified_at is not null
@@ -408,6 +442,117 @@ returns boolean language sql stable security definer set search_path = '' as $$
       and canary.disarmed_at is null and canary.expires_at>statement_timestamp()
       and canary.purpose='synthetic_development_test'
   );
+$$;
+
+create or replace function public.claim_waybill_notification_canary(
+  p_sender text,p_invoice_id uuid,p_company_recipient text,p_limit integer default 2
+) returns setof public.notification_outbox
+language plpgsql security definer set search_path = '' as $$
+declare v_invoice public.trip_closure_invoices%rowtype; v_job public.notification_outbox%rowtype;
+begin
+  if p_sender is null or length(btrim(p_sender))=0 or p_sender ~ E'[\r\n]'
+    or p_invoice_id is null or p_limit is null or p_limit not between 1 and 2 then
+    raise exception 'Invalid notification canary configuration' using errcode='22023';
+  end if;
+  if p_company_recipient is not null and (length(btrim(p_company_recipient))>254
+    or p_company_recipient !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$') then
+    raise exception 'Invalid notification canary recipient configuration' using errcode='22023';
+  end if;
+  select * into v_invoice from public.trip_closure_invoices where id=p_invoice_id;
+  if not found or not private.waybill_email_canary_delivery_allowed(v_invoice.id,v_invoice.trip_id) then
+    raise exception 'No active canary is armed for the selected synthetic invoice.' using errcode='42501';
+  end if;
+
+  update public.notification_outbox n
+  set recipients=case when p_company_recipient is null then null else array[p_company_recipient] end,
+      status=case when p_company_recipient is null then 'blocked_configuration' else 'pending' end,
+      blocked_reason_code=case when p_company_recipient is null then 'company_recipient_not_configured' else null end,
+      last_error=case when p_company_recipient is null then 'Parent company recipient must be configured' else null end,
+      next_attempt_at=statement_timestamp()
+  where n.trip_id=v_invoice.trip_id and n.event_type='waybill_ready' and n.audience='client'
+    and n.delivery_sequence=0 and n.attempts=0 and n.first_attempt_at is null
+    and (n.status='blocked_configuration'
+      or (n.status='pending' and n.recipients is distinct from
+        case when p_company_recipient is null then null else array[p_company_recipient] end))
+    and exists (select 1 from public.trip_closure_invoice_pdf_copies c
+      where c.invoice_id=v_invoice.id and c.trip_id=v_invoice.trip_id and c.copy_kind='company'
+        and c.status='ready' and c.ready_at is not null
+        and (c.notification_eligible or private.waybill_synthetic_canary_company_copy_allowed(
+          v_invoice.id,v_invoice.trip_id,c.copy_version,c.bank_snapshot_id))
+        and c.bank_snapshot_id is not null
+        and c.copy_version=(select max(x.copy_version) from public.trip_closure_invoice_pdf_copies x
+          where x.invoice_id=v_invoice.id and x.copy_kind='company'));
+
+  update public.notification_outbox n
+  set status='failed',lease_token=null,lease_until=null,blocked_reason_code=null,
+      last_error='Delivery retry limit reached',updated_at=statement_timestamp()
+  where n.trip_id=v_invoice.trip_id and n.event_type='waybill_ready'
+    and n.audience in ('driver','client') and n.status in ('pending','processing')
+    and (n.status='pending' or n.lease_until is null or n.lease_until<statement_timestamp())
+    and (n.attempts>=8 or n.first_attempt_at<statement_timestamp()-interval '23 hours')
+    and n.recipients is not null and cardinality(n.recipients)=1;
+
+  for v_job in
+    select n.* from public.notification_outbox n
+    join lateral (select c.* from public.trip_closure_invoice_pdf_copies c
+      where c.invoice_id=v_invoice.id and c.trip_id=v_invoice.trip_id
+        and c.copy_kind=case n.audience when 'driver' then 'driver' when 'client' then 'company' else null end
+      order by c.copy_version desc limit 1) c on true
+    where n.trip_id=v_invoice.trip_id and n.event_type='waybill_ready'
+      and n.audience in ('driver','client')
+      and n.payload->>'invoice_id'=v_invoice.id::text
+      and n.payload->>'invoice_number'=v_invoice.invoice_number
+      and n.status in ('pending','processing') and n.recipients is not null
+      and cardinality(n.recipients)=1
+      and ((n.status='pending' and n.next_attempt_at<=statement_timestamp())
+        or (n.status='processing' and (n.lease_until is null or n.lease_until<statement_timestamp())))
+      and c.status='ready' and c.ready_at is not null
+      and (c.notification_eligible or (n.audience='client'
+        and private.waybill_synthetic_canary_company_copy_allowed(
+          v_invoice.id,v_invoice.trip_id,c.copy_version,c.bank_snapshot_id)))
+      and (c.copy_kind<>'company' or c.bank_snapshot_id is not null)
+      and c.copy_version=(select max(x.copy_version) from public.trip_closure_invoice_pdf_copies x
+        where x.invoice_id=v_invoice.id and x.copy_kind=c.copy_kind)
+      and ((n.audience='driver' and v_invoice.driver_email is not null
+          and n.recipients=array[v_invoice.driver_email])
+        or (n.audience='client' and p_company_recipient is not null
+          and n.recipients=array[p_company_recipient]
+          and p_company_recipient ~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'))
+    order by case n.audience when 'driver' then 0 else 1 end,n.created_at,n.id
+    for update of n skip locked limit p_limit
+  loop
+    update public.notification_outbox n
+    set status='processing',attempts=n.attempts+1,
+        first_attempt_at=coalesce(n.first_attempt_at,statement_timestamp()),
+        lease_token=gen_random_uuid(),lease_until=statement_timestamp()+interval '5 minutes',
+        updated_at=statement_timestamp()
+    where n.id=v_job.id returning * into v_job;
+    return next v_job;
+  end loop;
+end;
+$$;
+
+create or replace function public.get_waybill_notification_pdf(p_notification_id uuid,p_lease_token uuid)
+returns table(invoice_id uuid,invoice_number text,copy_kind text,storage_bucket text,storage_path text)
+language sql stable security definer set search_path = '' as $$
+  select invoice.id,invoice.invoice_number,c.copy_kind,c.storage_bucket,c.storage_path
+  from public.notification_outbox n
+  join public.trip_closure_invoices invoice on invoice.trip_id=n.trip_id
+  join public.trip_closure_invoice_pdf_copies c on c.invoice_id=invoice.id and c.trip_id=invoice.trip_id
+  where n.id=p_notification_id and n.event_type='waybill_ready' and n.audience in ('driver','client')
+    and n.status='processing' and n.lease_token=p_lease_token and n.lease_until>clock_timestamp()
+    and n.payload->>'invoice_id'=invoice.id::text and n.payload->>'invoice_number'=invoice.invoice_number
+    and (private.waybill_email_regular_delivery_allowed(invoice.id,invoice.trip_id)
+      or private.waybill_email_canary_delivery_allowed(invoice.id,invoice.trip_id))
+    and c.copy_kind=case n.audience when 'driver' then 'driver' when 'client' then 'company' else null end
+    and c.status='ready' and c.ready_at is not null
+    and (c.notification_eligible or (c.copy_kind='company'
+      and private.waybill_email_canary_delivery_allowed(invoice.id,invoice.trip_id)
+      and private.waybill_synthetic_canary_company_copy_allowed(
+        invoice.id,invoice.trip_id,c.copy_version,c.bank_snapshot_id)))
+    and (c.copy_kind<>'company' or c.bank_snapshot_id is not null)
+    and c.copy_version=(select max(x.copy_version) from public.trip_closure_invoice_pdf_copies x
+      where x.invoice_id=invoice.id and x.copy_kind=c.copy_kind);
 $$;
 
 create or replace function private.guard_waybill_notification_canary_run() returns trigger
@@ -648,6 +793,8 @@ grant execute on function public.recover_expired_waybill_synthetic_email_canary(
 revoke all on function private.waybill_email_canary_environment_enabled() from public,anon,authenticated,service_role;
 revoke all on function private.guard_waybill_synthetic_email_canary_permit() from public,anon,authenticated,service_role;
 revoke all on function private.waybill_synthetic_email_canary_pdfs_ready(uuid) from public,anon,authenticated,service_role;
+revoke all on function private.waybill_synthetic_canary_company_copy_allowed(uuid,uuid,integer,uuid)
+  from public,anon,authenticated,service_role;
 revoke all on function private.waybill_email_canary_delivery_allowed(uuid,uuid) from public,anon,authenticated,service_role;
 revoke all on function private.guard_waybill_notification_canary_run() from public,anon,authenticated,service_role;
 revoke all on function private.guard_notification_delivery_cutover() from public,anon,authenticated,service_role;
