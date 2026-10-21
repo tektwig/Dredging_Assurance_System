@@ -341,7 +341,7 @@ begin
           and n.attempts=0 and n.first_attempt_at is null)
       or (v_recipient is not null and
           (n.status='blocked_configuration' or (n.status='pending' and n.attempts=0
-            and n.first_attempt_at is null and n.recipients is distinct from array[v_recipient])));
+            and n.first_attempt_at is null and n.recipients is distinct from array[v_recipient]))));
   get diagnostics v_updated=row_count;
   return v_inserted+v_updated;
 end;
