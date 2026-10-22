@@ -149,6 +149,11 @@ assert(!companyVerificationSuite.includes('api.resend.com'));
 assert(companyVerificationSuite.includes('the reserved synthetic invoice resolves exactly once before the service-role disarm call'));
 assert(companyVerificationSuite.includes("current_setting('phase3c.reserved_invoice_id')::uuid"));
 assert(companyVerificationSuite.includes('both synthetic Company Storage objects exist before authenticated RLS checks'));
+assert(companyVerificationSuite.includes('where existing.bucket_id=copy.storage_bucket and existing.name=copy.storage_path'));
+assert(!companyVerificationSuite.includes('on conflict (bucket_id,name) do nothing'));
+assert(companyVerificationSuite.includes("(select count(*) from storage.objects object\n      where object.bucket_id=copy.storage_bucket and object.name=copy.storage_path)=1"));
+assert(companyVerificationSuite.includes("invoice.invoice_number='WB-2026-000042'\n        and not private.waybill_company_copy_verification_eligible"));
+assert(companyVerificationSuite.includes("invoice.invoice_number='WB-2026-000043'\n        and private.waybill_company_copy_verification_eligible"));
 assert(companyVerificationSuite.includes('the authenticated Company access checks use a seeded active Operations Manager'));
 assert(companyVerificationSuite.includes('the Storage denial identity is an active, assigned Loading Officer with a seeded session'));
 const companyVerificationRoleBlocks = [...companyVerificationSuite.matchAll(

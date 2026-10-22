@@ -232,13 +232,24 @@ select copy.storage_bucket,copy.storage_path,'c0000000-0000-4000-8000-0000000000
 from public.trip_closure_invoice_pdf_copies copy
 join public.trip_closure_invoices invoice on invoice.id=copy.invoice_id
 where invoice.invoice_number in ('WB-2026-000042','WB-2026-000043') and copy.copy_kind='company'
-on conflict (bucket_id,name) do nothing;
+  and not exists (
+    select 1 from storage.objects existing
+    where existing.bucket_id=copy.storage_bucket and existing.name=copy.storage_path
+  );
 
 select pg_temp.assert_true((
   select count(*)=2 and count(distinct invoice.id)=2 and bool_and(
     copy.storage_bucket is not null and copy.storage_path is not null
-    and exists(select 1 from storage.objects object
-      where object.bucket_id=copy.storage_bucket and object.name=copy.storage_path)
+    and (
+      (invoice.invoice_number='WB-2026-000042'
+        and not private.waybill_company_copy_verification_eligible(
+          invoice.id,invoice.trip_id,copy.id,copy.bank_snapshot_id))
+      or (invoice.invoice_number='WB-2026-000043'
+        and private.waybill_company_copy_verification_eligible(
+          invoice.id,invoice.trip_id,copy.id,copy.bank_snapshot_id))
+    )
+    and (select count(*) from storage.objects object
+      where object.bucket_id=copy.storage_bucket and object.name=copy.storage_path)=1
   )
   from public.trip_closure_invoices invoice
   join public.trip_closure_invoice_pdf_copies copy
