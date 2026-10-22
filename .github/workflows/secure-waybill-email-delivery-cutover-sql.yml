@@ -17,6 +17,7 @@ on:
       - "supabase/migrations/**"
       - "supabase/tests/database/secure_email_delivery_cutover.sql"
       - "supabase/tests/database/secure_synthetic_email_canary.sql"
+      - "supabase/tests/database/company_waybill_verified_bank_eligibility.sql"
       - "supabase/tests/fixtures/secure_email_delivery_cutover/**"
       - "docs/secure-waybill-email-delivery-cutover.md"
       - "docs/phase-3b-development-email-canary-preparation.md"

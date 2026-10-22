@@ -292,13 +292,13 @@ select pg_temp.canary_assert((
   select count(*)=1
     and bool_and(invoice.invoice_number<>'WB-9999-999999'
       and trip.status='closed' and invoice.closed_at=trip.closed_at
-      and (select count(*)=1 from public.trip_closure_invoice_documents document where document.invoice_id=invoice.id)
-      and (select count(*)=2 from public.notification_outbox notification
-        where notification.trip_id=trip.id and notification.event_type='waybill_ready'))
+    and (select count(*)=1 from public.trip_closure_invoice_documents document where document.invoice_id=invoice.id)
+    and not exists (select 1 from public.notification_outbox notification
+      where notification.trip_id=trip.id and notification.event_type='waybill_ready'))
   from public.trip_closure_invoices invoice
   join public.trips trip on trip.id=invoice.trip_id
   where trip.id=current_setting('test.phase3b_ordinary_trip_id')::uuid
-),'ordinary trip is closed and has exactly one normal invoice, document, and notification pair');
+),'ordinary trip closes with its invoice and document while notification reconciliation waits for eligible PDFs');
 select set_config('test.phase3b_ordinary_invoice_id',(
   select invoice.id::text from public.trip_closure_invoices invoice
   where invoice.trip_id=current_setting('test.phase3b_ordinary_trip_id')::uuid

@@ -163,13 +163,16 @@ validate_migration_sources() {
   if [[ "$secure_email_cutover" == true ]]; then
     validate_migration_group "$repo_root/supabase/migrations" "20261021000000_secure_waybill_email_delivery_cutover.sql"
     validate_migration_group "$repo_root/supabase/migrations" "20261021133526_secure_synthetic_waybill_email_canary.sql"
+    validate_migration_group "$repo_root/supabase/migrations" "20261022085737_company_waybill_verified_bank_eligibility.sql"
     [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/seed.sql" ]] || fail "Secure email cutover seed fixture is missing."
     [[ -f "$repo_root/supabase/tests/database/secure_email_delivery_cutover.sql" ]] || fail "Secure email cutover SQL suite is missing."
     [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_provision.sql" ]] || fail "Synthetic email canary provisioning fixture is missing."
     [[ -f "$repo_root/supabase/tests/database/secure_synthetic_email_canary.sql" ]] || fail "Synthetic email canary SQL suite is missing."
     [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate.sql" ]] || fail "Synthetic email concurrency gate fixture is missing."
     [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate_cleanup.sql" ]] || fail "Synthetic email concurrency gate cleanup is missing."
-    [[ "$validated_source_count" == 28 ]] || fail "Expected 28 migration sources for secure email canary, validated $validated_source_count."
+    [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/company_verified_bank_attempt_cleanup_seed.sql" ]] || fail "Verified-bank attempt-cleanup fixture is missing."
+    [[ -f "$repo_root/supabase/tests/database/company_waybill_verified_bank_eligibility.sql" ]] || fail "Verified-bank eligibility SQL suite is missing."
+    [[ "$validated_source_count" == 29 ]] || fail "Expected 29 migration sources for secure email verification hardening, validated $validated_source_count."
   else
     [[ "$validated_source_count" == 26 ]] || fail "Expected 26 migration sources, validated $validated_source_count."
   fi
@@ -342,7 +345,34 @@ migration_preservation_fingerprint() {
       'payments',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_payments x),
       'audit_log',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.audit_log x),
       'captures',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from private.loading_registration_bank_captures x),
+      'bank_submissions',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_bank_submissions x),
+      'bank_snapshots',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_bank_snapshots x),
+      'bank_events',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_bank_detail_events x),
+      'pdf_copies',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_pdf_copies x),
       'notifications',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.notification_outbox x),
+      'storage',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from storage.objects x)
+    )::text)"
+}
+
+secure_email_hardening_fingerprint() {
+  docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres -c "
+    select md5(jsonb_build_object(
+      'trips',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trips x),
+      'invoices',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoices x),
+      'legacy_documents',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_documents x),
+      'drivers',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.drivers x),
+      'trucks',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trucks x),
+      'payments',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_payments x),
+      'audit_log',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.audit_log x),
+      'captures',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from private.loading_registration_bank_captures x),
+      'bank_submissions',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_bank_submissions x),
+      'bank_snapshots',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_bank_snapshots x),
+      'bank_events',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_bank_detail_events x),
+      'pdf_copies',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.trip_closure_invoice_pdf_copies x),
+      'bank_save_receipts',(select coalesce(jsonb_agg(to_jsonb(x) order by x.invoice_id,x.actor_id,x.request_id),'[]'::jsonb) from private.waybill_company_bank_save_receipts x),
+      'notifications',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from public.notification_outbox x),
+      'canary_runs',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from private.waybill_notification_canary_runs x),
+      'canary_permits',(select coalesce(jsonb_agg(to_jsonb(x) order by x.trip_id),'[]'::jsonb) from private.waybill_synthetic_email_canary_permits x),
       'storage',(select coalesce(jsonb_agg(to_jsonb(x) order by x.id),'[]'::jsonb) from storage.objects x)
     )::text)"
 }
@@ -699,7 +729,17 @@ SQL
   [[ "$email_canary_audit_before" == "$email_canary_audit_after" ]] || fail "Synthetic canary migration changed historical audit rows."
   printf 'PASS synthetic canary migration preserved every pre-existing notification and audit row.\n'
 
+  run_sql "synthetic unverified Company retry-limit fixture" "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/company_verified_bank_attempt_cleanup_seed.sql"
+  hardening_before=$(secure_email_hardening_fingerprint)
+  copy_migration "$repo_root/supabase/migrations" 20261022085737_company_waybill_verified_bank_eligibility.sql
+  assert_staged_count 29
+  apply_migrations "$all_versions,20261021000000,20261021133526,20261022085737"
+  hardening_after=$(secure_email_hardening_fingerprint)
+  [[ "$hardening_before" == "$hardening_after" ]] || fail "Company verification hardening migration changed existing operational, financial, bank, PDF, notification, canary, audit, or Storage records."
+  printf 'PASS Company verification hardening migration preserved every pre-existing row and Storage object.\n'
+
   run_sql "synthetic email canary provisioning fixture" "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_provision.sql"
+  run_transactional_suite "Company verified-bank eligibility hardening assertions" "$repo_root/supabase/tests/database/company_waybill_verified_bank_eligibility.sql"
   run_transactional_suite "synthetic email canary assertions" "$repo_root/supabase/tests/database/secure_synthetic_email_canary.sql"
   run_sql "canary concurrency gate setup" "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate.sql"
 
@@ -845,8 +885,8 @@ SQL
   printf 'PASS expired undisarmed canary safely recovers and no longer blocks regular processing.\n'
 
   run_sql "canary concurrency gate cleanup" "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate_cleanup.sql"
-  apply_migrations "$all_versions,20261021000000,20261021133526"
-  printf 'PASS complete secure email and synthetic canary SQL integration completed in isolated PostgreSQL 17 (project=%s, migrations=28).\n' "$project_id"
+  apply_migrations "$all_versions,20261021000000,20261021133526,20261022085737"
+  printf 'PASS complete secure email, synthetic canary, and Company verification SQL integration completed in isolated PostgreSQL 17 (project=%s, migrations=29).\n' "$project_id"
 else
   printf 'PASS all disposable Company Waybill bank-recovery SQL suites completed (project=%s, migrations=26).\n' "$project_id"
 fi
