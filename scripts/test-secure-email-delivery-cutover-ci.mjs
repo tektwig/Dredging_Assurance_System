@@ -122,6 +122,26 @@ assert(companyVerificationMigration.includes('An unverified or superseded Compan
 assert(companyVerificationMigration.includes('waybill_company_invoice_has_processing_delivery'));
 assert(companyVerificationMigration.includes('save_waybill_company_bank_details'));
 assert(companyVerificationMigration.includes("and copy.notification_eligible"));
+const unverifiedClaimMessage = companyVerificationSuite.indexOf('an unverified Company PDF cannot be claimed');
+const unverifiedSnapshotCall = companyVerificationSuite.indexOf(
+  "public.get_company_waybill_pdf_snapshot(\n    current_setting('phase3c.unverified_company_copy_id')::uuid,\n    gen_random_uuid()) is null");
+const unverifiedSnapshotMessage = companyVerificationSuite.indexOf(
+  'an unclaimed unverified Company copy returns scalar SQL NULL; bank eligibility is asserted by claim denial');
+assert(unverifiedClaimMessage >= 0 && unverifiedSnapshotCall > unverifiedClaimMessage
+  && unverifiedSnapshotMessage > unverifiedSnapshotCall,
+  'the unverified Company claim denial must precede its scalar SQL NULL lookup assertion');
+assert(companyVerificationSuite.lastIndexOf('set local role service_role;', unverifiedSnapshotCall)
+  > companyVerificationSuite.lastIndexOf('reset role;', unverifiedSnapshotCall),
+  'the unverified Company scalar snapshot lookup must run as service_role');
+assert.doesNotMatch(companyVerificationSuite,
+  /not\s+exists\s*\(\s*select\s+1\s+from\s+public\.get_company_waybill_pdf_snapshot/i,
+  'scalar JSONB snapshot functions must not be asserted as set-returning functions');
+assert(companyVerificationSuite.includes("public.get_company_waybill_pdf_snapshot(\n    current_setting('phase3c.verified_company_claim_copy_id')::uuid,\n    gen_random_uuid()) is null")
+  && companyVerificationSuite.includes('the verified Company snapshot getter returns scalar SQL NULL for an invalid lease token'),
+  'invalid-lease rejection must be independently asserted for a verified Company copy');
+assert.match(companyVerificationSuite,
+  /select lease\.copy_id,public\.get_company_waybill_pdf_snapshot\(lease\.copy_id,lease\.lease_token\)/i,
+  'the positive Company snapshot test must continue using the valid claimed lease');
 assert(companyVerificationFixture.includes('attempts=8'));
 assert(companyVerificationFixture.includes('attempts=5'));
 assert(companyVerificationSuite.includes('future-dated verification evidence'));

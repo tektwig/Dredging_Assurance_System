@@ -366,11 +366,11 @@ select pg_temp.assert_true((
   select count(*)=0 from public.claim_company_waybill_pdf_jobs(
     1,current_setting('phase3c.unverified_company_invoice_id')::uuid)
 ),'an unverified Company PDF cannot be claimed');
-select pg_temp.assert_true(not exists (
-  select 1 from public.get_company_waybill_pdf_snapshot(
+select pg_temp.assert_true(
+  public.get_company_waybill_pdf_snapshot(
     current_setting('phase3c.unverified_company_copy_id')::uuid,
-    gen_random_uuid())
-),'an unverified Company bank snapshot cannot be returned to the PDF worker');
+    gen_random_uuid()) is null,
+  'an unclaimed unverified Company copy returns scalar SQL NULL; bank eligibility is asserted by claim denial');
 reset role;
 select pg_temp.expect_sqlstate($q$update public.trip_closure_invoice_pdf_copies copy
   set status='processing',lease_token=gen_random_uuid(),lease_until=statement_timestamp()+interval '5 minutes'
@@ -517,6 +517,11 @@ set local role service_role;
 insert into phase3c_company_pdf_leases
 select job.* from public.claim_company_waybill_pdf_jobs(
   1,current_setting('phase3c.verified_company_claim_invoice_id')::uuid) job;
+select pg_temp.assert_true(
+  public.get_company_waybill_pdf_snapshot(
+    current_setting('phase3c.verified_company_claim_copy_id')::uuid,
+    gen_random_uuid()) is null,
+  'the verified Company snapshot getter returns scalar SQL NULL for an invalid lease token');
 insert into phase3c_company_pdf_snapshots(copy_id,payload)
 select lease.copy_id,public.get_company_waybill_pdf_snapshot(lease.copy_id,lease.lease_token)
 from phase3c_company_pdf_leases lease;
