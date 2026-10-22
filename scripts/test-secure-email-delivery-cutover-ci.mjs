@@ -121,6 +121,18 @@ assert(/phase3b_recipient_rejection_before[\s\S]*full outer join reserved_notifi
   'the invalid-recipient test must compare complete before/after reserved notification rows');
 assert(canarySuite.includes('invalid Company recipient rejection preserves both reserved notification rows exactly'),
   'the invalid-recipient test must assert both reserved notification rows remain unchanged');
+const canaryCompanyPdfDenial = canarySuite.indexOf(
+  'normal Company PDF eligibility remains blocked until a verified bank snapshot exists');
+const canaryOutboxPreservation = canarySuite.indexOf(
+  'regular reconciliation and claims preserve every non-canary outbox field');
+const canaryRoleReset = canarySuite.indexOf('reset role;', canaryCompanyPdfDenial);
+assert(canaryCompanyPdfDenial >= 0 && canaryRoleReset > canaryCompanyPdfDenial
+  && canaryRoleReset < canaryOutboxPreservation,
+  'the service-role Company PDF denial must be followed by RESET ROLE before privileged outbox comparison');
+assert(!canarySuite.slice(canaryOutboxPreservation,
+  canarySuite.indexOf("select set_config('request.jwt.claim.sub','c0000000-0000-4000-8000-000000000004'",
+    canaryOutboxPreservation)).includes('reset role;'),
+  'the historical outbox comparison must not retain a redundant service-role reset afterward');
 
 assert(companyVerificationMigration.startsWith('begin;'));
 assert(companyVerificationMigration.trimEnd().endsWith('commit;'));

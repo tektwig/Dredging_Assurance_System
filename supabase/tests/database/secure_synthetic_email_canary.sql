@@ -324,6 +324,7 @@ select pg_temp.canary_assert((select count(*)=1
 select pg_temp.canary_assert(not exists (
   select 1 from public.claim_company_waybill_pdf_jobs(1,current_setting('test.phase3b_ordinary_invoice_id')::uuid)
 ), 'normal Company PDF eligibility remains blocked until a verified bank snapshot exists');
+reset role;
 select pg_temp.canary_assert(not exists (
   (select before_row.id,before_row.row_data from canary_outbox_after_reconciliation before_row
    where not exists (select 1 from public.trip_closure_invoices invoice
@@ -341,7 +342,6 @@ select pg_temp.canary_assert(not exists (
    where not exists (select 1 from public.trip_closure_invoices invoice
      where invoice.trip_id=(before_row.row_data->>'trip_id')::uuid and invoice.invoice_number='WB-9999-999999'))
 ),'regular reconciliation and claims preserve every non-canary outbox field');
-reset role;
 
 select set_config('request.jwt.claim.sub','c0000000-0000-4000-8000-000000000004',true);
 set local role authenticated;
