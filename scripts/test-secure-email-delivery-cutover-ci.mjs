@@ -15,6 +15,36 @@ const companyVerificationMigration = readFileSync('supabase/migrations/202610220
 const companyVerificationFixture = readFileSync('supabase/tests/fixtures/secure_email_delivery_cutover/company_verified_bank_attempt_cleanup_seed.sql', 'utf8');
 const companyVerificationSuite = readFileSync('supabase/tests/database/company_waybill_verified_bank_eligibility.sql', 'utf8');
 const pdfWorkerIndex = readFileSync('supabase/functions/process-waybill-pdfs/index.ts', 'utf8');
+const getRunnerFunction = (name) => {
+  const body = runner.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?^\\}`, 'm'))?.[0];
+  assert(body, `runner function ${name} must exist`);
+  return body;
+};
+const migrationPreservationFingerprint = getRunnerFunction('migration_preservation_fingerprint');
+const secureEmailHardeningFingerprint = getRunnerFunction('secure_email_hardening_fingerprint');
+
+for (const table of [
+  'public.trips', 'public.trip_closure_invoices', 'public.trip_closure_invoice_documents',
+  'public.drivers', 'public.trucks', 'public.trip_payments', 'public.audit_log',
+  'private.loading_registration_bank_captures', 'public.notification_outbox', 'storage.objects',
+]) assert(migrationPreservationFingerprint.includes(`from ${table} x`));
+for (const table of [
+  'public.trip_closure_invoice_bank_submissions', 'public.trip_closure_invoice_bank_snapshots',
+  'public.trip_closure_invoice_bank_detail_events', 'public.trip_closure_invoice_pdf_copies',
+]) assert(!migrationPreservationFingerprint.includes(table),
+  `migration-26 recovery fingerprint must not include backfilled table ${table}`);
+for (const table of [
+  'public.audit_log', 'private.loading_registration_bank_captures',
+  'public.trip_closure_invoice_bank_submissions', 'public.trip_closure_invoice_bank_snapshots',
+  'public.trip_closure_invoice_bank_detail_events', 'public.trip_closure_invoice_pdf_copies',
+  'private.waybill_company_bank_save_receipts', 'private.waybill_notification_canary_runs',
+  'private.waybill_synthetic_email_canary_permits', 'public.notification_outbox', 'storage.objects',
+]) assert(secureEmailHardeningFingerprint.includes(`from ${table} x`));
+const migration29Copy = runner.indexOf('copy_migration "$repo_root/supabase/migrations" 20261022085737_company_waybill_verified_bank_eligibility.sql');
+const migration29Apply = runner.indexOf('apply_migrations "$all_versions,20261021000000,20261021133526,20261022085737"', migration29Copy);
+assert(migration29Copy >= 0 && runner.lastIndexOf('hardening_before=$(secure_email_hardening_fingerprint)', migration29Copy) > 0);
+assert(migration29Apply > migration29Copy);
+assert(runner.indexOf('hardening_after=$(secure_email_hardening_fingerprint)', migration29Apply) > migration29Apply);
 
 const snapshotTargets = seed.match(/create temporary table email_cutover_snapshot_targets[\s\S]*?;\s*insert into/m)?.[0] ?? '';
 assert(snapshotTargets.length > 0, 'snapshot setup must be identifiable');
