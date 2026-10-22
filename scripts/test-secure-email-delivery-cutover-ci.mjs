@@ -172,6 +172,13 @@ assert(mismatchLeaseStart >= 0 && mismatchLeaseEnd > mismatchLeaseStart
 assert(companyVerificationSuite.includes("bool_and(public.finish_trip_notification(lease.id,lease.lease_token,false,null,'synthetic SQL-only attachment test'))")
   && companyVerificationSuite.includes('valid notification leases can be safely released through the existing failure/retry RPC without provider calls'),
   'valid notification leases must still be released through the retry RPC');
+assert(companyVerificationSuite.includes('(select count(*)=0 from phase3c_followup_claims)')
+  && companyVerificationSuite.includes('actual_count=')
+  && companyVerificationSuite.includes('jobs=')
+  && companyVerificationSuite.includes('earlier valid notification claims are pending with retry backoff and no lease')
+  && companyVerificationSuite.includes('all earlier valid notification leases were released and none remain stranded')
+  && !/bool_and\([^)]*finish_trip_notification\([^)]*\)\s*from phase3c_followup_claims/i.test(companyVerificationSuite),
+  'follow-up retry claims must assert their expected empty count and prove prior leases are not stranded');
 assert(companyVerificationSuite.includes('all fields on unverified historical notification rows remain unchanged'));
 assert(companyVerificationSuite.includes('rollback;'));
 assert(!companyVerificationSuite.includes('api.resend.com'));

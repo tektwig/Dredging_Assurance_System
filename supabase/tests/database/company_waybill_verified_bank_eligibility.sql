@@ -756,12 +756,30 @@ select pg_temp.assert_true(not exists (
   where notification.id is null or before_row.row_data is distinct from to_jsonb(notification)
 ),'the complete existing outbox row is unchanged when its Company copy is superseded or future-verified');
 
-set local role service_role;
-select pg_temp.assert_true((
-  select bool_and(public.finish_trip_notification(lease.id,lease.lease_token,false,null,'synthetic unrelated follow-up release'))
-  from phase3c_followup_claims lease
-),'unrelated eligible follow-up claim leases are released without provider invocation');
-reset role;
+select pg_temp.assert_true(not exists (
+  select 1 from phase3c_notification_leases lease
+  join public.notification_outbox notification on notification.id=lease.id
+  where notification.status<>'pending'
+    or notification.lease_token is not null
+    or notification.lease_until is not null
+    or notification.last_error is distinct from 'synthetic SQL-only attachment test'
+    or notification.next_attempt_at<=notification.updated_at
+),'earlier valid notification claims are pending with retry backoff and no lease');
+select pg_temp.assert_true(
+  (select count(*)=0 from phase3c_followup_claims),
+  'no follow-up notifications are due after earlier valid claims entered retry backoff and remaining rows are ineligible; actual_count='||
+    (select count(*)::text from phase3c_followup_claims)||'; jobs='||coalesce((
+      select string_agg(invoice.invoice_number||'/'||claim.audience||'/'||claim.id::text,',')
+      from phase3c_followup_claims claim
+      join public.trip_closure_invoices invoice on invoice.trip_id=claim.trip_id
+    ),'none'));
+select pg_temp.assert_true(not exists (
+  select 1 from phase3c_notification_leases lease
+  join public.notification_outbox notification on notification.id=lease.id
+  where notification.status='processing'
+    or notification.lease_token is not null
+    or notification.lease_until is not null
+),'all earlier valid notification leases were released and none remain stranded');
 
 select pg_temp.assert_true(not exists (
   select 1 from public.notification_outbox notification
