@@ -163,6 +163,15 @@ assert(companyVerificationSuite.indexOf('regular email delivery remains disabled
 assert(companyVerificationSuite.includes('Company PDF worker cannot claim a future-verified or superseded Company copy'));
 assert(companyVerificationSuite.includes('bank correction fails closed while a Company email lease is active'));
 assert(companyVerificationSuite.includes('bank correction fails closed while a Company PDF lease is active'));
+const mismatchLeaseStart = companyVerificationSuite.indexOf('select pg_temp.assert_true(not public.finish_trip_notification(');
+const mismatchLeaseEnd = companyVerificationSuite.indexOf('select pg_temp.assert_true((', mismatchLeaseStart + 1);
+const mismatchLeaseAssertion = companyVerificationSuite.slice(mismatchLeaseStart, mismatchLeaseEnd);
+assert(mismatchLeaseStart >= 0 && mismatchLeaseEnd > mismatchLeaseStart
+  && /select pg_temp\.assert_true\(not public\.finish_trip_notification\([\s\S]*?gen_random_uuid\(\),false,null,'synthetic lease mismatch'\)\s*,'notification completion rejects a mismatched lease token'\);/i.test(mismatchLeaseAssertion),
+  'the mismatched notification lease assertion must pass its message as the second assert_true argument');
+assert(companyVerificationSuite.includes("bool_and(public.finish_trip_notification(lease.id,lease.lease_token,false,null,'synthetic SQL-only attachment test'))")
+  && companyVerificationSuite.includes('valid notification leases can be safely released through the existing failure/retry RPC without provider calls'),
+  'valid notification leases must still be released through the retry RPC');
 assert(companyVerificationSuite.includes('all fields on unverified historical notification rows remain unchanged'));
 assert(companyVerificationSuite.includes('rollback;'));
 assert(!companyVerificationSuite.includes('api.resend.com'));

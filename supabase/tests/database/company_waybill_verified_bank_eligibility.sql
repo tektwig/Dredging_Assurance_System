@@ -478,7 +478,7 @@ set local role service_role;
 select pg_temp.assert_true(not public.finish_trip_notification(
   (select lease.id from phase3c_notification_leases lease where lease.audience='client' limit 1),
   gen_random_uuid(),false,null,'synthetic lease mismatch')
-),'notification completion rejects a mismatched lease token');
+,'notification completion rejects a mismatched lease token');
 select pg_temp.assert_true((
   select bool_and(public.finish_trip_notification(lease.id,lease.lease_token,false,null,'synthetic SQL-only attachment test'))
   from phase3c_notification_leases lease
