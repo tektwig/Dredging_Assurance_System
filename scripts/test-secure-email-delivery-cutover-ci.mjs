@@ -146,6 +146,27 @@ assert(companyVerificationSuite.includes('bank correction fails closed while a C
 assert(companyVerificationSuite.includes('all fields on unverified historical notification rows remain unchanged'));
 assert(companyVerificationSuite.includes('rollback;'));
 assert(!companyVerificationSuite.includes('api.resend.com'));
+assert(companyVerificationSuite.includes('the reserved synthetic invoice resolves exactly once before the service-role disarm call'));
+assert(companyVerificationSuite.includes("current_setting('phase3c.reserved_invoice_id')::uuid"));
+assert(companyVerificationSuite.includes('both synthetic Company Storage objects exist before authenticated RLS checks'));
+assert(companyVerificationSuite.includes('the authenticated Company access checks use a seeded active Operations Manager'));
+assert(companyVerificationSuite.includes('the Storage denial identity is an active, assigned Loading Officer with a seeded session'));
+const companyVerificationRoleBlocks = [...companyVerificationSuite.matchAll(
+  /set local role (service_role|authenticated);([\s\S]*?)reset role;/gi,
+)];
+assert(companyVerificationRoleBlocks.length > 0, 'the eligibility suite retains role-scoped authorization tests');
+for (const [, role, body] of companyVerificationRoleBlocks) {
+  assert(!/\b(?:from|join)\s+public\.(?:trip_closure_invoices|trip_closure_invoice_pdf_copies)\b/i.test(body),
+    `${role} test blocks must not directly inspect restricted invoice or PDF tables`);
+}
+const companyStorageRlsBlocks = companyVerificationRoleBlocks
+  .filter(([, , body]) => body.includes("current_setting('phase3c.company_verified_path')"));
+assert(companyStorageRlsBlocks.length === 2,
+  'both Operations Manager and Loading Officer Storage RLS checks use privileged-prepared object paths');
+for (const [, role, body] of companyStorageRlsBlocks) {
+  assert(role === 'authenticated' && body.includes('from storage.objects') && !/\bjoin\s+public\./i.test(body),
+    'authenticated Storage checks query storage.objects directly without joining restricted Company metadata');
+}
 
 assert(canaryMigration.includes("secret.decrypted_secret='pidxlopbxlapfmakmtjt'"));
 assert(canaryMigration.includes("secret.decrypted_secret='true'"));

@@ -200,9 +200,17 @@ update public.profiles set is_active=true where id='e0000000-0000-4000-8000-0000
 
 select set_config('request.jwt.claim.sub','c0000000-0000-4000-8000-000000000004',true);
 select set_config('request.jwt.claims',jsonb_build_object('sub','c0000000-0000-4000-8000-000000000004')::text,true);
+select pg_temp.assert_true((
+  select count(*)=1 from public.trip_closure_invoices invoice
+  where invoice.invoice_number='WB-9999-999999'
+), 'the reserved synthetic invoice resolves exactly once before the service-role disarm call');
+select set_config('phase3c.reserved_invoice_id',(
+  select invoice.id::text from public.trip_closure_invoices invoice
+  where invoice.invoice_number='WB-9999-999999'
+),true);
 set local role service_role;
 select pg_temp.assert_true(public.disarm_waybill_synthetic_email_canary(
-  (select invoice.id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-9999-999999')
+  current_setting('phase3c.reserved_invoice_id')::uuid
 ),'CI transaction disarms the synthetic canary before exercising regular delivery paths');
 reset role;
 
@@ -226,59 +234,130 @@ join public.trip_closure_invoices invoice on invoice.id=copy.invoice_id
 where invoice.invoice_number in ('WB-2026-000042','WB-2026-000043') and copy.copy_kind='company'
 on conflict (bucket_id,name) do nothing;
 
+select pg_temp.assert_true((
+  select count(*)=2 and count(distinct invoice.id)=2 and bool_and(
+    copy.storage_bucket is not null and copy.storage_path is not null
+    and exists(select 1 from storage.objects object
+      where object.bucket_id=copy.storage_bucket and object.name=copy.storage_path)
+  )
+  from public.trip_closure_invoices invoice
+  join public.trip_closure_invoice_pdf_copies copy
+    on copy.invoice_id=invoice.id and copy.trip_id=invoice.trip_id and copy.copy_kind='company'
+  where invoice.invoice_number in ('WB-2026-000042','WB-2026-000043')
+), 'both synthetic Company Storage objects exist before authenticated RLS checks');
+select set_config('phase3c.company_verified_invoice_id',(
+  select invoice.id::text from public.trip_closure_invoices invoice
+  where invoice.invoice_number='WB-2026-000043'
+),true);
+select set_config('phase3c.company_verified_bucket',(
+  select copy.storage_bucket from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id=current_setting('phase3c.company_verified_invoice_id')::uuid
+    and copy.copy_kind='company'
+),true);
+select set_config('phase3c.company_verified_path',(
+  select copy.storage_path from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id=current_setting('phase3c.company_verified_invoice_id')::uuid
+    and copy.copy_kind='company'
+),true);
+select set_config('phase3c.company_unverified_invoice_id',(
+  select invoice.id::text from public.trip_closure_invoices invoice
+  where invoice.invoice_number='WB-2026-000042'
+),true);
+select set_config('phase3c.company_unverified_bucket',(
+  select copy.storage_bucket from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id=current_setting('phase3c.company_unverified_invoice_id')::uuid
+    and copy.copy_kind='company'
+),true);
+select set_config('phase3c.company_unverified_path',(
+  select copy.storage_path from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id=current_setting('phase3c.company_unverified_invoice_id')::uuid
+    and copy.copy_kind='company'
+),true);
+
+select pg_temp.assert_true(exists(
+  select 1 from public.profiles profile
+  where profile.id='e0000000-0000-4000-8000-000000000003'
+    and profile.role='operations_manager'::public.app_role and profile.is_active
+), 'the authenticated Company access checks use a seeded active Operations Manager');
 select set_config('request.jwt.claim.sub','e0000000-0000-4000-8000-000000000003',true);
 select set_config('request.jwt.claims',jsonb_build_object('sub','e0000000-0000-4000-8000-000000000003')::text,true);
 set local role authenticated;
-select pg_temp.assert_true((
-  select exists(select 1 from storage.objects object
-    where object.bucket_id=copy.storage_bucket and object.name=copy.storage_path)
-  from public.trip_closure_invoices invoice
-  join public.trip_closure_invoice_pdf_copies copy on copy.invoice_id=invoice.id
-    and copy.trip_id=invoice.trip_id and copy.copy_kind='company'
-  where invoice.invoice_number='WB-2026-000043'
-),'Operations Managers can read the current verified private Company object');
+select pg_temp.assert_true(exists(
+  select 1 from storage.objects object
+  where object.bucket_id=current_setting('phase3c.company_verified_bucket')
+    and object.name=current_setting('phase3c.company_verified_path')
+),'Operations Managers can read the current verified private Company object through Storage RLS');
 select pg_temp.assert_true(not exists (
-  select 1 from public.trip_closure_invoices invoice
-  join public.trip_closure_invoice_pdf_copies copy on copy.invoice_id=invoice.id
-    and copy.trip_id=invoice.trip_id and copy.copy_kind='company'
-  join storage.objects object on object.bucket_id=copy.storage_bucket and object.name=copy.storage_path
-  where invoice.invoice_number='WB-2026-000042'
-),'Operations Managers cannot read a Company object backed only by an unverified registration capture');
+  select 1 from storage.objects object
+  where object.bucket_id=current_setting('phase3c.company_unverified_bucket')
+    and object.name=current_setting('phase3c.company_unverified_path')
+),'Operations Managers cannot read a Company object backed only by an unverified registration capture through Storage RLS');
 select pg_temp.assert_true((
   select count(*)=1 from public.get_operations_waybill_pdf_copy(
-    (select invoice.id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-2026-000043'),'company')
+    current_setting('phase3c.company_verified_invoice_id')::uuid,'company')
 ),'Operations Manager download RPC returns exactly the current eligible Company copy');
 select pg_temp.assert_true(not exists (
   select 1 from public.get_operations_waybill_pdf_copy(
-    (select invoice.id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-2026-000042'),'company')
+    current_setting('phase3c.company_unverified_invoice_id')::uuid,'company')
 ),'Operations Manager download RPC withholds a ready but unverified Company copy');
 reset role;
 
+select pg_temp.assert_true((
+  exists (
+    select 1
+    from public.profiles profile
+    join auth.sessions session on session.user_id=profile.id
+    join public.user_site_assignments assignment on assignment.profile_id=profile.id
+    where profile.id='c0000000-0000-4000-8000-000000000005'
+      and profile.role='loading_officer'::public.app_role and profile.is_active
+      and session.id='c2000000-0000-4000-8000-000000000005'
+      and assignment.site_id='c1000000-0000-4000-8000-000000000001'
+      and assignment.ended_at is null
+  )
+), 'the Storage denial identity is an active, assigned Loading Officer with a seeded session');
 select set_config('request.jwt.claim.sub','c0000000-0000-4000-8000-000000000005',true);
-select set_config('request.jwt.claims',jsonb_build_object('sub','c0000000-0000-4000-8000-000000000005')::text,true);
+select set_config('request.jwt.claims',jsonb_build_object(
+  'sub','c0000000-0000-4000-8000-000000000005',
+  'session_id','c2000000-0000-4000-8000-000000000005',
+  'iat',extract(epoch from statement_timestamp())::bigint
+)::text,true);
 set local role authenticated;
 select pg_temp.assert_true(not exists (
-  select 1 from public.trip_closure_invoices invoice
-  join public.trip_closure_invoice_pdf_copies copy on copy.invoice_id=invoice.id
-    and copy.trip_id=invoice.trip_id and copy.copy_kind='company'
-  join storage.objects object on object.bucket_id=copy.storage_bucket and object.name=copy.storage_path
-  where invoice.invoice_number='WB-2026-000043'
-),'a Loading Officer cannot read a verified Company object');
+  select 1 from storage.objects object
+  where object.bucket_id=current_setting('phase3c.company_verified_bucket')
+    and object.name=current_setting('phase3c.company_verified_path')
+),'an active Loading Officer cannot read a verified Company object through Storage RLS');
 select pg_temp.expect_sqlstate($q$select * from public.get_operations_waybill_pdf_copy(
-  (select invoice.id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-2026-000043'),'company')$q$,
+  current_setting('phase3c.company_verified_invoice_id')::uuid,'company')$q$,
   '42501','a Loading Officer cannot use the Operations Manager Company download RPC');
 reset role;
 
+select pg_temp.assert_true((
+  select count(*)=1 from public.trip_closure_invoices invoice
+  where invoice.invoice_number='WB-2026-000041'
+), 'the unverified Company invoice resolves exactly once before service-role claim tests');
+select set_config('phase3c.unverified_company_invoice_id',(
+  select invoice.id::text from public.trip_closure_invoices invoice
+  where invoice.invoice_number='WB-2026-000041'
+),true);
+select pg_temp.assert_true((
+  select count(*)=1 from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id=current_setting('phase3c.unverified_company_invoice_id')::uuid
+    and copy.copy_kind='company'
+), 'the unverified Company PDF ID resolves exactly once before service-role snapshot testing');
+select set_config('phase3c.unverified_company_copy_id',(
+  select copy.id::text from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id=current_setting('phase3c.unverified_company_invoice_id')::uuid
+    and copy.copy_kind='company'
+),true);
 set local role service_role;
 select pg_temp.assert_true((
   select count(*)=0 from public.claim_company_waybill_pdf_jobs(
-    1,(select invoice.id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-2026-000041'))
+    1,current_setting('phase3c.unverified_company_invoice_id')::uuid)
 ),'an unverified Company PDF cannot be claimed');
 select pg_temp.assert_true(not exists (
   select 1 from public.get_company_waybill_pdf_snapshot(
-    (select copy.id from public.trip_closure_invoice_pdf_copies copy
-      join public.trip_closure_invoices invoice on invoice.id=copy.invoice_id
-      where invoice.invoice_number='WB-2026-000041' and copy.copy_kind='company'),
+    current_setting('phase3c.unverified_company_copy_id')::uuid,
     gen_random_uuid())
 ),'an unverified Company bank snapshot cannot be returned to the PDF worker');
 reset role;
@@ -367,11 +446,19 @@ select pg_temp.assert_true(not exists (
       or copy.bank_snapshot_id is not null)
 ),'Driver attachments use only the latest bank-free private Driver PDF');
 
+select pg_temp.assert_true((
+  select count(*)=1 from public.trip_closure_invoices invoice
+  where invoice.invoice_number='WB-2026-000044'
+), 'the leased-email invoice resolves exactly once before the Operations Manager mutation call');
+select set_config('phase3c.email_lease_invoice_id',(
+  select invoice.id::text from public.trip_closure_invoices invoice
+  where invoice.invoice_number='WB-2026-000044'
+),true);
 select set_config('request.jwt.claim.sub','e0000000-0000-4000-8000-000000000003',true);
 select set_config('request.jwt.claims',jsonb_build_object('sub','e0000000-0000-4000-8000-000000000003')::text,true);
 set local role authenticated;
 select pg_temp.expect_sqlstate($q$select * from public.save_waybill_company_bank_details(
-  (select invoice.id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-2026-000044'),
+  current_setting('phase3c.email_lease_invoice_id')::uuid,
   'f3c00000-0000-4000-8000-000000000001','Synthetic Race Bank','Synthetic Race Account','0000000044')$q$,
   '55P03','bank correction fails closed while a Company email lease is active');
 reset role;
@@ -400,17 +487,33 @@ where copy.invoice_id=invoice.id and copy.trip_id=invoice.trip_id
   and invoice.invoice_number='WB-2026-000043' and copy.copy_kind='company'
     and copy.status='ready';
 
+select pg_temp.assert_true((
+  select count(*)=1 from public.trip_closure_invoices invoice
+  join public.trip_closure_invoice_pdf_copies copy
+    on copy.invoice_id=invoice.id and copy.trip_id=invoice.trip_id
+  where invoice.invoice_number='WB-2026-000043' and copy.copy_kind='company'
+), 'the verified Company invoice and copy resolve exactly once before service-role claim');
+select set_config('phase3c.verified_company_claim_invoice_id',(
+  select invoice.id::text from public.trip_closure_invoices invoice
+  where invoice.invoice_number='WB-2026-000043'
+),true);
+select set_config('phase3c.verified_company_claim_copy_id',(
+  select copy.id::text from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id=current_setting('phase3c.verified_company_claim_invoice_id')::uuid
+    and copy.copy_kind='company'
+),true);
 set local role service_role;
 insert into phase3c_company_pdf_leases
 select job.* from public.claim_company_waybill_pdf_jobs(
-  1,(select invoice.id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-2026-000043')) job;
+  1,current_setting('phase3c.verified_company_claim_invoice_id')::uuid) job;
 insert into phase3c_company_pdf_snapshots(copy_id,payload)
 select lease.copy_id,public.get_company_waybill_pdf_snapshot(lease.copy_id,lease.lease_token)
 from phase3c_company_pdf_leases lease;
 reset role;
 
 select pg_temp.assert_true((
-  select count(*)=1 and bool_and(lease.storage_bucket='waybill-company-copies'
+  select count(*)=1 and bool_and(lease.copy_id=current_setting('phase3c.verified_company_claim_copy_id')::uuid
+    and lease.storage_bucket='waybill-company-copies'
     and snapshot.payload ?& array['bank_name','account_name','account_number']
     and snapshot.payload->>'bank_name' is not null
     and snapshot.payload->>'account_name' is not null
@@ -421,9 +524,10 @@ select pg_temp.assert_true((
 
 select set_config('request.jwt.claim.sub','e0000000-0000-4000-8000-000000000003',true);
 select set_config('request.jwt.claims',jsonb_build_object('sub','e0000000-0000-4000-8000-000000000003')::text,true);
+select set_config('phase3c.verified_company_save_invoice_id',current_setting('phase3c.verified_company_claim_invoice_id'),true);
 set local role authenticated;
 select pg_temp.expect_sqlstate($q$select * from public.save_waybill_company_bank_details(
-  (select invoice.id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-2026-000043'),
+  current_setting('phase3c.verified_company_save_invoice_id')::uuid,
   'f3c00000-0000-4000-8000-000000000002','Synthetic Race Bank','Synthetic Race Account','0000000043')$q$,
   '55P03','bank correction fails closed while a Company PDF lease is active');
 reset role;
@@ -451,16 +555,32 @@ from public.trip_closure_invoices invoice
 where copy.invoice_id=invoice.id and copy.trip_id=invoice.trip_id
   and invoice.invoice_number='WB-2026-000041' and copy.copy_kind='driver'
     and copy.status='ready';
+select pg_temp.assert_true((
+  select count(*)=1 from public.trip_closure_invoices invoice
+  join public.trip_closure_invoice_pdf_copies copy
+    on copy.invoice_id=invoice.id and copy.trip_id=invoice.trip_id
+  where invoice.invoice_number='WB-2026-000041' and copy.copy_kind='driver'
+), 'the Driver invoice and copy resolve exactly once before service-role claim');
+select set_config('phase3c.driver_claim_invoice_id',(
+  select invoice.id::text from public.trip_closure_invoices invoice
+  where invoice.invoice_number='WB-2026-000041'
+),true);
+select set_config('phase3c.driver_claim_copy_id',(
+  select copy.id::text from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id=current_setting('phase3c.driver_claim_invoice_id')::uuid
+    and copy.copy_kind='driver'
+),true);
 set local role service_role;
 insert into phase3c_driver_pdf_leases
 select job.* from public.claim_driver_waybill_pdf_jobs(
-  1,(select invoice.id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-2026-000041')) job;
+  1,current_setting('phase3c.driver_claim_invoice_id')::uuid) job;
 insert into phase3c_driver_pdf_snapshots(copy_id,payload)
 select lease.copy_id,public.get_driver_waybill_pdf_snapshot(lease.copy_id,lease.lease_token)
 from phase3c_driver_pdf_leases lease;
 reset role;
 select pg_temp.assert_true((
-  select count(*)=1 and bool_and(lease.storage_bucket='waybill-driver-copies'
+  select count(*)=1 and bool_and(lease.copy_id=current_setting('phase3c.driver_claim_copy_id')::uuid
+    and lease.storage_bucket='waybill-driver-copies'
     and not (snapshot.payload ?| array['bank_name','account_name','account_number','bank_snapshot_id']))
   from phase3c_driver_pdf_leases lease
   join phase3c_driver_pdf_snapshots snapshot on snapshot.copy_id=lease.copy_id
@@ -523,6 +643,22 @@ join public.trip_closure_invoices invoice on invoice.id=copy.invoice_id
 where invoice.invoice_number='WB-2026-000044' and copy.copy_kind='company' and copy.copy_version=2;
 
 select pg_temp.assert_true((
+  select count(*)=1 from public.trip_closure_invoices invoice
+  join public.trip_closure_invoice_pdf_copies copy
+    on copy.invoice_id=invoice.id and copy.trip_id=invoice.trip_id
+  where invoice.invoice_number='WB-2026-000044' and copy.copy_kind='company' and copy.copy_version=2
+), 'the future-version invoice and PDF resolve exactly once before service-role claim');
+select set_config('phase3c.future_company_invoice_id',(
+  select invoice.id::text from public.trip_closure_invoices invoice
+  where invoice.invoice_number='WB-2026-000044'
+),true);
+select set_config('phase3c.future_company_copy_id',(
+  select copy.id::text from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id=current_setting('phase3c.future_company_invoice_id')::uuid
+    and copy.copy_kind='company' and copy.copy_version=2
+),true);
+
+select pg_temp.assert_true((
   select snapshot.verified_at>statement_timestamp()
     and not private.waybill_company_copy_verification_eligible(
       invoice.id,invoice.trip_id,copy.id,copy.bank_snapshot_id)
@@ -551,7 +687,7 @@ select pg_temp.assert_true(not private.waybill_company_copy_verification_eligibl
 set local role service_role;
 select pg_temp.assert_true((
   select count(*)=0 from public.claim_company_waybill_pdf_jobs(
-    1,(select invoice.id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-2026-000044'))
+    1,current_setting('phase3c.future_company_invoice_id')::uuid)
 ),'the Company PDF worker cannot claim a future-verified or superseded Company copy');
 reset role;
 select pg_temp.assert_true(not exists (
@@ -583,13 +719,14 @@ select pg_temp.assert_true(not exists (
   join public.trip_closure_invoices invoice on invoice.trip_id=lease.trip_id
   where invoice.invoice_number='WB-2026-000044' and lease.audience='client'
 ),'superseded and future-verified Company PDFs cannot be enqueued or claimed for email');
+select set_config('phase3c.superseded_invoice_id',current_setting('phase3c.future_company_invoice_id'),true);
 set local role authenticated;
 select pg_temp.expect_sqlstate($q$select public.retry_operations_waybill_delivery(
-  (select invoice.id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-2026-000044'),
+  current_setting('phase3c.superseded_invoice_id')::uuid,
   'client','DELIVERY_UNCONFIRMED')$q$,'P4091',
   'Operations Manager retry cannot release an email for a superseded or future-verified Company copy');
 select pg_temp.expect_sqlstate($q$select public.resend_operations_waybill(
-  (select invoice.id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-2026-000044'),
+  current_setting('phase3c.superseded_invoice_id')::uuid,
   'client','f3c00000-0000-4000-8000-000000000003','CORRECTIVE_RESEND',false)$q$,'P4091',
   'Operations Manager resend cannot release an email for a superseded or future-verified Company copy');
 reset role;
