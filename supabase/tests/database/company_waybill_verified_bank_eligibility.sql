@@ -100,15 +100,45 @@ select pg_temp.assert_true(
   'private verification predicates are not directly callable by API roles while the Storage policy wrapper is authenticated-only');
 
 select pg_temp.assert_true((
-  select count(*)=5 and bool_and(private.waybill_email_regular_delivery_allowed(invoice.id,invoice.trip_id))
-  from public.trip_closure_invoices invoice
-  where invoice.invoice_number in ('WB-2026-000041','WB-2026-000042','WB-2026-000043','WB-2026-000044','WB-2026-000045')
-),'the fixed historical allowlist remains exactly Waybills 041 through 045');
-select pg_temp.assert_true(not private.waybill_email_regular_delivery_allowed(
-  'e7000000-0000-4000-8000-000000000040','e6000000-0000-4000-8000-000000000040'
-) and not private.waybill_email_regular_delivery_allowed(
-  'e7000000-0000-4000-8000-000000000039','e6000000-0000-4000-8000-000000000039'
-),'Waybill 040 and older remain excluded from regular delivery');
+  select count(*)=5 and array_agg(allowlist.invoice_number order by allowlist.invoice_number)=array[
+    'WB-2026-000041','WB-2026-000042','WB-2026-000043','WB-2026-000044','WB-2026-000045'
+  ]::text[]
+  from private.waybill_email_historical_allowlist allowlist
+) and (
+  select count(*)=5 and bool_and(
+    allowlist.invoice_id=invoice.id
+    and allowlist.trip_id=invoice.trip_id
+    and allowlist.invoice_number=invoice.invoice_number
+    and allowlist.closed_at=invoice.closed_at
+    and allowlist.closed_at=trip.closed_at
+  )
+  from private.waybill_email_historical_allowlist allowlist
+  join public.trip_closure_invoices invoice
+    on invoice.id=allowlist.invoice_id and invoice.trip_id=allowlist.trip_id
+  join public.trips trip on trip.id=invoice.trip_id
+  where allowlist.invoice_number in (
+    'WB-2026-000041','WB-2026-000042','WB-2026-000043','WB-2026-000044','WB-2026-000045'
+  )
+),'the immutable allowlist contains exactly Waybills 041 through 045 with matching invoice, trip, and closure timestamps');
+select pg_temp.assert_true(not exists (
+  select 1 from private.waybill_email_historical_allowlist allowlist
+  where allowlist.invoice_number in ('WB-2026-000039','WB-2026-000040')
+),'Waybill 040 and the older synthetic control are absent from the fixed historical allowlist');
+select pg_temp.assert_true(
+  exists (
+    select 1 from private.waybill_notification_canary_runs canary
+    join public.trip_closure_invoices invoice
+      on invoice.id=canary.invoice_id and invoice.trip_id=canary.trip_id
+    where invoice.invoice_number='WB-9999-999999'
+      and canary.disarmed_at is null
+      and canary.expires_at>statement_timestamp()
+      and canary.purpose='synthetic_development_test'
+  )
+  and not private.waybill_email_regular_delivery_allowed(
+    (select invoice.id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-2026-000041'),
+    (select invoice.trip_id from public.trip_closure_invoices invoice where invoice.invoice_number='WB-2026-000041')
+  ),
+  'regular email delivery remains disabled while the synthetic canary is armed');
 
 select pg_temp.assert_true((
   select count(*)=3 and bool_and(private.waybill_company_copy_verification_eligible(

@@ -128,6 +128,18 @@ assert(companyVerificationSuite.includes('future-dated verification evidence'));
 assert(companyVerificationSuite.includes('previously eligible Company copy becomes ineligible'));
 assert(companyVerificationSuite.includes('ready but unverified Company copy'));
 assert(companyVerificationSuite.includes('reconciliation does not enqueue, unblock, or mutate any unverified historical Company notification'));
+assert(companyVerificationSuite.includes('from private.waybill_email_historical_allowlist allowlist'));
+assert(companyVerificationSuite.includes('array_agg(allowlist.invoice_number order by allowlist.invoice_number)'));
+assert(companyVerificationSuite.includes('allowlist.invoice_id=invoice.id'));
+assert(companyVerificationSuite.includes('allowlist.trip_id=invoice.trip_id'));
+assert(companyVerificationSuite.includes('allowlist.closed_at=invoice.closed_at'));
+assert(companyVerificationSuite.includes('allowlist.closed_at=trip.closed_at'));
+assert(companyVerificationSuite.includes("allowlist.invoice_number in ('WB-2026-000039','WB-2026-000040')"));
+assert(companyVerificationSuite.includes('canary.disarmed_at is null'));
+assert(companyVerificationSuite.includes('canary.expires_at>statement_timestamp()'));
+assert(companyVerificationSuite.includes('regular email delivery remains disabled while the synthetic canary is armed'));
+assert(companyVerificationSuite.indexOf('regular email delivery remains disabled while the synthetic canary is armed')
+  < companyVerificationSuite.indexOf('CI transaction disarms the synthetic canary'));
 assert(companyVerificationSuite.includes('Company PDF worker cannot claim a future-verified or superseded Company copy'));
 assert(companyVerificationSuite.includes('bank correction fails closed while a Company email lease is active'));
 assert(companyVerificationSuite.includes('bank correction fails closed while a Company PDF lease is active'));
