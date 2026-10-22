@@ -22,6 +22,7 @@ const getRunnerFunction = (name) => {
 };
 const migrationPreservationFingerprint = getRunnerFunction('migration_preservation_fingerprint');
 const secureEmailHardeningFingerprint = getRunnerFunction('secure_email_hardening_fingerprint');
+const canarySerializedLockObserver = getRunnerFunction('wait_for_canary_lock_contention');
 
 for (const table of [
   'public.trips', 'public.trip_closure_invoices', 'public.trip_closure_invoice_documents',
@@ -87,6 +88,35 @@ assert(runner.includes('canary concurrency gate setup'));
 assert(runner.includes('canary lease recovery'));
 assert(runner.includes('notification_canary_runs'));
 assert(runner.includes('migration replay is rejected before changes'));
+assert(canarySerializedLockObserver.includes('pg_catalog.pg_stat_clear_snapshot()')
+  && canarySerializedLockObserver.includes("wait_event_type='Timeout' and wait_event='PgSleep'")
+  && canarySerializedLockObserver.includes("wait_event_type='Lock' and wait_event='advisory'")
+  && canarySerializedLockObserver.includes('v_a_sleeping and v_b_waiting'),
+  'canary concurrency observer must require A in PgSleep and B waiting on the invoice advisory lock');
+assert(canarySerializedLockObserver.includes('into v_a_sleeping,v_b_waiting,v_states')
+  && canarySerializedLockObserver.includes('from pg_catalog.pg_stat_activity')
+  && canarySerializedLockObserver.includes('where application_name in (v_app_a,v_app_b)'),
+  'both canary wait states must be evaluated by one activity query after refreshing the snapshot');
+assert(canarySerializedLockObserver.includes("interval '30 seconds'")
+  && canarySerializedLockObserver.includes('client_a_pg_sleep=%')
+  && canarySerializedLockObserver.includes('client_b_advisory_lock=%'),
+  'canary lock observation must remain bounded and report both observed wait states on failure');
+const canaryFirstGateReached = runner.indexOf('if ! wait "$canary_observer_a_pid";');
+const canarySecondClientStarted = runner.indexOf('run_canary_claim "$canary_b" & canary_b_pid=$!');
+const canarySerializedWait = runner.indexOf('wait_for_canary_lock_contention "$canary_a" "$canary_b"');
+assert(canaryFirstGateReached >= 0 && canarySecondClientStarted > canaryFirstGateReached
+  && canarySerializedWait > canarySecondClientStarted,
+  'client B must start promptly after A reaches the gate, before the same-snapshot contention observer');
+assert(!runner.includes('wait_for_pg_state "$canary_b" Timeout PgSleep'),
+  'serialized canary client B must not be expected to enter the same PgSleep gate');
+assert(runner.includes('client A held the invoice lock in PgSleep while client B waited on the advisory lock'));
+const canaryLeaseRecovery = runner.indexOf('PASS expired canary lease recovery released exactly two jobs');
+const canaryExplicitDisarm = runner.indexOf('PASS canary can be explicitly disarmed when no notification lease is active');
+const canaryExpiredRunRecovery = runner.indexOf('PASS expired undisarmed canary safely recovers');
+const canaryGateCleanupIndex = runner.indexOf('run_sql "canary concurrency gate cleanup"');
+assert(canaryLeaseRecovery > canarySerializedWait && canaryExplicitDisarm > canaryLeaseRecovery
+  && canaryExpiredRunRecovery > canaryExplicitDisarm && canaryGateCleanupIndex > canaryExpiredRunRecovery,
+  'canary lease recovery, explicit disarm, expired-run recovery, and gate cleanup must remain after contention tests');
 
 for (const version of [
   'WB-2026-000041', 'WB-2026-000042', 'WB-2026-000043', 'WB-2026-000044', 'WB-2026-000045',
@@ -115,6 +145,9 @@ const effectiveCanaryClaim = companyVerificationMigration.slice(canaryClaimStart
 assert(effectiveCanaryClaim.includes("p_company_recipient is distinct from 'synthetic-company@example.invalid'")
   && effectiveCanaryClaim.includes("using errcode='22023'"),
   'the effective canary RPC must reject non-synthetic Company recipients with SQLSTATE 22023');
+assert(effectiveCanaryClaim.includes('pg_catalog.pg_advisory_xact_lock')
+  && effectiveCanaryClaim.includes("'waybill-bank:'||v_invoice.id::text"),
+  'the production canary invoice advisory lock remains part of the tested serialized-claim contract');
 assert(canarySuite.includes("'attacker@example.invalid'),\n  '22023','canary claim rejects a non-synthetic Company recipient'"),
   'the invalid-recipient regression must preserve its attacker input and match the effective 22023 contract');
 assert(/phase3b_recipient_rejection_before[\s\S]*full outer join reserved_notification_rows_after after_row using \(id\)[\s\S]*before_row\.complete_row is distinct from after_row\.complete_row/i.test(canarySuite),

@@ -518,6 +518,54 @@ SQL
     -f - <"$observer_sql" >"$observer_log" 2>&1
 }
 
+wait_for_canary_lock_contention() {
+  local app_a="$1"
+  local app_b="$2"
+  local observer_app="cwbrmon_${app_a}_and_${app_b}"
+  local observer_log="$runner_temp/$project_id-observer-$app_a-$app_b-lock.log"
+  local observer_sql="$project_root/wait-for-canary-lock-contention.sql"
+  printf "select set_config('ci.canary_app_a','%s',false);\nselect set_config('ci.canary_app_b','%s',false);\n" \
+    "$app_a" "$app_b" >"$observer_sql"
+  cat >>"$observer_sql" <<'SQL'
+do $wait$
+declare
+  v_app_a text := current_setting('ci.canary_app_a');
+  v_app_b text := current_setting('ci.canary_app_b');
+  v_deadline timestamptz := clock_timestamp() + interval '30 seconds';
+  v_a_sleeping boolean := false;
+  v_b_waiting boolean := false;
+  v_states text;
+begin
+  loop
+    perform pg_catalog.pg_stat_clear_snapshot();
+    select
+      coalesce(bool_or(application_name=v_app_a and state='active'
+        and wait_event_type='Timeout' and wait_event='PgSleep'),false),
+      coalesce(bool_or(application_name=v_app_b and state='active'
+        and wait_event_type='Lock' and wait_event='advisory'),false),
+      coalesce(string_agg(application_name||'|'||coalesce(state,'')||'|'
+        ||coalesce(wait_event_type,'')||'|'||coalesce(wait_event,''),';'
+        order by application_name),'no canary claim sessions')
+    into v_a_sleeping,v_b_waiting,v_states
+    from pg_catalog.pg_stat_activity
+    where application_name in (v_app_a,v_app_b);
+    if v_a_sleeping and v_b_waiting then
+      raise notice 'Observed client A in PgSleep and client B waiting on advisory lock in the same fresh activity snapshot.';
+      return;
+    end if;
+    if clock_timestamp()>=v_deadline then
+      raise exception 'Timed out waiting for serialized canary contention; client_a_pg_sleep=%, client_b_advisory_lock=%, sessions=%',
+        v_a_sleeping,v_b_waiting,v_states using errcode='P0001';
+    end if;
+    perform pg_catalog.pg_sleep(0.05);
+  end loop;
+end;
+$wait$;
+SQL
+  docker exec --env "PGAPPNAME=$observer_app" -i "$db_container" psql -X -q -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -U postgres -d postgres \
+    -f - <"$observer_sql" >"$observer_log" 2>&1
+}
+
 wait_for_observer_start() {
   local observer_app="$1"
   local active
@@ -781,32 +829,18 @@ SQL
     stop_race_client "$canary_a" "$canary_a_pid"
     fail "First canary claim did not reach the synthetic PostgreSQL sleep gate."
   fi
-  wait_for_pg_state "$canary_b" Timeout PgSleep & canary_observer_b_pid=$!
-  if ! wait_for_observer_start "cwbrmon_${canary_b}_PgSleep"; then
-    race_client_diagnostics "$canary_a"
-    stop_race_client "$canary_a" "$canary_a_pid"
-    stop_race_client "canary-observer-b" "$canary_observer_b_pid"
-    fail "Could not start the second canary PostgreSQL wait observer."
-  fi
   run_canary_claim "$canary_b" & canary_b_pid=$!
-  if ! wait "$canary_observer_b_pid"; then
+  if ! wait_for_canary_lock_contention "$canary_a" "$canary_b"; then
+    printf 'Canary same-snapshot advisory-lock diagnostics:\n' >&2
+    redact_log <"$runner_temp/$project_id-observer-$canary_a-$canary_b-lock.log" \
+      | grep -E '^(ERROR:|DETAIL:|HINT:|FATAL:|psql: error:|NOTICE:)' | tail -n 20 >&2 || true
     race_client_diagnostics "$canary_a"
     race_client_diagnostics "$canary_b"
     stop_race_client "$canary_a" "$canary_a_pid"
     stop_race_client "$canary_b" "$canary_b_pid"
-    fail "Second canary claim did not reach the synthetic PostgreSQL sleep gate."
+    fail "Canary clients did not show client A in PgSleep and client B waiting on the invoice advisory lock in one activity snapshot."
   fi
-  canary_overlap_count=$(docker exec "$db_container" psql -X -qAt -v ON_ERROR_STOP=1 -U postgres -d postgres \
-    -c "select count(*) from pg_catalog.pg_stat_activity where application_name in ('$canary_a','$canary_b') and state='active' and wait_event_type='Timeout' and wait_event='PgSleep'")
-  [[ "$canary_overlap_count" == 2 ]] || {
-    printf 'Canary overlap observer found %s simultaneously sleeping sessions.\n' "$canary_overlap_count" >&2
-    race_client_diagnostics "$canary_a"
-    race_client_diagnostics "$canary_b"
-    stop_race_client "$canary_a" "$canary_a_pid"
-    stop_race_client "$canary_b" "$canary_b_pid"
-    fail "Two independent canary database sessions did not overlap."
-  }
-  printf 'PASS two independent canary claim sessions overlapped in PostgreSQL.\n'
+  printf 'PASS independent canary sessions overlapped: client A held the invoice lock in PgSleep while client B waited on the advisory lock in one PostgreSQL activity snapshot.\n'
   if wait "$canary_a_pid"; then canary_a_status=0; else canary_a_status=$?; fi
   if wait "$canary_b_pid"; then canary_b_status=0; else canary_b_status=$?; fi
   [[ "$canary_a_status" == 0 && "$canary_b_status" == 0 ]] || {
