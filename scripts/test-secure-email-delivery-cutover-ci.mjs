@@ -124,6 +124,16 @@ assert(canaryFixture.includes('public.finish_company_waybill_pdf_job'));
 assert(canaryFixture.includes('vault.create_secret'));
 assert(!canaryFixture.includes('api.resend.com'));
 assert(canarySuite.includes('claim_waybill_synthetic_canary_pdf_jobs'));
+assert(canarySuite.includes("trip.driver_id=v_ordinary_driver_id and trip.status='closed'"),
+  'ordinary control trip lookup must bind the closed trip to the identified synthetic driver');
+assert(canarySuite.includes('v_ordinary_trip_count<>1 or v_ordinary_invoice_count<>1'),
+  'ordinary control lookup must fail clearly unless exactly one closed trip and invoice match');
+assert(canarySuite.includes("perform set_config('test.phase3b_ordinary_invoice_id',v_ordinary_invoice_id::text,true)"),
+  'the actual non-reserved ordinary invoice ID must be initialized before UUID casts');
+assert(!canarySuite.includes("driver.full_name='Synthetic Ordinary Control Driver' and trip.status='open'"),
+  'ordinary control lookup must not assume the trip remains open after provisioning');
+assert(canarySuite.includes('ordinary closed trip received no reserved-number permit'));
+assert(canarySuite.includes('invoice-scoped PDF claim rejects an ordinary closed trip'));
 assert(canarySuite.includes('notification_outbox'));
 assert(canarySuite.includes('pre-existing outbox rows retain their complete status'));
 assert(canarySuite.includes('recover_expired_waybill_synthetic_email_canary'));

@@ -25,19 +25,72 @@ begin
 end;
 $$;
 
-select set_config('test.phase3b_invoice_id',(
-  select invoice.id::text from public.trip_closure_invoices invoice
-  where invoice.invoice_number='WB-9999-999999'
-),true);
-select set_config('test.phase3b_trip_id',(
-  select invoice.trip_id::text from public.trip_closure_invoices invoice
-  where invoice.invoice_number='WB-9999-999999'
-),true);
-select set_config('test.phase3b_ordinary_trip_id',(
-  select trip.id::text from public.trips trip
-  join public.drivers driver on driver.id=trip.driver_id
-  where driver.full_name='Synthetic Ordinary Control Driver' and trip.status='open'
-),true);
+do $$
+declare
+  v_reserved_invoice_count integer;
+  v_reserved_trip_count integer;
+  v_reserved_invoice_id uuid;
+  v_reserved_trip_id uuid;
+  v_ordinary_driver_count integer;
+  v_ordinary_driver_id uuid;
+  v_ordinary_trip_count integer;
+  v_ordinary_invoice_count integer;
+  v_ordinary_trip_id uuid;
+  v_ordinary_invoice_id uuid;
+begin
+  select count(*) into v_reserved_invoice_count
+  from public.trip_closure_invoices invoice
+  where invoice.invoice_number='WB-9999-999999';
+  if v_reserved_invoice_count<>1 then
+    raise exception 'Expected exactly one reserved synthetic invoice, found %',v_reserved_invoice_count;
+  end if;
+
+  select count(*) into v_reserved_trip_count
+  from public.trip_closure_invoices invoice
+  join public.trips trip on trip.id=invoice.trip_id
+  where invoice.invoice_number='WB-9999-999999';
+  if v_reserved_trip_count<>1 then
+    raise exception 'Expected exactly one trip for the reserved synthetic invoice, found %',v_reserved_trip_count;
+  end if;
+
+  select invoice.id,trip.id into v_reserved_invoice_id,v_reserved_trip_id
+  from public.trip_closure_invoices invoice
+  join public.trips trip on trip.id=invoice.trip_id
+  where invoice.invoice_number='WB-9999-999999';
+
+  select count(*) into v_ordinary_driver_count
+  from public.drivers driver
+  where driver.full_name='Synthetic Ordinary Control Driver';
+  if v_ordinary_driver_count<>1 then
+    raise exception 'Expected exactly one synthetic ordinary control driver, found %',v_ordinary_driver_count;
+  end if;
+  select driver.id into v_ordinary_driver_id
+  from public.drivers driver
+  where driver.full_name='Synthetic Ordinary Control Driver';
+
+  select count(distinct trip.id),count(invoice.id)
+    into v_ordinary_trip_count,v_ordinary_invoice_count
+  from public.trips trip
+  join public.trip_closure_invoices invoice on invoice.trip_id=trip.id
+  where trip.driver_id=v_ordinary_driver_id and trip.status='closed'
+    and invoice.invoice_number<>'WB-9999-999999';
+  if v_ordinary_trip_count<>1 or v_ordinary_invoice_count<>1 then
+    raise exception 'Expected exactly one closed ordinary synthetic trip and one non-reserved invoice for its driver; found % trips and % invoices',
+      v_ordinary_trip_count,v_ordinary_invoice_count;
+  end if;
+
+  select trip.id,invoice.id into v_ordinary_trip_id,v_ordinary_invoice_id
+  from public.trips trip
+  join public.trip_closure_invoices invoice on invoice.trip_id=trip.id
+  where trip.driver_id=v_ordinary_driver_id and trip.status='closed'
+    and invoice.invoice_number<>'WB-9999-999999';
+
+  perform set_config('test.phase3b_invoice_id',v_reserved_invoice_id::text,true);
+  perform set_config('test.phase3b_trip_id',v_reserved_trip_id::text,true);
+  perform set_config('test.phase3b_ordinary_trip_id',v_ordinary_trip_id::text,true);
+  perform set_config('test.phase3b_ordinary_invoice_id',v_ordinary_invoice_id::text,true);
+end;
+$$;
 
 create temporary table canary_outbox_before as
 select notification.id,to_jsonb(notification) as row_data
@@ -74,7 +127,7 @@ select pg_temp.canary_assert((
 select pg_temp.canary_assert(not exists (
   select 1 from private.waybill_synthetic_email_canary_permits permit
   where permit.trip_id=current_setting('test.phase3b_ordinary_trip_id')::uuid
-),'ordinary open trip received no reserved-number permit');
+),'ordinary closed trip received no reserved-number permit');
 select pg_temp.canary_assert((
   select count(*)=0 from public.trip_closure_invoice_documents document
   where document.invoice_id=current_setting('test.phase3b_invoice_id')::uuid
@@ -121,7 +174,7 @@ reset role;
 select pg_temp.canary_expect_sqlstate(format(
   'select public.claim_waybill_synthetic_canary_pdf_jobs(%L::uuid,%L)',
   current_setting('test.phase3b_ordinary_trip_id'),'driver'),'42501',
-  'invoice-scoped PDF claim rejects an ordinary open trip');
+  'invoice-scoped PDF claim rejects an ordinary closed trip');
 select pg_temp.canary_expect_sqlstate(format(
   'select public.provision_waybill_synthetic_email_canary_notifications(%L::uuid,%L)',
   (select invoice.id from public.trip_closure_invoices invoice
