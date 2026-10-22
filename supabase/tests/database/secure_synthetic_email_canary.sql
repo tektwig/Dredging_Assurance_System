@@ -209,10 +209,47 @@ select pg_temp.canary_assert((
     and notification.event_type='waybill_ready' limit 1
 ),'canary notification payloads contain no bank information');
 
+create temporary table phase3b_recipient_rejection_before on commit drop as
+select notification.id,to_jsonb(notification) as complete_row
+from public.notification_outbox notification
+where notification.trip_id=current_setting('test.phase3b_trip_id')::uuid
+  and notification.event_type='waybill_ready'
+  and notification.delivery_sequence=0
+  and notification.audience in ('driver','client')
+  and notification.payload->>'invoice_id'=current_setting('test.phase3b_invoice_id');
+select pg_temp.canary_assert((
+  select count(*)=2 and count(distinct notification.audience)=2
+  from public.notification_outbox notification
+  where notification.trip_id=current_setting('test.phase3b_trip_id')::uuid
+    and notification.event_type='waybill_ready'
+    and notification.delivery_sequence=0
+    and notification.audience in ('driver','client')
+    and notification.payload->>'invoice_id'=current_setting('test.phase3b_invoice_id')
+),'both reserved-invoice notification rows are snapshotted before invalid-recipient rejection');
+
 select pg_temp.canary_expect_sqlstate(format(
   'select * from public.claim_waybill_notification_canary(%L,%L::uuid,%L,2)',
   'ci-wrong-recipient',current_setting('test.phase3b_invoice_id'),'attacker@example.invalid'),
-  '42501','canary claim rejects a non-synthetic Company recipient');
+  '22023','canary claim rejects a non-synthetic Company recipient');
+with reserved_notification_rows_after as (
+  select notification.id,to_jsonb(notification) as complete_row
+  from public.notification_outbox notification
+  where notification.trip_id=current_setting('test.phase3b_trip_id')::uuid
+    and notification.event_type='waybill_ready'
+    and notification.delivery_sequence=0
+    and notification.audience in ('driver','client')
+    and notification.payload->>'invoice_id'=current_setting('test.phase3b_invoice_id')
+)
+select pg_temp.canary_assert(
+  (select count(*)=2 from phase3b_recipient_rejection_before)
+  and (select count(*)=2 from reserved_notification_rows_after)
+  and not exists (
+    select 1 from phase3b_recipient_rejection_before before_row
+    full outer join reserved_notification_rows_after after_row using (id)
+    where before_row.id is null or after_row.id is null
+      or before_row.complete_row is distinct from after_row.complete_row
+  ),
+  'invalid Company recipient rejection preserves both reserved notification rows exactly');
 select pg_temp.canary_expect_sqlstate(format(
   'select * from public.claim_waybill_notification_canary(%L,%L::uuid,%L,1)',
   'ci-historical',(select invoice.id from public.trip_closure_invoices invoice

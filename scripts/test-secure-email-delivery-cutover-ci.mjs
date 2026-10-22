@@ -106,6 +106,21 @@ assert(suite.includes('rollback;'));
 assert(!suite.includes('api.resend.com'));
 assert(canarySuite.includes('normal Company PDF eligibility remains blocked until a verified bank snapshot exists'),
   'the existing unverified Company PDF negative-control assertion must remain unchanged');
+const canaryClaimStart = companyVerificationMigration.indexOf(
+  'create or replace function public.claim_waybill_notification_canary(');
+const canaryClaimEnd = companyVerificationMigration.indexOf('\n$$;', canaryClaimStart);
+assert(canaryClaimStart >= 0 && canaryClaimEnd > canaryClaimStart,
+  'the effective Company-eligibility migration must define the synthetic canary claim RPC');
+const effectiveCanaryClaim = companyVerificationMigration.slice(canaryClaimStart, canaryClaimEnd);
+assert(effectiveCanaryClaim.includes("p_company_recipient is distinct from 'synthetic-company@example.invalid'")
+  && effectiveCanaryClaim.includes("using errcode='22023'"),
+  'the effective canary RPC must reject non-synthetic Company recipients with SQLSTATE 22023');
+assert(canarySuite.includes("'attacker@example.invalid'),\n  '22023','canary claim rejects a non-synthetic Company recipient'"),
+  'the invalid-recipient regression must preserve its attacker input and match the effective 22023 contract');
+assert(/phase3b_recipient_rejection_before[\s\S]*full outer join reserved_notification_rows_after after_row using \(id\)[\s\S]*before_row\.complete_row is distinct from after_row\.complete_row/i.test(canarySuite),
+  'the invalid-recipient test must compare complete before/after reserved notification rows');
+assert(canarySuite.includes('invalid Company recipient rejection preserves both reserved notification rows exactly'),
+  'the invalid-recipient test must assert both reserved notification rows remain unchanged');
 
 assert(companyVerificationMigration.startsWith('begin;'));
 assert(companyVerificationMigration.trimEnd().endsWith('commit;'));
