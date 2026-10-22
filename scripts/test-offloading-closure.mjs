@@ -204,12 +204,16 @@ assert.equal(unavailableController.frozenRequest, null, 'A trip closed elsewhere
 const { ClosurePanel } = load('src/features/offloading/components/ClosurePanel.tsx');
 const panel = props => renderToStaticMarkup(React.createElement(ClosurePanel, {
   lookup: { status: 'found', assignment, trip, capture: manualReview.capture },
-  state: { status: 'idle' }, quantity: '', onQuantity() {}, onReview() {}, onBack() {}, onClose() {}, ...props,
+  state: { status: 'idle' }, quantity: '', onQuantity() {}, onReview() {}, onClose() {}, ...props,
 }));
 assert(panel({}).includes('disabled'), 'Invalid tonnage must block Review Trip');
-assert(!panel({ quantity: '12.50' }).includes('disabled'));
+const entryHtml = panel({ quantity: '12.50' });
+assert(!entryHtml.includes('disabled'));
+assert(entryHtml.includes('id="offloading-tonnage"') && entryHtml.includes('Review Trip'));
 const reviewHtml = panel({ state: { status: 'review', review: manualReview } });
 assert(reviewHtml.includes('Confirm &amp; Close Trip'));
+assert(reviewHtml.includes('Actual Tonnage') && reviewHtml.includes('12.50 tonnes'));
+assert(!reviewHtml.includes('Edit tonnage'));
 assert(reviewHtml.includes('Offloading Site') && reviewHtml.includes('John Driver'));
 assert(reviewHtml.includes('Estimated Tonnage') && reviewHtml.includes('Actual Tonnage')
   && reviewHtml.includes('Variance') && reviewHtml.includes('2.25 tonnes'));

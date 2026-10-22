@@ -3,11 +3,11 @@ import { ListResultState } from '../../../components/data/ListResultState';
 import { PaginationControls } from '../../../components/data/PaginationControls';
 import { DEFAULT_PAGE_SIZE } from '../../../types/listQuery';
 import { downloadReport, exportOperationsReport, loadOperationsReport, OPERATIONS_REPORT_KINDS,
-  reportColumnsFor, type OperationsReportKind, type OperationsReportPage, type ReportFilters } from '../services/operationsReports';
+  OperationsReportError, reportColumnsFor, type OperationsReportKind, type OperationsReportPage, type ReportFilters } from '../services/operationsReports';
 import './reports.css';
 
 const labels: Record<OperationsReportKind, string> = {
-  trips: 'Trips', performance: 'Performance', waybills: 'Waybills & Payouts', exceptions: 'Exceptions',
+  trips: 'Trips', performance: 'Performance', waybills: 'Waybills & Delivery', exceptions: 'Exceptions',
 };
 
 function lagosToday(): string {
@@ -79,10 +79,8 @@ function Filters({ kind, filters, change }: { kind: OperationsReportKind; filter
         <option value="">All</option>{['pending', 'processing', 'ready', 'failed'].map(value => <option key={value} value={value}>{value}</option>)}
       </select></label>
       <label>Delivery status<select value={String(filters.delivery_status ?? '')} onChange={event => change('delivery_status', event.currentTarget.value)}>
-        <option value="">All</option>{['pending', 'processing', 'sent', 'failed', 'not_queued', 'not_applicable'].map(value => <option key={value} value={value}>{value.replace(/_/g, ' ')}</option>)}
-      </select></label>
-      <label>Payout status<select value={String(filters.payout_status ?? '')} onChange={event => change('payout_status', event.currentTarget.value)}>
-        <option value="">All</option>{['payment_details_required', 'pending', 'paid'].map(value => <option key={value} value={value}>{value.replace(/_/g, ' ')}</option>)}
+        <option value="">All</option>{['pending', 'processing', 'sent', 'failed', 'blocked_missing_email', 'blocked_configuration', 'not_queued']
+          .map(value => <option key={value} value={value}>{value.replace(/_/g, ' ')}</option>)}
       </select></label>
     </>}
     {kind === 'exceptions' && <>
@@ -117,7 +115,7 @@ export function OperationsReportsView({ kind, onKindChange, filters, changeFilte
   exporting, exportError, onExport }: {
   kind: OperationsReportKind; onKindChange: (kind: OperationsReportKind) => void; filters: ReportFilters;
   changeFilter: (key: string, value: string | boolean) => void;
-  state: { status: 'loading' } | { status: 'error' } | { status: 'ready'; data: OperationsReportPage };
+  state: { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; data: OperationsReportPage };
   page: number; onPageChange: (page: number) => void; onRetry: () => void; exporting: boolean;
   exportError: string; onExport: (format: 'csv' | 'xlsx') => void;
 }) {
@@ -129,7 +127,7 @@ export function OperationsReportsView({ kind, onKindChange, filters, changeFilte
     <Filters key={kind} kind={kind} filters={filters} change={changeFilter} />
     <section aria-label={`${labels[kind]} results`}>
       {state.status === 'loading' ? <ListResultState status="loading" /> : state.status === 'error'
-        ? <ListResultState status="error" message="Unable to load report results." onRetry={onRetry} /> : <>
+        ? <ListResultState status="error" message={state.message} onRetry={onRetry} /> : <>
         <div className="report-summary" aria-label="Report summary">{Object.entries(state.data.summary).map(([key, value]) =>
           <div className="card" key={key}><span>{key.replace(/_/g, ' ')}</span><strong>{value.toLocaleString('en-NG')}</strong></div>)}</div>
         {state.data.items.length === 0 ? <p className="empty-state">No report results match these filters.</p> : <ReportTable kind={kind} page={state.data} />}
@@ -146,7 +144,8 @@ export function OperationsReports() {
   const [kind, setKind] = useState<OperationsReportKind>('trips');
   const [filters, setFilters] = useState<ReportFilters>(() => initialFilters('trips'));
   const [page, setPage] = useState(1);
-  const [state, setState] = useState<{ status: 'loading' } | { status: 'error' } | { status: 'ready'; data: OperationsReportPage }>({ status: 'loading' });
+  const [state, setState] = useState<{ status: 'loading' } | { status: 'error'; message: string }
+    | { status: 'ready'; data: OperationsReportPage }>({ status: 'loading' });
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
   const load = useCallback(() => {
@@ -154,7 +153,8 @@ export function OperationsReports() {
     setState({ status: 'loading' });
     void loadOperationsReport(kind, filters, page).then(data => {
       if (active) setState({ status: 'ready', data });
-    }).catch(() => { if (active) setState({ status: 'error' }); });
+    }).catch(error => { if (active) setState({ status: 'error', message: error instanceof OperationsReportError
+      ? error.message : 'Unable to load report results.' }); });
     return () => { active = false; };
   }, [kind, filters, page]);
   useEffect(() => load(), [load]);
@@ -174,7 +174,7 @@ export function OperationsReports() {
     if (exporting) return;
     setExporting(true); setExportError('');
     try { await downloadReport(await exportOperationsReport(kind, filters, format)); }
-    catch (error) { setExportError(error instanceof Error ? error.message : 'Unable to export report'); }
+    catch (error) { setExportError(error instanceof OperationsReportError ? error.message : 'Unable to export report safely.'); }
     finally { setExporting(false); }
   };
   return <OperationsReportsView kind={kind} onKindChange={changeKind} filters={filters} changeFilter={changeFilter}

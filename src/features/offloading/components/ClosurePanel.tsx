@@ -4,7 +4,7 @@ import type { ClosureState } from '../utils/closureController';
 
 type Props = { lookup: Extract<OffloadingLookupState, { status: 'found' }> | null;
   state: ClosureState; quantity: string; onQuantity: (value: string) => void;
-  onReview: () => void; onBack: () => void; onClose: () => void };
+  onReview: () => void; onClose: () => void };
 
 function failureMessage(code: Extract<ClosureState, { status: 'business_failure' }>['code'], tripNumber?: string) {
   if (code === 'TRIP_NOT_OPEN') return `This trip${tripNumber ? ` (${tripNumber})` : ''} is no longer OPEN. Contact Operations.`;
@@ -20,7 +20,7 @@ function failureMessage(code: Extract<ClosureState, { status: 'business_failure'
   return 'The trip could not be closed. Recheck the trip with Operations before trying again.';
 }
 
-export function ClosurePanel({ lookup, state, quantity, onQuantity, onReview, onBack, onClose }: Props) {
+export function ClosurePanel({ lookup, state, quantity, onQuantity, onReview, onClose }: Props) {
   if (state.status === 'success') return <div className="loading-trip-success" role="status">
     <p className="eyebrow">Trip closed successfully</p>
     <h3>{state.result.trip.tripNumber}</h3>
@@ -65,7 +65,6 @@ export function ClosurePanel({ lookup, state, quantity, onQuantity, onReview, on
     </dl>
     <div className="offloading-review-actions">
       <button className="button" type="button" onClick={onClose}>Confirm &amp; Close Trip</button>
-      <button className="button secondary" type="button" onClick={onBack}>Edit tonnage</button>
     </div>
   </div>;
   if (!lookup) return null;

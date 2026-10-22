@@ -319,7 +319,7 @@ function OffloadingPortalContent({ actorId, operationalDate, officerName }: {
   const closurePanel = <ClosurePanel lookup={verifiedLookup} state={closure} quantity={quantity}
     onQuantity={value => { if (closureController.current.status === 'idle' && verified) setQuantity(value); }}
     onReview={() => { if (review) { closureController.setInput(review); closureController.beginReview(); } }}
-    onBack={() => closureController.back()} onClose={() => { void closureController.submit(); }} />;
+    onClose={() => { void closureController.submit(); }} />;
 
   return <>
     <OffloadingPortalView officerName={officerName} openTrips={openTrips}

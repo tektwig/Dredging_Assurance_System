@@ -63,9 +63,6 @@ export class ClosureController {
     if (this.disposed || !this.candidate || this.state.status !== 'idle') return;
     this.publish({ status: 'review', review: this.candidate });
   }
-  back() {
-    if (this.state.status === 'review' && !this.pending) this.publish({ status: 'idle' });
-  }
   async submit() {
     if (this.disposed || this.pending || !this.candidate
       || (this.state.status !== 'review' && this.state.status !== 'ambiguous')) return;

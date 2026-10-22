@@ -49,10 +49,10 @@ const tripRow = { trip_id: 'trip-1', trip_number: 'TRP-001', truck_id: 'truck-1'
 const page = { summary: { rows: 1, trips_opened: 0, trips_closed: 1, trips_cancelled: 0, open_trips: 0, tonnage_tonnes: 12.5 },
   items: [tripRow], total_count: 1, page: 1, page_size: 25, has_next: false };
 const waybillSummary = { waybills: 1, pdf_failed: 0, delivery_failed: 0,
-  payment_details_required: 0, pending_payout: 1, paid: 0 };
+  blocked_missing_email: 0, blocked_configuration: 0 };
 const waybillRow = { invoice_id: 'waybill-1', invoice_number: 'INV-2026-000001', trip_number: 'TRP-001',
   truck_plate: 'RPT-001', driver_name: 'Driver', tonnage_tonnes: 12.5, issued_at: timestamp,
-  pdf_status: 'ready', driver_delivery_status: 'sent', internal_delivery_status: 'sent', payout_status: 'pending' };
+  pdf_status: 'ready', driver_delivery_status: 'sent', company_delivery_status: 'sent' };
 const waybillPage = { summary: waybillSummary, items: [waybillRow], total_count: 1,
   page: 1, page_size: 25, has_next: false };
 assert.equal(service.validateReportPage('trips', page).items.length, 1);
@@ -64,6 +64,13 @@ assert.equal(parsedWaybillPage.items[0].waybill_id, 'waybill-1');
 assert.equal(parsedWaybillPage.items[0].waybill_number, 'INV-2026-000001');
 assert(!('invoice_number' in parsedWaybillPage.items[0]) && !('invoice_id' in parsedWaybillPage.items[0]));
 assert(service.buildCsv('waybills', parsedWaybillPage.items).includes('"INV-2026-000001"'));
+const waybillCsv = service.buildCsv('waybills', parsedWaybillPage.items);
+assert(waybillCsv.includes('"Company Delivery"') && !waybillCsv.includes('Payout'));
+assert.throws(() => service.validateReportPage('waybills', { ...waybillPage,
+  summary: { ...waybillSummary, payout_total: 1 } }), /Invalid/);
+assert.throws(() => service.validateReportPage('waybills', { ...waybillPage,
+  items: [{ ...waybillRow, internal_delivery_status: 'sent' }] }), /Invalid/);
+assert.equal(service.validateReportPage('waybills', { ...waybillPage, items: [], total_count: 0 }).items.length, 0);
 console.log('PASS fixed report projections, bounded pagination and sensitive-field rejection');
 
 rpcHandler = async (name, args) => ({ data: name === 'get_operations_report'
@@ -84,11 +91,63 @@ assert.equal(waybillReport.items[0].waybill_number, 'INV-2026-000001');
 const waybillExport = await service.exportOperationsReport('waybills', {}, 'csv');
 assert.equal(waybillExport.items[0].waybill_id, 'waybill-1');
 assert.equal(waybillExport.items[0].waybill_number, 'INV-2026-000001');
-await assert.rejects(() => service.loadOperationsReport('trips', { raw: 'any' }, 1), /Invalid report filters/);
+assert.equal(waybillExport.summary.blocked_configuration, 0);
+assert.equal(calls.at(-1).args.p_filters.payout_status, undefined);
+const allowedDeliveryStatuses = ['pending', 'processing', 'sent', 'failed', 'blocked_missing_email', 'blocked_configuration', 'not_queued'];
+for (const status of allowedDeliveryStatuses) {
+  await service.loadOperationsReport('waybills', { delivery_status: status }, 1);
+  assert.deepEqual(calls.at(-1).args.p_filters, { delivery_status: status });
+}
+await service.loadOperationsReport('waybills', { pdf_status: 'ready' }, 2);
+assert.equal(calls.at(-1).args.p_page, 2, 'Pagination sends the selected page to the report RPC');
+const callsBeforeInvalidFilter = calls.length;
+await assert.rejects(() => service.loadOperationsReport('waybills', { payout_status: 'paid' }, 1), error => {
+  assert.equal(error.code, 'invalid_request');
+  assert.equal(error.message, 'The selected report filters are not supported.');
+  return true;
+});
+assert.equal(calls.length, callsBeforeInvalidFilter, 'Unsupported payout filters are rejected before the RPC');
+await assert.rejects(() => service.loadOperationsReport('trips', { raw: 'any' }, 1), error => error.code === 'invalid_request');
+await assert.rejects(() => service.exportOperationsReport('waybills', { payout_status: 'paid' }, 'csv'),
+  error => error.code === 'invalid_request');
+for (const deliveryStatus of ['not_applicable', 'unknown']) {
+  await assert.rejects(() => service.loadOperationsReport('waybills', { delivery_status: deliveryStatus }, 1),
+    error => error.code === 'invalid_request');
+}
+await assert.rejects(() => service.loadOperationsReport('waybills', { pdf_status: 'not_queued' }, 1),
+  error => error.code === 'invalid_request');
 rpcHandler = async () => ({ data: null, error: { code: 'P0001', details: 'EXPORT_LIMIT_EXCEEDED' } });
-await assert.rejects(() => service.exportOperationsReport('trips', {}, 'csv'), /1,000 rows/);
-rpcHandler = async () => ({ data: null, error: { code: '42501' } });
-await assert.rejects(() => service.loadOperationsReport('trips', {}, 1), /access denied/);
+await assert.rejects(() => service.exportOperationsReport('trips', {}, 'csv'), error => error.code === 'export_limit');
+rpcHandler = async () => ({ data: null, error: { code: '42501', message: 'sensitive database detail', details: 'private value' } });
+await assert.rejects(() => service.loadOperationsReport('trips', {}, 1), error => {
+  assert.equal(error.code, 'access_denied');
+  assert.equal(error.message, 'Your account cannot access Operations Reports.');
+  assert(!error.message.includes('sensitive database detail'));
+  return true;
+});
+rpcHandler = async () => ({ data: null, error: { code: 'XX000', message: 'internal schema details', details: 'private value' } });
+await assert.rejects(() => service.loadOperationsReport('waybills', {}, 1), error => {
+  assert.equal(error.code, 'rpc_failed');
+  assert.equal(error.message, 'The report request failed. Retry or contact Operations Support.');
+  assert(!error.message.includes('internal schema details'));
+  return true;
+});
+rpcHandler = async () => { throw new Error('private transport response'); };
+await assert.rejects(() => service.loadOperationsReport('waybills', {}, 1), error => {
+  assert.equal(error.code, 'rpc_failed');
+  assert(!error.message.includes('private transport response'));
+  return true;
+});
+rpcHandler = async () => ({ data: { ...waybillPage, summary: { ...waybillSummary, payout: 2 } }, error: null });
+await assert.rejects(() => service.loadOperationsReport('waybills', {}, 1), error => error.code === 'invalid_response');
+rpcHandler = async (_name, args) => ({ data: { export_id: 'export-2', report_kind: 'waybills', format: 'xlsx',
+  filters: args.p_filters, summary: waybillSummary, items: [waybillRow], row_count: 1, generated_at: timestamp }, error: null });
+const xlsxExport = await service.exportOperationsReport('waybills', {}, 'xlsx');
+assert.equal(xlsxExport.format, 'xlsx');
+const waybillXlsxBytes = writer.createXlsxBytes('waybills', xlsxExport.items);
+const waybillSheet = new TextDecoder().decode(waybillXlsxBytes);
+assert(waybillSheet.includes('Company Delivery') && !waybillSheet.includes('Payout Status'));
+assert(waybillSheet.includes('Legacy PDF Status'));
 console.log('PASS server-side RPC calls, safe authorization failures and export-limit handling');
 
 const malicious = { ...tripRow, driver_name: ' =HYPERLINK("https://bad.invalid")' };
@@ -123,14 +182,21 @@ assert(![...files.keys()].some(name => /vbaProject|externalLinks|hyperlinks/i.te
 assert(![...files.values()].some(value => /<f[ >]|TargetMode="External"|<hyperlinks\b/i.test(value)));
 console.log('PASS XLSX is a valid stored OpenXML workbook with literal cells and no formula or external-link parts');
 
-const render = state => renderToStaticMarkup(React.createElement(router.MemoryRouter, null,
-  React.createElement(view.OperationsReportsView, { kind: 'trips', onKindChange() {}, filters: { basis: 'opened' }, changeFilter() {},
+const render = (state, kind = 'trips') => renderToStaticMarkup(React.createElement(router.MemoryRouter, null,
+  React.createElement(view.OperationsReportsView, { kind, onKindChange() {}, filters: { basis: 'opened' }, changeFilter() {},
     state, page: 1, onPageChange() {}, onRetry() {}, exporting: false, exportError: '', onExport() {} })));
 assert.match(render({ status: 'loading' }), /Loading results/);
-assert.match(render({ status: 'error' }), /Unable to load report results/);
+assert.match(render({ status: 'error', message: 'Unable to load report results.' }), /Unable to load report results/);
+assert.match(render({ status: 'error', message: 'Your account cannot access Operations Reports.' }),
+  /Your account cannot access Operations Reports/);
 assert.match(render({ status: 'ready', data: { ...service.validateReportPage('trips', page), items: [], totalCount: 0 } }), /No report results match/);
 const ready = render({ status: 'ready', data: service.validateReportPage('trips', page) });
 assert(ready.includes('Export CSV') && ready.includes('Export Excel') && ready.includes('Tonnage'));
+const waybillUi = render({ status: 'ready', data: service.validateReportPage('waybills', waybillPage) }, 'waybills');
+assert(waybillUi.includes('Waybills &amp; Delivery') && waybillUi.includes('Company Delivery'));
+assert(!waybillUi.includes('Payout Status') && !waybillUi.includes('not_applicable'));
+for (const status of ['blocked_missing_email', 'blocked_configuration', 'not_queued']) assert(waybillUi.includes(status));
+assert(waybillUi.includes('Clear filters') && waybillUi.includes('Next'));
 const busy = renderToStaticMarkup(React.createElement(router.MemoryRouter, null,
   React.createElement(view.OperationsReportsView, { kind: 'trips', onKindChange() {}, filters: { basis: 'opened' }, changeFilter() {},
     state: { status: 'ready', data: service.validateReportPage('trips', page) }, page: 1, onPageChange() {}, onRetry() {},
