@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { ListResultState } from '../../../components/data/ListResultState';
 import { PaginationControls } from '../../../components/data/PaginationControls';
 import {
-  downloadWaybill, downloadWaybillCopy, loadDeliveryHistory, loadWaybillCopyManagementState,
+  downloadWaybillCopy, loadDeliveryHistory, loadWaybillCopyManagementState,
   loadWaybillDetail, resendWaybill, retryWaybillDelivery, saveWaybillCompanyBankDetails,
   type DeliveryAttempt, type DeliveryStatus,
   type Page, type SecurePdfStatus, type WaybillCopyManagementState, type WaybillDetail,
@@ -151,17 +151,17 @@ function DeliveryRecovery({ detail, audience, status, onDone, onError }: {
   </section>;
 }
 
-export function OperationsWaybillDetailView({ state, copyState, history, historyError, historyPage, onHistoryPageChange, onRetry, onDownload, onCopyDownload, onRefresh, onActionError }: {
+export function OperationsWaybillDetailView({ state, copyState, history, historyError, historyPage, onHistoryPageChange, onRetry, onCopyDownload, onRefresh, onActionError }: {
   state: State; copyState: CopyState; history: Page<DeliveryAttempt> | null; historyError: boolean; historyPage: number;
   onHistoryPageChange: (page: number) => void; onRetry: () => void;
-  onDownload: (detail: WaybillDetail) => void; onCopyDownload: (kind: 'driver' | 'company', detail: WaybillDetail) => void;
+  onCopyDownload: (kind: 'driver' | 'company', detail: WaybillDetail) => void;
   onRefresh: () => void; onActionError: (message: string) => void;
 }) {
   if (state.status === 'loading') return <ListResultState status="loading" />;
   if (state.status === 'error') return <ListResultState status="error" message="Unable to load Waybill detail." onRetry={onRetry} />;
   if (state.status === 'not-found') return <section className="card"><h1>Waybill not found</h1>
     <Link to="/operations/waybills">Back to Waybills</Link></section>;
-  const { waybill, document, delivery } = state.data;
+  const { waybill, delivery } = state.data;
   return <div className="operations-waybills-page">
     <header><Link to="/operations/waybills">← Back to Waybills</Link>
       <p className="eyebrow">Immutable Waybill</p><h1>{waybill.waybill_number}</h1>
@@ -179,14 +179,10 @@ export function OperationsWaybillDetailView({ state, copyState, history, history
       <DetailField label="Closed">{formatLagosDate(waybill.closed_at)}</DetailField>
       <DetailField label="Tonnage">{waybill.quantity_tonnes.toFixed(2)} t</DetailField>
     </dl></section>
-    <section className="card waybill-section"><h2>PDF</h2><p>Status: {document.status}</p>
-      {document.ready_at && <p>Ready: {formatLagosDate(document.ready_at)}</p>}
-      <button className="button secondary" type="button" disabled={document.status !== 'ready'}
-        onClick={() => onDownload(state.data)}>Download private PDF</button></section>
     <section className="card waybill-section" aria-labelledby="secure-waybill-copies-heading">
       <h2 id="secure-waybill-copies-heading">Secure PDF copies</h2>
       {copyState.status === 'loading' && <p role="status">Loading Driver and Company PDF statuses…</p>}
-      {copyState.status === 'error' && <p role="alert">Secure copy statuses are unavailable. The legacy PDF status above is unchanged.</p>}
+      {copyState.status === 'error' && <p role="alert">Secure PDF copy statuses are unavailable.</p>}
       {copyState.status === 'ready' && <div className="waybill-detail-grid">
         <div><h3>Driver PDF</h3>
           <p>Status: <strong>{secureCopyStatusLabel(copyState.data.driver_pdf_status)}</strong></p>
@@ -256,8 +252,6 @@ export function OperationsWaybillDetail() {
   return <>{message && <p role="alert">{message}</p>}
     <OperationsWaybillDetailView state={state} copyState={copyState} history={history} historyError={historyError} historyPage={historyPage}
       onHistoryPageChange={setHistoryPage} onRetry={refresh} onRefresh={refresh} onActionError={setMessage}
-      onDownload={detail => { setMessage(''); void downloadWaybill(detail)
-        .catch(() => setMessage('Unable to download private Waybill PDF.')); }}
       onCopyDownload={(kind, detail) => { setMessage(''); void downloadWaybillCopy(detail.waybill.id, detail.waybill.waybill_number, kind)
         .catch(() => setMessage(`Unable to download secure ${kind} PDF copy.`)); }} /></>;
 }

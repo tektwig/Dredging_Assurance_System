@@ -150,10 +150,6 @@ const originalRevoke = URL.revokeObjectURL;
 globalThis.document = { body: { append() {} }, createElement() { return { click() {}, remove() {} }; } };
 URL.createObjectURL = () => 'blob:mock'; URL.revokeObjectURL = () => {};
 try {
-  await service.downloadWaybill(parsedDetail);
-  assert.equal(storagePath, '2026/WB-2026-000001.pdf');
-  assert.equal(storageBucket, 'waybills');
-  storagePath = undefined;
   await service.downloadWaybillCopy('waybill-1', waybillNumber, 'driver');
   assert.equal(storageBucket, 'waybill-driver-copies');
   assert.equal(storagePath, '2026/WB-2026-000001.pdf');
@@ -167,12 +163,9 @@ try {
   await assert.rejects(() => service.downloadWaybillCopy('waybill-1', waybillNumber, 'company'), /Invalid/);
   assert.equal(storagePath, undefined);
   copyDownloadOverride = undefined;
-  await assert.rejects(() => service.downloadWaybill({ ...parsedDetail, document: {
-    ...parsedDetail.document, storage_path: '2026/WB-2026-999999.pdf',
-  } }), /Invalid/);
-  assert.equal(storagePath, undefined);
 } finally { globalThis.document = originalDocument; URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke; }
-console.log('PASS private PDF download validates the Waybill storage path before Storage access');
+assert.equal(service.downloadWaybill, undefined);
+console.log('PASS secure PDF downloads use copy-specific authorization and private buckets');
 
 const registerHtml = state => renderToStaticMarkup(React.createElement(router.MemoryRouter, null,
   React.createElement(register.OperationsWaybillsRegisterView, { state, filters: register.EMPTY_WAYBILL_FILTERS,
@@ -184,10 +177,12 @@ const registerReady = registerHtml({ status: 'ready', data: { items: [parsedRow]
 for (const text of ['Waybill #', 'Waybill PDF', 'Delivery Status', 'Parent company:', 'Driver:']) assert(registerReady.includes(text));
 assert(registerReady.includes('href="/operations/waybills/waybill-1"'));
 assert(!registerReady.match(/payout|payment|bank|account_number/i));
-const detailHtml = (state, copyState = { status: 'ready', data: secureStatus }) => renderToStaticMarkup(React.createElement(router.MemoryRouter, null,
-  React.createElement(detailModule.OperationsWaybillDetailView, { state, copyState,
-    history: { ...page([parsedAttempt]), pageSize: 25 }, historyError: false, historyPage: 1,
-    onHistoryPageChange() {}, onRetry() {}, onDownload() {}, onCopyDownload() {}, onRefresh() {}, onActionError() {} })));
+const detailProps = (state, copyState = { status: 'ready', data: secureStatus }, onCopyDownload = () => {}) => ({
+  state, copyState, history: { ...page([parsedAttempt]), pageSize: 25 }, historyError: false, historyPage: 1,
+  onHistoryPageChange() {}, onRetry() {}, onCopyDownload, onRefresh() {}, onActionError() {},
+});
+const detailHtml = (state, copyState, onCopyDownload) => renderToStaticMarkup(React.createElement(router.MemoryRouter, null,
+  React.createElement(detailModule.OperationsWaybillDetailView, detailProps(state, copyState, onCopyDownload))));
 const readyHtml = detailHtml({ status: 'ready', data: parsedDetail });
 for (const text of ['Correct the driver email', 'Add an email to the driver master record first.',
   'Company delivery is blocked until the parent company email recipient is configured.',
@@ -198,11 +193,20 @@ const acceptedHtml = detailHtml({ status: 'ready', data: { ...parsedDetail, deli
 assert(acceptedHtml.includes('The email provider accepted the message. This does not confirm mailbox delivery.'));
 assert(acceptedHtml.includes('Driver PDF'));
 assert(acceptedHtml.includes('Company PDF'));
+assert(!acceptedHtml.includes('<h2>PDF</h2>'));
+assert(!acceptedHtml.includes('Download private PDF'));
+assert(!acceptedHtml.includes('legacy PDF status above'));
 assert(acceptedHtml.includes('Bank Details Required'));
 assert(acceptedHtml.includes('Enter Bank Details'));
 assert(acceptedHtml.includes('Account Number'));
 assert(acceptedHtml.includes('Save bank details'));
-assert(!acceptedHtml.match(/payout|payment|bank_name|account_number|1234567890/i));
+assert(!acceptedHtml.match(/payout|payment|bank_name|account_number|storage_path|waybill-(driver|company)-copies|1234567890/i));
+const legacyReadyAt = '2024-01-02T03:04:05.000Z';
+const legacyOnlyPdfHtml = detailHtml({ status: 'ready', data: { ...parsedDetail,
+  document: { ...parsedDetail.document, status: 'legacy-pdf-status-sentinel', ready_at: legacyReadyAt } } },
+{ status: 'ready', data: { ...secureStatus, driver_pdf_ready_at: null, company_pdf_ready_at: null } });
+assert(!legacyOnlyPdfHtml.includes('legacy-pdf-status-sentinel'));
+assert(!legacyOnlyPdfHtml.includes(register.formatLagosDate(legacyReadyAt)));
 const registrationCapturedState = { ...copyStatus, company_pdf_status: 'pending',
   bank_verification_state: 'registration_captured', latest_bank_snapshot_version: 1,
   company_pdf_held_for_missing_bank_details: false };
@@ -217,5 +221,27 @@ const savedBankHtml = detailHtml({ status: 'ready', data: parsedDetail },
 assert(!savedBankHtml.includes('Enter Bank Details'));
 assert(!savedBankHtml.includes('Bank Details Required'));
 assert(savedBankHtml.includes('Status: <strong>Pending</strong>'));
-assert(detailHtml({ status: 'ready', data: parsedDetail }, { status: 'error' }).includes('Secure copy statuses are unavailable'));
+assert(detailHtml({ status: 'ready', data: parsedDetail }, { status: 'loading' }).includes('Loading Driver and Company PDF statuses'));
+assert(detailHtml({ status: 'ready', data: parsedDetail }, { status: 'error' }).includes('Secure PDF copy statuses are unavailable'));
+assert(!detailHtml({ status: 'ready', data: parsedDetail }, { status: 'error' }).includes('legacy'));
+const pendingCopyStatus = { ...secureStatus, driver_pdf_status: 'pending', company_pdf_status: 'processing' };
+const pendingButtonsTree = detailModule.OperationsWaybillDetailView(detailProps({ status: 'ready', data: parsedDetail },
+  { status: 'ready', data: pendingCopyStatus }));
+const findButtons = node => {
+  if (Array.isArray(node)) return node.flatMap(findButtons);
+  if (!React.isValidElement(node)) return [];
+  return [...(node.type === 'button' ? [node] : []), ...findButtons(node.props.children)];
+};
+const pendingCopyButtons = findButtons(pendingButtonsTree);
+assert.equal(pendingCopyButtons.length, 2);
+assert(pendingCopyButtons.every(button => button.props.disabled));
+const copyDownloadCalls = [];
+const readyCopyData = { ...secureStatus, company_pdf_status: 'ready', company_pdf_ready_at: timestamp };
+const readyButtonsTree = detailModule.OperationsWaybillDetailView(detailProps({ status: 'ready', data: parsedDetail },
+  { status: 'ready', data: readyCopyData }, (...args) => copyDownloadCalls.push(args)));
+const readyCopyButtons = findButtons(readyButtonsTree);
+assert.equal(readyCopyButtons.length, 2);
+assert(readyCopyButtons.every(button => !button.props.disabled));
+for (const button of readyCopyButtons) button.props.onClick();
+assert.deepEqual(copyDownloadCalls, [['driver', parsedDetail], ['company', parsedDetail]]);
 console.log('PASS Waybill detail shows separate secure PDF states without exposing bank values or copy paths');

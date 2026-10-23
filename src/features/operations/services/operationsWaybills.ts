@@ -314,21 +314,6 @@ export async function loadDeliveryHistory(waybillId: string, page: number): Prom
   return result.data === null ? null : parsePage(result.data, request.page, request.pageSize, parseAttempt);
 }
 
-export async function downloadWaybill(detail: WaybillDetail): Promise<void> {
-  if (detail.document.status !== 'ready' || !detail.document.storage_path) throw new Error('PDF not ready');
-  if (detail.document.storage_path !== waybillStoragePath(detail.waybill.waybill_number)) {
-    throw new Error('Invalid Waybill PDF path');
-  }
-  const result = await client().storage.from('waybills').download(detail.document.storage_path);
-  if (result.error || !result.data) throw new Error('Unable to download Waybill PDF');
-  const objectUrl = URL.createObjectURL(result.data);
-  try {
-    const anchor = document.createElement('a');
-    anchor.href = objectUrl; anchor.download = `${detail.waybill.waybill_number}.pdf`;
-    document.body.append(anchor); anchor.click(); anchor.remove();
-  } finally { URL.revokeObjectURL(objectUrl); }
-}
-
 export async function resendWaybill(waybillId: string, audience: 'driver' | 'client',
   requestId: string, reasonCode: string, duplicateRiskConfirmed: boolean): Promise<void> {
   const result = await client().rpc('resend_operations_waybill', {
