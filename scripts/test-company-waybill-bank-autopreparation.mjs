@@ -15,7 +15,7 @@ const concurrencyAssertions = readFileSync('supabase/tests/database/company_wayb
 const recoverySeed = readFileSync('supabase/tests/fixtures/company_waybill_bank_recovery/seed.sql', 'utf8');
 const concurrencyGate = readFileSync('supabase/tests/fixtures/company_waybill_bank_recovery/concurrency_gate.sql', 'utf8');
 const concurrencyGateCleanup = readFileSync('supabase/tests/fixtures/company_waybill_bank_recovery/concurrency_gate_cleanup.sql', 'utf8');
-const ciRunner = readFileSync('scripts/ci/run-company-waybill-bank-recovery.sh', 'utf8');
+const ciRunner = readFileSync('scripts/ci/run-company-waybill-bank-recovery.sh', 'utf8').replace(/\r\n/g, '\n');
 const ciWorkflow = readFileSync('.github/workflows/company-waybill-bank-recovery-sql.yml', 'utf8');
 
 assert.match(migration, /create function private\.snapshot_registration_bank_capture_for_invoice\(p_invoice_id uuid\)[\s\S]*?security definer set search_path = ''/);
@@ -43,9 +43,14 @@ assert.match(databaseTest, /registration snapshot preserves source values, actor
 assert.match(databaseTest, /one authorized save atomically verifies details and releases Company PDF processing/);
 assert.match(databaseTest, /same request replay is idempotent/);
 assert.match(databaseTest, /failed audit insert rolls back all bank save writes/);
-assert.match(databaseTest, /value->>'count'='2'[\s\S]*?WB-2099-999999998[\s\S]*?WB-2026-000043[\s\S]*?Action Required queue contains exactly the two seeded closed Waybills without registration captures/);
-assert.match(databaseTest, /queue\.value->>'count'='1'[\s\S]*?WB-2026-000043[\s\S]*?WB-2099-999999998[\s\S]*?resolved Waybill leaves only WB-2026-000043 in the Action Required queue/);
-assert.match(databaseTest, /resolved Waybill leaves only WB-2026-000043 in the Action Required queue'\);\s*reset role;\s*select pg_temp\.assert_true\(\(select count\(\*\)=1 from public\.trip_closure_invoice_bank_detail_events/);
+assert.match(databaseTest, /BANK-MISSING-TRIP-1[\s\S]*?transaction_timestamp\(\)-interval '2 hours'[\s\S]*?transaction_timestamp\(\)-interval '1 hour'[\s\S]*?WB-2099-999999998[\s\S]*?transaction_timestamp\(\)-interval '2 hours',transaction_timestamp\(\)-interval '1 hour'/);
+assert.match(databaseTest, /Company bank save leaves the independent Driver PDF pending/);
+assert.match(databaseTest, /authorized bank save releases the Company PDF to pending/);
+assert.match(databaseTest, /Operations Manager bank save remains represented as verified/);
+assert.match(databaseTest, /initial Company bank save exposes snapshot version one/);
+assert.match(databaseTest, /\(value->>'count'\)::integer>=1[\s\S]*?WB-2099-999999998[\s\S]*?Action Required queue includes the synthetic missing-bank Waybill created for this test/);
+assert.match(databaseTest, /queue\.value->>'count'\)::integer=\(before_row\.value->>'count'\)::integer-1[\s\S]*?WB-2099-999999998[\s\S]*?resolved synthetic Waybill leaves the Action Required queue and decreases its count by one/);
+assert.match(databaseTest, /resolved synthetic Waybill leaves the Action Required queue and decreases its count by one'\);\s*reset role;\s*select pg_temp\.assert_true\(\(select count\(\*\)=1 from public\.trip_closure_invoice_bank_detail_events/);
 assert.match(databaseTest, /set local role authenticated;\s*insert into bank_test_state\s*select 'same_request_replay'[\s\S]*?reset role;\s*select pg_temp\.assert_true\([\s\S]*?same request replay is idempotent/);
 assert.match(databaseTest, /bank saving does not enqueue notification delivery or send email as a side effect/);
 assert.match(databaseTest, /Company PDF snapshot receives only the invoice-specific saved bank version/);
@@ -149,7 +154,10 @@ const allVersionsIndex = ciRunner.indexOf('apply_migrations "$all_versions"');
 const migrationPreservationIndex = ciRunner.indexOf('PASS migration preserves historical records, Storage objects, and notification outbox.');
 const recoverySuiteIndex = ciRunner.indexOf('run_transactional_suite "bank snapshot automatic preparation and recovery assertions"');
 const concurrencySuiteIndex = ciRunner.indexOf('run_transactional_suite "concurrent bank-save assertions"');
-assert.ok(v4CheckpointIndex < secureSuiteIndex && secureSuiteIndex < fieldSuiteIndex && fieldSuiteIndex < allVersionsIndex && allVersionsIndex < migrationPreservationIndex && migrationPreservationIndex < v4SuiteIndex && v4SuiteIndex < recoverySuiteIndex && recoverySuiteIndex < concurrencySuiteIndex, 'V4 registration assertions requiring the recovery contract must run after all migrations and preservation checks');
+assert.ok(v4CheckpointIndex < secureSuiteIndex && secureSuiteIndex < fieldSuiteIndex && fieldSuiteIndex < allVersionsIndex && allVersionsIndex < migrationPreservationIndex && migrationPreservationIndex < recoverySuiteIndex && recoverySuiteIndex < concurrencySuiteIndex, 'payment-free, hybrid, preservation, and recovery suites retain their migration checkpoints');
+const registrationEligibilityCheckpoint = ciRunner.indexOf('apply_migrations "$all_versions,20261021000000,20261021133526,20261022085737,20261024173258"');
+const syntheticCanarySuiteIndex = ciRunner.indexOf('run_transactional_suite "synthetic email canary assertions after registration-capture eligibility"');
+assert.ok(registrationEligibilityCheckpoint < v4SuiteIndex && v4SuiteIndex < syntheticCanarySuiteIndex, 'V4 registration eligibility suite must run after migration 30 and before canary isolation assertions');
 assert.match(ciRunner, /for migration in \$predecessor_migrations; do copy_migration "\$repo_root\/supabase\/migrations" "\$migration"; done/);
 assert.match(ciRunner, /for migration in \$secure_migrations; do copy_migration "\$repo_root\/supabase\/migrations" "\$migration"; done/);
 assert.match(ciRunner, /copy_migration "\$repo_root\/supabase\/migrations" 20261016000050_loading_receipt_v3_operation\.sql/);
@@ -186,7 +194,7 @@ for (const input of expectedSqlInputs.filter(path => path.startsWith('$repo_root
   assert.ok(existsSync(input.replace('$repo_root/', '')), `repository SQL input must exist: ${input}`);
 }
 assert.ok(ciRunner.indexOf('\nvalidate_migration_sources\n') < ciRunner.indexOf('supabase start --yes --exclude'));
-assert.match(ciRunner, /sha256sum --check supabase\/tests\/fixtures\/trakflit-ci\/MIGRATION_SHA256SUMS/);
+assert.ok(ciRunner.includes("awk '{ sub(/\\r$/, \"\"); print }' supabase/tests/fixtures/trakflit-ci/MIGRATION_SHA256SUMS | sha256sum --check"), 'runner must normalize manifest CRLF before strict checksum verification');
 assert.ok(ciRunner.indexOf('sha256sum --check') < ciRunner.indexOf('supabase start --yes --exclude'));
 assert.match(ciRunner, /validate_migration_group "\$fixture_root\/canonical_baseline" "\$canonical_migrations"/);
 assert.match(ciRunner, /awk '\{ sub\(\/\\r\$\/, ""\); print \}'/);

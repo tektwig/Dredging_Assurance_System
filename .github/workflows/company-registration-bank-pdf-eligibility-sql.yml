@@ -1,0 +1,165 @@
+name: Company registration bank PDF eligibility SQL
+
+on:
+  push:
+    branches:
+      - fix/company-registration-bank-pdf-eligibility
+    paths:
+      - .github/workflows/company-registration-bank-pdf-eligibility-sql.yml
+      - scripts/ci/run-company-waybill-bank-recovery.sh
+      - scripts/test-company-waybill-bank-autopreparation.mjs
+      - scripts/test-company-registration-company-pdf-eligibility.mjs
+      - supabase/migrations/**
+      - supabase/tests/database/loading_registration_bank_capture.sql
+      - supabase/tests/database/company_waybill_verified_bank_eligibility.sql
+      - supabase/tests/database/secure_email_delivery_cutover.sql
+      - supabase/tests/database/secure_synthetic_email_canary.sql
+      - supabase/tests/fixtures/secure_email_delivery_cutover/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: company-registration-bank-pdf-sql-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sql-integration:
+    name: Disposable PostgreSQL 17 integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "true"
+      RUN_SECURE_EMAIL_CUTOVER: "true"
+    steps:
+      - name: Initialize private test log paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_dir="$RUNNER_TEMP/company-registration-bank-pdf-sql-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -m 700 -p "$report_dir"
+          printf 'SQL_REPORT_DIR=%s\n' "$report_dir" >> "$GITHUB_ENV"
+          printf 'SQL_RAW_LOG=%s/runner.raw.log\n' "$report_dir" >> "$GITHUB_ENV"
+          printf 'SQL_SAFE_LOG=%s/test.log\n' "$report_dir" >> "$GITHUB_ENV"
+          printf 'SQL_EXIT_FILE=%s/exit-codes.txt\n' "$report_dir" >> "$GITHUB_ENV"
+          : > "$report_dir/runner.raw.log"
+          printf 'preflight=not-run\nintegration=not-run\n' > "$report_dir/exit-codes.txt"
+          printf 'Workflow ref: %s\nCommit: %s\nExpected migration count: 30\n' "$GITHUB_REF" "$GITHUB_SHA" >> "$report_dir/runner.raw.log"
+
+      - name: Check out feature source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Check out checksum-pinned SQL baseline and fixtures
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: 16bf4ec5286f8ed5efc225da5456b95fbb7ba4dd
+          path: .ci-sql-support
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install pinned Supabase CLI
+        uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+        with:
+          version: 2.120.0
+
+      - name: Validate branch, pinned sources, and static contracts
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          (
+            set -euo pipefail
+            test "$GITHUB_REF" = "refs/heads/fix/company-registration-bank-pdf-eligibility"
+            test "$RUN_SECURE_EMAIL_CUTOVER" = "true"
+            test "$(supabase --version)" = "2.120.0"
+            docker info --format '{{.ServerVersion}}' >/dev/null
+            test "$(git -C .ci-sql-support rev-parse HEAD)" = "16bf4ec5286f8ed5efc225da5456b95fbb7ba4dd"
+            (
+              cd .ci-sql-support
+              awk '{ sub(/\r$/, ""); print }' supabase/tests/fixtures/trakflit-ci/MIGRATION_SHA256SUMS | sha256sum --check >/dev/null
+            )
+            node --version
+            node scripts/test-company-waybill-bank-autopreparation.mjs
+            node scripts/test-company-registration-company-pdf-eligibility.mjs
+            bash -n scripts/ci/run-company-waybill-bank-recovery.sh
+          ) >> "$SQL_RAW_LOG" 2>&1
+          preflight_status=$?
+          printf 'preflight_exit_code=%s\n' "$preflight_status" >> "$SQL_RAW_LOG"
+          printf 'preflight=%s\n' "$preflight_status" > "$SQL_EXIT_FILE"
+          if [[ "$preflight_status" -ne 0 ]]; then
+            exit "$preflight_status"
+          fi
+
+      - name: Run complete disposable 30-migration PostgreSQL 17 suite
+        shell: bash
+        env:
+          RUN_SECURE_EMAIL_CUTOVER: "true"
+        run: |
+          set -uo pipefail
+          set +e
+          bash scripts/ci/run-company-waybill-bank-recovery.sh >> "$SQL_RAW_LOG" 2>&1
+          runner_status=$?
+          printf 'integration_runner_exit_code=%s\n' "$runner_status" >> "$SQL_RAW_LOG"
+          printf 'integration=%s\n' "$runner_status" >> "$SQL_EXIT_FILE"
+          if [[ "$runner_status" -ne 0 ]]; then
+            exit "$runner_status"
+          fi
+
+      - name: Sanitize and summarize test output
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "$SQL_RAW_LOG" ]]; then
+            perl -pe '
+              s/\bBearer\s+\S+/Bearer [REDACTED]/ig;
+              s/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/[REDACTED_JWT]/g;
+              s/\bsb_(?:publishable|secret)_[A-Za-z0-9_-]+/[REDACTED_SUPABASE_KEY]/g;
+              s/((?:password|secret|token|api[_ -]?key|anon[_ -]?key|service[_ -]?role[_ -]?key)\s*[:=]\s*)[^\s,;]+/$1[REDACTED]/ig;
+              s{(postgres(?:ql)?://)[^[:space:]]+}{$1[REDACTED_CONNECTION_STRING]}ig;
+              s/\b\d{10}\b/[REDACTED_ACCOUNT_NUMBER]/g;
+              s/[[:alnum:]._%+-]+\@[[:alnum:].-]+\.[[:alpha:]]{2,}/[REDACTED_EMAIL]/g;
+              s/CI Concurrent Bank/[REDACTED_BANK_NAME]/ig;
+              s/CI Synthetic Bank/[REDACTED_BANK_NAME]/ig;
+              s/CI Synthetic Account/[REDACTED_ACCOUNT_NAME]/ig;
+              s/Synthetic recovery driver 43/[REDACTED_ACCOUNT_NAME]/ig;
+            ' "$SQL_RAW_LOG" > "$SQL_SAFE_LOG"
+          else
+            printf 'No runner output was created.\n' > "$SQL_SAFE_LOG"
+          fi
+          if [[ -f "$SQL_EXIT_FILE" ]]; then
+            preflight_status=$(sed -n 's/^preflight=//p' "$SQL_EXIT_FILE" | tail -n 1)
+            runner_status=$(sed -n 's/^integration=//p' "$SQL_EXIT_FILE" | tail -n 1)
+          else
+            preflight_status=unknown
+            runner_status=not-run
+          fi
+          assertion_total=$(grep -Eo 'assertions(_passed_before_failure)?=[0-9]+' "$SQL_SAFE_LOG" | awk -F= '{ total += $2 } END { print total + 0 }' || true)
+          failed_assertions=$(grep -Eic 'assertion failed:' "$SQL_SAFE_LOG" || true)
+          failed_suites=$(grep -c '^FAIL SQL suite:' "$SQL_SAFE_LOG" || true)
+          migration_count=$(grep -Eo 'PASS migration ledger \([0-9]+ versions\)' "$SQL_SAFE_LOG" | sed -E 's/.*\(([0-9]+) versions\).*/\1/' | sort -n | tail -n 1 || true)
+          migration_count=${migration_count:-0}
+          {
+            printf 'Preflight exit code: %s\n' "$preflight_status"
+            printf 'Integration runner exit code: %s\n' "$runner_status"
+            printf 'Highest verified migration ledger count: %s (target: 30)\n' "$migration_count"
+            printf 'SQL assertions passed or passed before first suite failure: %s\n' "$assertion_total"
+            printf 'Explicit assertion-failure diagnostics: %s\n' "$failed_assertions"
+            printf 'Failed SQL suites: %s\n' "$failed_suites"
+          } > "$SQL_REPORT_DIR/summary.txt"
+          cat "$SQL_REPORT_DIR/summary.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized SQL test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: company-registration-bank-pdf-sql-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/company-registration-bank-pdf-sql-${{ github.run_id }}-${{ github.run_attempt }}/test.log
+            ${{ runner.temp }}/company-registration-bank-pdf-sql-${{ github.run_id }}-${{ github.run_attempt }}/exit-codes.txt
+            ${{ runner.temp }}/company-registration-bank-pdf-sql-${{ github.run_id }}-${{ github.run_attempt }}/summary.txt
+          if-no-files-found: error
+          retention-days: 14

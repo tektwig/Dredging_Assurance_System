@@ -176,6 +176,10 @@ select pg_temp.assert_code(public.register_loading_participant_v4(
   'd3000000-0000-0000-0000-000000000002','BANKBAD2',null,null,'Invalid Bank Driver Two','08020000002',null,
   ' ','1234567890','Invalid Bank Driver Two'
 ),'INVALID_BANK_NAME');
+select pg_temp.assert_code(public.register_loading_participant_v4(
+  'd3000000-0000-0000-0000-000000000011','BANKBAD3',null,null,'Invalid Bank Driver Three','08020000013',null,
+  'Test Bank','1234567898',' '
+),'INVALID_ACCOUNT_NAME');
 select pg_temp.assert_true(pg_temp.registration_side_effect_counts()=
   (select value from bank_test_state where key='before_invalid'),
   'invalid required bank data creates no driver, truck, receipt or audit event');
@@ -384,8 +388,8 @@ insert into public.trips(
   'd5000000-0000-0000-0000-000000000002','BANK-MISSING-TRIP-1',
   'd3000000-0000-0000-0000-000000000012','d3000000-0000-0000-0000-000000000011',
   'd4000000-0000-0000-0000-000000000002','d1000000-0000-0000-0000-000000000001',
-  'd1000000-0000-0000-0000-000000000002','closed',9,statement_timestamp()-interval '2 hours',
-  'd0000000-0000-0000-0000-000000000002',statement_timestamp()-interval '1 hour',
+  'd1000000-0000-0000-0000-000000000002','closed',9,transaction_timestamp()-interval '2 hours',
+  'd0000000-0000-0000-0000-000000000002',transaction_timestamp()-interval '1 hour',
   'd0000000-0000-0000-0000-000000000003','BANKMISS001','Registered tipper truck',30,
   'Not provided','08020000011',null,'Synthetic Missing Bank Driver',
   current_setting('test.loading_assignment')::uuid
@@ -406,8 +410,8 @@ insert into public.trip_closure_invoices(
   'd1000000-0000-0000-0000-000000000002','Bank Capture Offloading Site',
   'd0000000-0000-0000-0000-000000000002','Synthetic Loading Officer',
   'd0000000-0000-0000-0000-000000000003','Synthetic Operations Manager',
-  9,statement_timestamp()-interval '2 hours',statement_timestamp()-interval '1 hour',
-  statement_timestamp()-interval '1 hour'
+  9,transaction_timestamp()-interval '2 hours',transaction_timestamp()-interval '1 hour',
+  transaction_timestamp()-interval '1 hour'
 );
 
 select set_config('request.jwt.claim.sub','d0000000-0000-0000-0000-000000000002',true);
@@ -467,6 +471,35 @@ select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoice_b
     and event.event_type='registration_capture_snapshotted'
     and event.actor_id='d0000000-0000-0000-0000-000000000002'),
   'automatic snapshot creates one auditable event attributed to the registration actor');
+select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id='d6000000-0000-0000-0000-000000000001'
+    and copy.copy_kind='company' and copy.copy_version=1 and copy.status='pending'
+    and copy.notification_eligible
+    and private.waybill_company_copy_verification_eligible(
+      copy.invoice_id,copy.trip_id,copy.id,copy.bank_snapshot_id)
+    and not private.waybill_company_copy_email_eligible(
+      copy.invoice_id,copy.trip_id,copy.id)),
+  'valid V4 registration capture qualifies the pending Company PDF without OPM verification while email remains gated until the PDF is ready');
+select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id='d6000000-0000-0000-0000-000000000002'
+    and copy.copy_kind='company' and copy.bank_snapshot_id is null
+    and not private.waybill_company_copy_verification_eligible(
+      copy.invoice_id,copy.trip_id,copy.id,copy.bank_snapshot_id)),
+  'missing registration bank capture remains ineligible for Company PDF processing');
+select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id='d6000000-0000-0000-0000-000000000001'
+    and copy.copy_kind='company'
+    and not private.waybill_company_copy_verification_eligible(
+      copy.invoice_id,'d5000000-0000-0000-0000-000000000002',copy.id,copy.bank_snapshot_id)),
+  'Company PDF eligibility rejects an invoice and trip association mismatch');
+select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id='d6000000-0000-0000-0000-000000000002'
+    and copy.copy_kind='company'
+    and not private.waybill_company_copy_verification_eligible(
+      copy.invoice_id,copy.trip_id,copy.id,(
+        select snapshot.id from public.trip_closure_invoice_bank_snapshots snapshot
+        where snapshot.invoice_id='d6000000-0000-0000-0000-000000000001'))),
+  'Company PDF eligibility rejects a snapshot belonging to another invoice');
 do $$
 declare
   v_capture private.loading_registration_bank_captures%rowtype;
@@ -528,10 +561,10 @@ select pg_temp.expect_sqlstate($q$select * from public.save_waybill_company_bank
 select set_config('request.jwt.claim.sub','d0000000-0000-0000-0000-000000000003',true);
 insert into bank_test_state
 select 'missing_queue_before',public.get_operations_missing_bank_waybills();
-select pg_temp.assert_true((select value->>'count'='2'
-  and value->'items' @> '[{"invoice_number":"WB-2099-999999998"},{"invoice_number":"WB-2026-000043"}]'::jsonb
+select pg_temp.assert_true((select (value->>'count')::integer>=1
+  and value->'items' @> '[{"invoice_number":"WB-2099-999999998"}]'::jsonb
   from bank_test_state where key='missing_queue_before'),
-  'Action Required queue contains exactly the two seeded closed Waybills without registration captures');
+  'Action Required queue includes the synthetic missing-bank Waybill created for this test');
 insert into bank_test_state
 select 'notification_count_before',jsonb_build_object(
   'count',pg_temp.registration_side_effect_counts()->>'notification_outbox');
@@ -578,16 +611,26 @@ select pg_temp.assert_true((select value->>'snapshot_version'='1'
   and value->>'company_pdf_status'='pending' and value->>'unchanged'='false'
   from bank_test_state where key='bank_save'),
   'one authorized save atomically verifies details and releases Company PDF processing');
-select pg_temp.assert_true((select count(*)=1 from public.get_operations_waybill_copy_management_state(
-  'd6000000-0000-0000-0000-000000000002') state
-  where state.driver_pdf_status='pending' and state.company_pdf_status='pending'
-    and state.bank_verification_state='verified' and state.latest_bank_snapshot_version=1),
-  'bank save leaves Driver PDF independent and exposes Company processing state');
-select pg_temp.assert_true((select queue.value->>'count'='1'
-  and queue.value->'items' @> '[{"invoice_number":"WB-2026-000043"}]'::jsonb
-  and not (queue.value->'items' @> '[{"invoice_number":"WB-2099-999999998"}]'::jsonb)
-  from (select public.get_operations_missing_bank_waybills() as value) queue),
-  'resolved Waybill leaves only WB-2026-000043 in the Action Required queue');
+reset role;
+select pg_temp.assert_true((select count(*)=1 and bool_and(state.driver_pdf_status='pending')
+  from public.get_operations_waybill_copy_management_state('d6000000-0000-0000-0000-000000000002') state),
+  'Company bank save leaves the independent Driver PDF pending');
+select pg_temp.assert_true((select count(*)=1 and bool_and(state.company_pdf_status='pending')
+  from public.get_operations_waybill_copy_management_state('d6000000-0000-0000-0000-000000000002') state),
+  'authorized bank save releases the Company PDF to pending');
+select pg_temp.assert_true((select count(*)=1 and bool_and(state.bank_verification_state='verified')
+  from public.get_operations_waybill_copy_management_state('d6000000-0000-0000-0000-000000000002') state),
+  'Operations Manager bank save remains represented as verified');
+select pg_temp.assert_true((select count(*)=1 and bool_and(state.latest_bank_snapshot_version=1)
+  from public.get_operations_waybill_copy_management_state('d6000000-0000-0000-0000-000000000002') state),
+  'initial Company bank save exposes snapshot version one');
+select pg_temp.assert_true((
+  select (queue.value->>'count')::integer=(before_row.value->>'count')::integer-1
+    and not (queue.value->'items' @> '[{"invoice_number":"WB-2099-999999998"}]'::jsonb)
+  from bank_test_state before_row
+  cross join lateral (select public.get_operations_missing_bank_waybills() as value) queue
+  where before_row.key='missing_queue_before'
+),'resolved synthetic Waybill leaves the Action Required queue and decreases its count by one');
 reset role;
 select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoice_bank_detail_events event
   join public.trip_closure_invoice_bank_submissions submission on submission.id=event.submission_id
@@ -702,5 +745,52 @@ select pg_temp.assert_true((select count(*)=2 and min(version)=1 and max(version
   and (select status='ready' from public.trip_closure_invoice_pdf_copies
     where invoice_id='d6000000-0000-0000-0000-000000000002' and copy_kind='company' and copy_version=1),
   'correction preserves prior snapshot and creates only a new Company PDF version');
+
+select pg_temp.assert_true(
+  position('waybill_company_copy_verification_eligible' in pg_catalog.pg_get_functiondef(
+    'private.claim_waybill_pdf_copy_jobs(text,integer,uuid)'::regprocedure))>0
+  and position('WB-9999-999999' in pg_catalog.pg_get_functiondef(
+    'private.claim_waybill_pdf_copy_jobs(text,integer,uuid)'::regprocedure))>0
+  and to_regprocedure('private.waybill_synthetic_canary_company_copy_allowed(uuid,uuid,integer,uuid)') is not null,
+  'regular Company PDF claims remain verification-gated and exclude the separately scoped synthetic canary');
+select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoices invoice
+  join public.trip_closure_invoice_pdf_copies copy on copy.invoice_id=invoice.id
+    and copy.trip_id=invoice.trip_id and copy.copy_kind='company'
+  where invoice.id='d6000000-0000-0000-0000-000000000001'
+    and invoice.invoice_number='WB-2099-999999999' and copy.status='pending'
+    and private.waybill_company_copy_verification_eligible(
+      invoice.id,invoice.trip_id,copy.id,copy.bank_snapshot_id)),
+  'invoice-scoped claim test targets exactly one eligible pending synthetic registration Waybill');
+select set_config('test.company_pdf_registration_invoice_id','d6000000-0000-0000-0000-000000000001',true);
+set local role service_role;
+do $$
+declare v_count integer;
+begin
+  select count(*) into v_count from public.claim_company_waybill_pdf_jobs(
+    1,current_setting('test.company_pdf_registration_invoice_id')::uuid);
+  if v_count<>1 then raise exception 'Registration-captured Company PDF claim expected one job, got %',v_count; end if;
+  raise notice 'ASSERTION PASS: protected Company PDF claim accepts a valid registration-captured snapshot';
+end;
+$$;
+reset role;
+select pg_temp.assert_true((select count(*)=1 from public.trip_closure_invoice_pdf_copies copy
+  where copy.invoice_id='d6000000-0000-0000-0000-000000000002'
+    and copy.copy_kind='driver' and copy.status='pending')
+  and not exists (select 1 from private.loading_registration_bank_captures capture
+    join public.trip_closure_invoices invoice on invoice.driver_id=capture.driver_id
+    where invoice.id='d6000000-0000-0000-0000-000000000002'),
+  'Driver claim control is pending and has no registration bank capture');
+select set_config('test.company_pdf_registration_invoice_id','d6000000-0000-0000-0000-000000000002',true);
+set local role service_role;
+do $$
+declare v_count integer;
+begin
+  select count(*) into v_count from public.claim_driver_waybill_pdf_jobs(
+    1,current_setting('test.company_pdf_registration_invoice_id')::uuid);
+  if v_count<>1 then raise exception 'Independent Driver PDF claim expected one job, got %',v_count; end if;
+  raise notice 'ASSERTION PASS: Driver PDF claim remains independent of registration-capture Company eligibility';
+end;
+$$;
+reset role;
 
 rollback;
