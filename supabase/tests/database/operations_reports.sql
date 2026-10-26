@@ -131,9 +131,6 @@ insert into public.trip_closure_invoice_pdf_copies(
 values ('f7370000-0000-0000-0000-000000000001','f7360000-0000-0000-0000-000000000001',
   'INV-2026-999991','company',2,'blocked_bank_details_unverified','waybill-company-copies',
   private.secure_waybill_copy_storage_path('INV-2026-999991','company',2));
-insert into public.trip_payments(trip_id,truck_id,driver_id,driver_name,driver_phone,status)
-values ('f7360000-0000-0000-0000-000000000001','f7340000-0000-0000-0000-000000000001',
-  'f7330000-0000-0000-0000-000000000002','Actual Trip Driver','08017000002','payment_details_required');
 insert into public.notification_outbox(trip_id,event_type,audience,recipients,payload,status,delivery_sequence)
 values ('f7360000-0000-0000-0000-000000000001','waybill_ready','driver',array['actual@example.invalid'],
   jsonb_build_object('invoice_id','f7370000-0000-0000-0000-000000000001','invoice_number','INV-2026-999991'),
