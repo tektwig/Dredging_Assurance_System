@@ -132,7 +132,7 @@ values ('f7370000-0000-0000-0000-000000000001','f7360000-0000-0000-0000-00000000
   'INV-2026-999991','company',2,'blocked_bank_details_unverified','waybill-company-copies',
   private.secure_waybill_copy_storage_path('INV-2026-999991','company',2));
 set local role authenticated;
-select set_config('request.jwt.claim.sub','f7310000-0000-0000-0000-000000000002',true);
+select set_config('request.jwt.claim.sub','f7310000-0000-0000-0000-000000000001',true);
 select set_config('test.exception_id',public.raise_trip_exception('dispute','EXCEPTION-FREE-TEXT-SECRET',
   'f7340000-0000-0000-0000-000000000002','f7360000-0000-0000-0000-000000000002',null,true)::text,true);
 reset role;
