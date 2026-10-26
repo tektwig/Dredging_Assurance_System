@@ -87,25 +87,35 @@ alter table public.trips enable trigger user;
 
 insert into public.trip_closure_invoices(id,invoice_number,trip_id,trip_number,truck_id,truck_registration,
   driver_id,driver_name,driver_email,loading_site_id,loading_site_name,offloading_site_id,offloading_site_name,
-  quantity_tonnes,opened_at,closed_at,issued_at,account_name,account_number,bank_name)
+  quantity_tonnes,opened_at,closed_at,issued_at)
 values ('f7370000-0000-0000-0000-000000000001','INV-2026-999991','f7360000-0000-0000-0000-000000000001',
   'RPT-TRIP-CLOSED','f7340000-0000-0000-0000-000000000001','RPT-001','f7330000-0000-0000-0000-000000000002',
   'Actual Trip Driver','actual@example.invalid','f7320000-0000-0000-0000-000000000001','Reports Loading',
   'f7320000-0000-0000-0000-000000000002','Reports Offloading',12.50,
   timestamp with time zone '1999-12-31 22:59:00+00',timestamp with time zone '1999-12-31 23:00:00+00',
-  timestamp with time zone '2000-01-01 00:30:00+00','Sensitive Account','1111111111','Sensitive Bank');
+  timestamp with time zone '2000-01-01 00:30:00+00');
+insert into public.trip_closure_invoice_bank_submissions(
+  id,invoice_id,trip_id,bank_name,account_name,account_number,submitted_by,submitted_at)
+values ('f7390000-0000-0000-0000-000000000001','f7370000-0000-0000-0000-000000000001',
+  'f7360000-0000-0000-0000-000000000001','Sensitive Bank','Sensitive Account','1111111111',
+  'f7310000-0000-0000-0000-000000000001',timestamp with time zone '2000-01-01 00:30:00+00');
+insert into public.trip_closure_invoice_bank_detail_events(
+  submission_id,invoice_id,trip_id,event_type,actor_id,occurred_at)
+values ('f7390000-0000-0000-0000-000000000001','f7370000-0000-0000-0000-000000000001',
+  'f7360000-0000-0000-0000-000000000001','submitted','f7310000-0000-0000-0000-000000000001',
+  timestamp with time zone '2000-01-01 00:30:00+00');
 update public.trip_closure_invoice_documents set status='ready',ready_at=clock_timestamp()
 where invoice_id='f7370000-0000-0000-0000-000000000001';
 alter table public.trip_closure_invoices disable trigger queue_secure_waybill_pdf_copies;
 insert into public.trip_closure_invoices(id,invoice_number,trip_id,trip_number,truck_id,truck_registration,
   driver_id,driver_name,driver_email,loading_site_id,loading_site_name,offloading_site_id,offloading_site_name,
-  quantity_tonnes,opened_at,closed_at,issued_at,account_name,account_number,bank_name)
+  quantity_tonnes,opened_at,closed_at,issued_at)
 values ('f7370000-0000-0000-0000-000000000002','INV-2026-999992','f7360000-0000-0000-0000-000000000004',
   'RPT-TRIP-NO-SECURE-COPY','f7340000-0000-0000-0000-000000000002','RPT-002','f7330000-0000-0000-0000-000000000002',
   'Actual Trip Driver','actual@example.invalid','f7320000-0000-0000-0000-000000000001','Reports Loading',
   'f7320000-0000-0000-0000-000000000002','Reports Offloading',14.25,
   timestamp with time zone '2000-01-02 09:00+00',timestamp with time zone '2000-01-02 10:00+00',
-  timestamp with time zone '2000-01-02 10:30+00','Synthetic Account','2222222222','Synthetic Bank');
+  timestamp with time zone '2000-01-02 10:30+00');
 alter table public.trip_closure_invoices enable trigger queue_secure_waybill_pdf_copies;
 select pg_temp.report_assert((select tgenabled='O' from pg_trigger
   where tgrelid='public.trip_closure_invoices'::regclass and tgname='queue_secure_waybill_pdf_copies'),
@@ -244,6 +254,8 @@ select pg_temp.report_error($q$select public.get_operations_report('waybills',
 
 select pg_temp.report_assert(position('Sensitive Account' in public.get_operations_report('waybills',
   '{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)::text)=0
+  and position('Sensitive Bank' in public.get_operations_report('waybills',
+  '{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)::text)=0
   and position('1111111111' in public.get_operations_report('waybills',
   '{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)::text)=0
   and position('actual@example.invalid' in public.get_operations_report('waybills',
@@ -261,6 +273,9 @@ select pg_temp.report_assert((select (value->>'row_count')::integer=1 and value-
   and value->'items'->0->>'company_pdf_status'='blocked_bank_details_unverified'
   and value->'items'->0->>'driver_delivery_status'='sent'
   and value->'items'->0->>'company_delivery_status'='sent'
+  and position('Sensitive Account' in value::text)=0
+  and position('Sensitive Bank' in value::text)=0
+  and position('1111111111' in value::text)=0
   and not (value->'items'->0 ? 'pdf_status')
   and not (value->'items'->0 ? 'payout_status') from report_export,
   'XLSX export uses the secure-copy and audience-specific report projection');
