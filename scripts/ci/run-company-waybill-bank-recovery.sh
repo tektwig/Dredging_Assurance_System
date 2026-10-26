@@ -189,7 +189,6 @@ validate_migration_sources() {
     [[ -f "$repo_root/supabase/tests/database/company_waybill_verified_bank_eligibility.sql" ]] || fail "Verified-bank eligibility SQL suite is missing."
     if [[ "$secure_waybill_reports" == true ]]; then
       validate_migration_group "$repo_root/supabase/migrations" "20261026120000_operations_secure_waybill_report_statuses.sql"
-      validated_source_count=$((validated_source_count + 1))
       [[ -f "$repo_root/supabase/tests/database/operations_reports.sql" ]] || fail "Operations Reports SQL suite is missing."
       [[ "$validated_source_count" == 31 ]] || fail "Expected 31 migration sources through secure Waybill report statuses, validated $validated_source_count."
     else
