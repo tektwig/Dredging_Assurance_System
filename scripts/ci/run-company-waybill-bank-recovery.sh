@@ -6,6 +6,8 @@ repo_root="$GITHUB_WORKSPACE"
 runner_temp="$RUNNER_TEMP"
 secure_email_cutover="${RUN_SECURE_EMAIL_CUTOVER:-false}"
 secure_waybill_reports="${RUN_SECURE_WAYBILL_REPORTS:-false}"
+report_migration_offset=0
+report_migration_version=""
 project_prefix="cwbr"
 expected_branch="refs/heads/feature/company-waybill-bank-recovery"
 if [[ "$secure_email_cutover" == true ]]; then
@@ -25,8 +27,12 @@ if [[ "$secure_waybill_reports" != true && "$secure_waybill_reports" != false ]]
 fi
 if [[ "$secure_waybill_reports" == true \
   && ("$secure_email_cutover" != true || "$GITHUB_REF" != "refs/heads/fix/waybill-secure-report-statuses-ci") ]]; then
-  printf 'ERROR: Secure Waybill report integration is restricted to its isolated feature branch and 30-migration prerequisite suite.\n' >&2
+  printf 'ERROR: Secure Waybill report integration is restricted to its isolated feature branch and 31-migration prerequisite suite.\n' >&2
   exit 1
+fi
+if [[ "$secure_waybill_reports" == true ]]; then
+  report_migration_offset=1
+  report_migration_version=",20260927001000"
 fi
 project_id="$project_prefix-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 project_root="$runner_temp/$project_id"
@@ -127,7 +133,7 @@ v4_migrations="20261016000050_loading_receipt_v3_operation.sql
 20261016000100_loading_registration_bank_capture.sql"
 later_migrations="20261018124936_restore_operations_trip_detail_payout.sql
 20261019151115_company_waybill_bank_snapshot_autopreparation.sql"
-baseline_versions="20260921000100,20260921000200,20260924000100,20260924000200,20260925000200,20260925000400,20260927000100,20260927000150,20260927001150,20261002000100,20261002000200,20261002000300,20261002000400,20261005000600"
+baseline_versions="20260921000100,20260921000200,20260924000100,20260924000200,20260925000200,20260925000400,20260927000100,20260927000150${report_migration_version},20260927001150,20261002000100,20261002000200,20261002000300,20261002000400,20261005000600"
 predecessor_versions="$baseline_versions,20261009000000,20261010000100,20261011000050,20261011000100,20261012000100,20261013000100"
 secure_versions="$predecessor_versions,20261013000200,20261013000300"
 v3_versions="$secure_versions,20261016000050"
@@ -142,8 +148,10 @@ copy_migration() {
 }
 
 assert_staged_count() {
+  local expected="$1"
+  expected=$((expected + report_migration_offset))
   count=$(find "$migration_dir" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')
-  [[ "$count" == "$1" ]] || fail "Expected $1 staged migrations, found $count."
+  [[ "$count" == "$expected" ]] || fail "Expected $expected staged migrations, found $count."
 }
 
 copy_support_group() {
@@ -188,9 +196,10 @@ validate_migration_sources() {
     [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/company_verified_bank_attempt_cleanup_seed.sql" ]] || fail "Verified-bank attempt-cleanup fixture is missing."
     [[ -f "$repo_root/supabase/tests/database/company_waybill_verified_bank_eligibility.sql" ]] || fail "Verified-bank eligibility SQL suite is missing."
     if [[ "$secure_waybill_reports" == true ]]; then
+      validate_migration_group "$repo_root/supabase/migrations" "20260927001000_operations_reports.sql"
       validate_migration_group "$repo_root/supabase/migrations" "20261026120000_operations_secure_waybill_report_statuses.sql"
       [[ -f "$repo_root/supabase/tests/database/operations_reports.sql" ]] || fail "Operations Reports SQL suite is missing."
-      [[ "$validated_source_count" == 31 ]] || fail "Expected 31 migration sources through secure Waybill report statuses, validated $validated_source_count."
+      [[ "$validated_source_count" == 32 ]] || fail "Expected 32 migration sources through secure Waybill report statuses, validated $validated_source_count."
     else
       [[ "$validated_source_count" == 30 ]] || fail "Expected 30 migration sources for secure email and registration-capture eligibility hardening, validated $validated_source_count."
     fi
@@ -237,6 +246,9 @@ validate_sql_sources
 validate_migration_sources
 
 copy_support_group "$fixture_root/canonical_baseline" "$canonical_migrations"
+if [[ "$secure_waybill_reports" == true ]]; then
+  copy_migration "$repo_root/supabase/migrations" 20260927001000_operations_reports.sql
+fi
 copy_migration "$repo_root/supabase/migrations" 20261002000200_field_operational_day_auth.sql
 assert_staged_count 14
 
@@ -399,7 +411,7 @@ secure_email_hardening_fingerprint() {
 }
 
 cd "$fixture_root/canonical_baseline"
-baseline_list="20260921000100,20260921000200,20260924000100,20260924000200,20260925000200,20260925000400,20260927000100,20260927000150,20260927001150,20261002000100,20261002000200,20261002000300,20261002000400,20261005000600"
+baseline_list="$baseline_versions"
 cd "$repo_root"
 apply_migrations "$baseline_list"
 run_sql "synthetic hybrid seed" "$fixture_root/hybrid_cutover_seed.sql"
@@ -960,7 +972,7 @@ SQL
     [[ "$report_migration_before" == "$report_migration_after" ]] || fail "Operations report migration changed existing operational, financial, bank, PDF, notification, canary, audit, or Storage records."
     printf 'PASS secure Waybill report migration preserved all existing rows and Storage objects.\n'
     run_transactional_suite "Operations secure Waybill report status assertions" "$repo_root/supabase/tests/database/operations_reports.sql"
-    printf 'PASS complete 31-migration secure email, synthetic canary, Company registration eligibility, and Operations report SQL integration completed in isolated PostgreSQL 17 (project=%s, migrations=31).\n' "$project_id"
+    printf 'PASS complete 32-migration secure email, synthetic canary, Company registration eligibility, and Operations report SQL integration completed in isolated PostgreSQL 17 (project=%s, migrations=32).\n' "$project_id"
   else
     printf 'PASS complete 30-migration secure email, synthetic canary, and Company registration eligibility SQL integration completed in isolated PostgreSQL 17 (project=%s, migrations=30).\n' "$project_id"
   fi

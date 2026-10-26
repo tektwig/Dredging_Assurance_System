@@ -41,11 +41,14 @@ const service = load('src/features/operations/services/operationsReports.ts');
 const writer = load('src/features/operations/services/xlsxWriter.ts');
 const view = load('src/features/operations/reports/OperationsReports.tsx');
 const reportMigrationSql = readFileSync('supabase/migrations/20261026120000_operations_secure_waybill_report_statuses.sql', 'utf8');
+const reportFoundationSql = readFileSync('supabase/migrations/20260927001000_operations_reports.sql', 'utf8');
 const reportDatabaseTest = readFileSync('supabase/tests/database/operations_reports.sql', 'utf8');
 const reportRunner = readFileSync('scripts/ci/run-company-waybill-bank-recovery.sh', 'utf8');
 const reportWorkflow = readFileSync('.github/workflows/waybill-secure-report-statuses.yml', 'utf8');
 
 assert(reportMigrationSql.includes("coalesce(driver_copy.status,'unavailable')"));
+assert(reportFoundationSql.includes('create function public.get_operations_report('));
+assert(reportFoundationSql.includes('create function public.export_operations_report('));
 assert(reportMigrationSql.includes("coalesce(company_copy.status,'unavailable')"));
 assert(reportMigrationSql.includes('copy.copy_version desc,copy.created_at desc,copy.id desc'));
 assert.equal((reportMigrationSql.match(/order by notification\.delivery_sequence desc,notification\.updated_at desc/g) ?? []).length, 2);
@@ -59,8 +62,19 @@ assert(reportDatabaseTest.includes("raise notice 'ASSERTION PASS: %',message")
 const reportMigrationApply = reportRunner.indexOf('apply_migrations "$all_versions,20261021000000,20261021133526,20261022085737,20261024173258,20261026120000"');
 const reportSuiteRun = reportRunner.indexOf('run_transactional_suite "Operations secure Waybill report status assertions"');
 assert(reportMigrationApply >= 0 && reportSuiteRun > reportMigrationApply,
-  'the report SQL suite must run after migration 31 is applied');
-assert(reportRunner.includes('assert_staged_count 31') && reportRunner.includes('validated_source_count" == 31'));
+  'the report SQL suite must run after the final report migration is applied');
+assert(reportRunner.includes('report_migration_offset=1')
+  && reportRunner.includes('report_migration_version=",20260927001000"')
+  && reportRunner.includes('20260927000150${report_migration_version},20260927001150')
+  && reportRunner.includes('validate_migration_group "$repo_root/supabase/migrations" "20260927001000_operations_reports.sql"')
+  && reportRunner.includes('copy_migration "$repo_root/supabase/migrations" 20260927001000_operations_reports.sql')
+  && reportRunner.includes('baseline_list="$baseline_versions"')
+  && reportRunner.includes('expected=$((expected + report_migration_offset))')
+  && reportRunner.includes('assert_staged_count 31')
+  && reportRunner.includes('validated_source_count" == 32'),
+  'the Operations Reports foundation migration must be applied in historical order and included in the 32-migration report chain');
+assert(reportWorkflow.includes('Expected migrations: 32')
+  && reportWorkflow.includes('Run 32-migration PostgreSQL 17 integration suite'));
 assert(reportRunner.includes('RUN_SECURE_WAYBILL_REPORTS')
   && reportRunner.includes('refs/heads/fix/waybill-secure-report-statuses-ci'));
 assert(reportWorkflow.includes('fix/waybill-secure-report-statuses-ci')

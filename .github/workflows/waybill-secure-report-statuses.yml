@@ -51,8 +51,8 @@ jobs:
           printf 'SQL_RAW_LOG=%s/sql.raw.log\n' "$report_dir" >> "$GITHUB_ENV"
           printf 'FRONT_EXIT_FILE=%s/frontend-exit.txt\n' "$report_dir" >> "$GITHUB_ENV"
           printf 'SQL_EXIT_FILE=%s/sql-exit.txt\n' "$report_dir" >> "$GITHUB_ENV"
-          printf 'Workflow ref: %s\nCommit: %s\nExpected migrations: 31\n' "$GITHUB_REF" "$GITHUB_SHA" > "$report_dir/frontend.raw.log"
-          printf 'Workflow ref: %s\nCommit: %s\nExpected migrations: 31\n' "$GITHUB_REF" "$GITHUB_SHA" > "$report_dir/sql.raw.log"
+          printf 'Workflow ref: %s\nCommit: %s\nExpected migrations: 32\n' "$GITHUB_REF" "$GITHUB_SHA" > "$report_dir/frontend.raw.log"
+          printf 'Workflow ref: %s\nCommit: %s\nExpected migrations: 32\n' "$GITHUB_REF" "$GITHUB_SHA" > "$report_dir/sql.raw.log"
           printf 'npm_ci=not-run\nreport_test=not-run\nautopreparation_test=not-run\ncompany_eligibility_test=not-run\ntypecheck=not-run\nbuild=not-run\n' > "$report_dir/frontend-exit.txt"
           printf 'preflight=not-run\nintegration=not-run\n' > "$report_dir/sql-exit.txt"
 
@@ -139,7 +139,7 @@ jobs:
           printf 'preflight=%s\n' "$result" > "$SQL_EXIT_FILE"
           exit "$result"
 
-      - name: Run 31-migration PostgreSQL 17 integration suite
+      - name: Run 32-migration PostgreSQL 17 integration suite
         id: sql_runner
         if: always() && steps.sql_preflight.outcome == 'success'
         continue-on-error: true
@@ -180,10 +180,10 @@ jobs:
           sanitize "$SQL_RAW_LOG" "$REPORT_DIR/sql.log"
           assertions=$(grep -Eo 'assertions(_passed_before_failure)?=[0-9]+' "$REPORT_DIR/sql.log" | awk -F= '{ total += $2 } END { print total + 0 }' || true)
           failures=$(grep -Eic 'assertion failed:' "$REPORT_DIR/sql.log" || true)
-          migration_count=$(grep -Eo 'migrations=31|PASS migration ledger \([0-9]+ versions\)' "$REPORT_DIR/sql.log" | grep -Eo '[0-9]+' | sort -n | tail -n 1 || true)
+          migration_count=$(grep -Eo 'migrations=32|PASS migration ledger \([0-9]+ versions\)' "$REPORT_DIR/sql.log" | grep -Eo '[0-9]+' | sort -n | tail -n 1 || true)
           migration_count=${migration_count:-0}
           {
-            printf 'Expected migration count: 31\n'
+            printf 'Expected migration count: 32\n'
             printf 'Verified migration count: %s\n' "$migration_count"
             printf 'SQL assertions passed or passed before first failure: %s\n' "$assertions"
             printf 'Explicit assertion failure diagnostics: %s\n' "$failures"
