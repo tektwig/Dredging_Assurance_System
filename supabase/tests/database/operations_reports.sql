@@ -1,14 +1,20 @@
 begin;
 
 create function pg_temp.report_assert(condition boolean,message text) returns void language plpgsql as $$
-begin if condition is distinct from true then raise exception 'Operations report assertion failed: %',message; end if; end $$;
+begin
+  if condition is distinct from true then raise exception 'Operations report assertion failed: %',message; end if;
+  raise notice 'ASSERTION PASS: %',message;
+end $$;
 create function pg_temp.report_error(query text,state text) returns void language plpgsql as $$
 declare actual text;
 begin
   begin execute query;
   exception when others then
     get stacked diagnostics actual=returned_sqlstate;
-    if actual=state then return; end if;
+    if actual=state then
+      raise notice 'ASSERTION PASS: expected SQLSTATE %',state;
+      return;
+    end if;
     raise exception 'Expected SQLSTATE %, got %',state,actual;
   end;
   raise exception 'Expected SQLSTATE %',state;
@@ -45,8 +51,10 @@ alter table public.daily_registrations disable trigger user;
 insert into public.daily_registrations(id,truck_id,initial_driver_id,operational_date,registered_at,registered_by) values
  ('f7350000-0000-0000-0000-000000000001','f7340000-0000-0000-0000-000000000001','f7330000-0000-0000-0000-000000000001',
   date '2000-01-01',timestamp with time zone '2000-01-01 10:00 Africa/Lagos','f7310000-0000-0000-0000-000000000001'),
- ('f7350000-0000-0000-0000-000000000002','f7340000-0000-0000-0000-000000000002','f7330000-0000-0000-0000-000000000002',
-  date '2000-01-01',timestamp with time zone '2000-01-01 10:00 Africa/Lagos','f7310000-0000-0000-0000-000000000001');
+  ('f7350000-0000-0000-0000-000000000002','f7340000-0000-0000-0000-000000000002','f7330000-0000-0000-0000-000000000002',
+  date '2000-01-01',timestamp with time zone '2000-01-01 10:00 Africa/Lagos','f7310000-0000-0000-0000-000000000001'),
+  ('f7350000-0000-0000-0000-000000000003','f7340000-0000-0000-0000-000000000002','f7330000-0000-0000-0000-000000000002',
+  date '2000-01-02',timestamp with time zone '2000-01-02 10:00 Africa/Lagos','f7310000-0000-0000-0000-000000000001');
 alter table public.daily_registrations enable trigger user;
 
 alter table public.trips disable trigger user;
@@ -65,11 +73,16 @@ values
   timestamp with time zone '2000-01-01 10:00 Africa/Lagos','f7310000-0000-0000-0000-000000000002',
   null,null,timestamp with time zone '2000-01-01 23:00 Africa/Lagos','f7310000-0000-0000-0000-000000000002','Cancel secret',
   'RPT-002','Actual Trip Driver'),
- ('f7360000-0000-0000-0000-000000000003','RPT-TRIP-OLD-OPEN','f7340000-0000-0000-0000-000000000001',
-  'f7330000-0000-0000-0000-000000000002','f7350000-0000-0000-0000-000000000001',
-  'f7320000-0000-0000-0000-000000000001',null,'open',null,null,
+  ('f7360000-0000-0000-0000-000000000003','RPT-TRIP-OLD-OPEN','f7340000-0000-0000-0000-000000000001',
+   'f7330000-0000-0000-0000-000000000002','f7350000-0000-0000-0000-000000000001',
+   'f7320000-0000-0000-0000-000000000001',null,'open',null,null,
   timestamp with time zone '1999-12-01 10:00 Africa/Lagos','f7310000-0000-0000-0000-000000000002',
-  null,null,null,null,null,'RPT-001','Actual Trip Driver');
+  null,null,null,null,null,'RPT-001','Actual Trip Driver'),
+  ('f7360000-0000-0000-0000-000000000004','RPT-TRIP-NO-SECURE-COPY','f7340000-0000-0000-0000-000000000002',
+   'f7330000-0000-0000-0000-000000000002','f7350000-0000-0000-0000-000000000003',
+   'f7320000-0000-0000-0000-000000000001','f7320000-0000-0000-0000-000000000002','closed',14.25,13.00,
+   timestamp with time zone '2000-01-02 09:00+00','f7310000-0000-0000-0000-000000000002',
+   timestamp with time zone '2000-01-02 10:00+00','f7310000-0000-0000-0000-000000000003',null,null,null,'RPT-002','Actual Trip Driver');
 alter table public.trips enable trigger user;
 
 insert into public.trip_closure_invoices(id,invoice_number,trip_id,trip_number,truck_id,truck_registration,
@@ -83,15 +96,48 @@ values ('f7370000-0000-0000-0000-000000000001','INV-2026-999991','f7360000-0000-
   timestamp with time zone '2000-01-01 00:30:00+00','Sensitive Account','1111111111','Sensitive Bank');
 update public.trip_closure_invoice_documents set status='ready',ready_at=clock_timestamp()
 where invoice_id='f7370000-0000-0000-0000-000000000001';
+alter table public.trip_closure_invoices disable trigger queue_secure_waybill_pdf_copies;
+insert into public.trip_closure_invoices(id,invoice_number,trip_id,trip_number,truck_id,truck_registration,
+  driver_id,driver_name,driver_email,loading_site_id,loading_site_name,offloading_site_id,offloading_site_name,
+  quantity_tonnes,opened_at,closed_at,issued_at,account_name,account_number,bank_name)
+values ('f7370000-0000-0000-0000-000000000002','INV-2026-999992','f7360000-0000-0000-0000-000000000004',
+  'RPT-TRIP-NO-SECURE-COPY','f7340000-0000-0000-0000-000000000002','RPT-002','f7330000-0000-0000-0000-000000000002',
+  'Actual Trip Driver','actual@example.invalid','f7320000-0000-0000-0000-000000000001','Reports Loading',
+  'f7320000-0000-0000-0000-000000000002','Reports Offloading',14.25,
+  timestamp with time zone '2000-01-02 09:00+00',timestamp with time zone '2000-01-02 10:00+00',
+  timestamp with time zone '2000-01-02 10:30+00','Synthetic Account','2222222222','Synthetic Bank');
+alter table public.trip_closure_invoices enable trigger queue_secure_waybill_pdf_copies;
+select pg_temp.report_assert((select tgenabled='O' from pg_trigger
+  where tgrelid='public.trip_closure_invoices'::regclass and tgname='queue_secure_waybill_pdf_copies'),
+  'synthetic no-copy fixture restores the secure copy queue trigger');
+insert into public.trip_closure_invoice_pdf_copies(
+  invoice_id,trip_id,invoice_number,copy_kind,copy_version,status,storage_bucket,storage_path)
+values ('f7370000-0000-0000-0000-000000000001','f7360000-0000-0000-0000-000000000001',
+  'INV-2026-999991','company',2,'blocked_bank_details_unverified','waybill-company-copies',
+  private.secure_waybill_copy_storage_path('INV-2026-999991','company',2));
 insert into public.trip_payments(trip_id,truck_id,driver_id,driver_name,driver_phone,status)
 values ('f7360000-0000-0000-0000-000000000001','f7340000-0000-0000-0000-000000000001',
   'f7330000-0000-0000-0000-000000000002','Actual Trip Driver','08017000002','payment_details_required');
 insert into public.notification_outbox(trip_id,event_type,audience,recipients,payload,status,delivery_sequence)
-values ('f7360000-0000-0000-0000-000000000001','waybill_ready','driver',array['actual@example.invalid'],'{}','failed',0);
+values ('f7360000-0000-0000-0000-000000000001','waybill_ready','driver',array['actual@example.invalid'],
+  jsonb_build_object('invoice_id','f7370000-0000-0000-0000-000000000001','invoice_number','INV-2026-999991'),
+  'pending',0);
 insert into public.notification_outbox(trip_id,event_type,audience,recipients,payload,status,delivery_sequence,
   resend_request_id,requested_by,requested_reason_code,sent_at)
-values ('f7360000-0000-0000-0000-000000000001','waybill_ready','driver',array['actual@example.invalid'],'{}','sent',1,
-  'f7380000-0000-0000-0000-000000000001','f7310000-0000-0000-0000-000000000001','DRIVER_REQUEST',clock_timestamp());
+values ('f7360000-0000-0000-0000-000000000001','waybill_ready','driver',array['actual@example.invalid'],
+  jsonb_build_object('invoice_id','f7370000-0000-0000-0000-000000000001','invoice_number','INV-2026-999991'),
+  'sent',1,'f7380000-0000-0000-0000-000000000001','f7310000-0000-0000-0000-000000000001',
+  'DRIVER_REQUEST',clock_timestamp());
+insert into public.notification_outbox(trip_id,event_type,audience,recipients,payload,status,delivery_sequence)
+values ('f7360000-0000-0000-0000-000000000001','waybill_ready','client',array['reports-company@example.invalid'],
+  jsonb_build_object('invoice_id','f7370000-0000-0000-0000-000000000001','invoice_number','INV-2026-999991'),
+  'pending',0);
+insert into public.notification_outbox(trip_id,event_type,audience,recipients,payload,status,delivery_sequence,
+  resend_request_id,requested_by,requested_reason_code,sent_at)
+values ('f7360000-0000-0000-0000-000000000001','waybill_ready','client',array['reports-company@example.invalid'],
+  jsonb_build_object('invoice_id','f7370000-0000-0000-0000-000000000001','invoice_number','INV-2026-999991'),
+  'sent',1,'f7380000-0000-0000-0000-000000000002','f7310000-0000-0000-0000-000000000001',
+  'INTERNAL_REQUEST',clock_timestamp());
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub','f7310000-0000-0000-0000-000000000002',true);
@@ -136,9 +182,44 @@ select pg_temp.report_assert((public.get_operations_report('waybills',
   '{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)->>'total_count')::integer=1,
   'Waybill report uses issued_at');
 select pg_temp.report_assert((public.get_operations_report('waybills',
+  '{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)#>>'{items,0,driver_pdf_status}')='pending'
+  and (public.get_operations_report('waybills','{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)
+    #>>'{items,0,company_pdf_status}')='blocked_bank_details_unverified'
+  and (public.get_operations_report('waybills','{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)
+    #>>'{items,0,pdf_status}') is null,
+  'secure Driver and latest Company copy states replace the ready legacy document status');
+select pg_temp.report_assert((public.get_operations_report('waybills',
   '{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)#>>'{items,0,driver_delivery_status}')='sent'
   and (public.get_operations_report('waybills','{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)
-    #>>'{summary,delivery_failed}')::integer=0,'Waybill delivery uses latest sequence and omits superseded failure');
+    #>>'{items,0,company_delivery_status}')='sent'
+  and (public.get_operations_report('waybills','{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)
+    #>>'{summary,driver_delivery_failed}')::integer=0
+  and (public.get_operations_report('waybills','{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)
+    #>>'{summary,company_delivery_failed}')::integer=0,
+  'each audience reports its newest invoice-matched delivery sequence');
+select pg_temp.report_assert((public.get_operations_report('waybills',
+  '{"date_from":"2000-01-02","date_to":"2000-01-02"}',1,25)#>>'{items,0,driver_pdf_status}')='unavailable'
+  and (public.get_operations_report('waybills','{"date_from":"2000-01-02","date_to":"2000-01-02"}',1,25)
+    #>>'{items,0,company_pdf_status}')='unavailable'
+  and (public.get_operations_report('waybills','{"date_from":"2000-01-02","date_to":"2000-01-02"}',1,25)
+    #>>'{items,0,driver_delivery_status}')='not_queued'
+  and (public.get_operations_report('waybills','{"date_from":"2000-01-02","date_to":"2000-01-02"}',1,25)
+    #>>'{items,0,company_delivery_status}')='not_queued',
+  'Waybills without secure copies or audience notifications are explicitly unavailable or not queued');
+select pg_temp.report_assert((public.get_operations_report('waybills',
+  '{"date_from":"2000-01-01","date_to":"2000-01-01","company_pdf_status":"blocked_bank_details_unverified"}',1,25)
+    ->>'total_count')::integer=1
+  and (public.get_operations_report('waybills',
+  '{"date_from":"2000-01-01","date_to":"2000-01-01","company_pdf_status":"blocked_missing_bank_details"}',1,25)
+    ->>'total_count')::integer=0
+  and (public.get_operations_report('waybills',
+  '{"date_from":"2000-01-01","date_to":"2000-01-01","company_delivery_status":"sent"}',1,25)
+    ->>'total_count')::integer=1,
+  'status filters apply to latest secure copy and latest delivery state');
+select pg_temp.report_assert((public.get_operations_report('waybills',
+  '{"date_from":"2000-01-02","date_to":"2000-01-02","driver_pdf_status":"unavailable","company_delivery_status":"not_queued"}',1,25)
+    ->>'total_count')::integer=1,
+  'unavailable PDF and not-queued delivery filters find missing secure records');
 select pg_temp.report_assert((public.get_operations_report('exceptions',
   jsonb_build_object('date_from',(statement_timestamp() at time zone 'Africa/Lagos')::date,
     'date_to',(statement_timestamp() at time zone 'Africa/Lagos')::date),1,25)->>'total_count')::integer=1,
@@ -152,6 +233,14 @@ select pg_temp.report_error($q$select public.get_operations_report('performance'
   '{"dimension":"site"}',1,25)$q$,'22023');
 select pg_temp.report_error($q$select public.get_operations_report('trips',
   '{"basis":"opened","unapproved":"x"}',1,25)$q$,'22023');
+select pg_temp.report_error($q$select public.get_operations_report('waybills',
+  '{"date_from":"2000-01-01","date_to":"2000-01-01","pdf_status":"ready"}',1,25)$q$,'22023');
+select pg_temp.report_error($q$select public.get_operations_report('waybills',
+  '{"date_from":"2000-01-01","date_to":"2000-01-01","delivery_status":"sent"}',1,25)$q$,'22023');
+select pg_temp.report_error($q$select public.get_operations_report('waybills',
+  '{"date_from":"2000-01-01","date_to":"2000-01-01","payout_status":"paid"}',1,25)$q$,'22023');
+select pg_temp.report_error($q$select public.get_operations_report('waybills',
+  '{"date_from":"2000-01-01","date_to":"2000-01-01","driver_pdf_status":"not_queued"}',1,25)$q$,'22023');
 
 select pg_temp.report_assert(position('Sensitive Account' in public.get_operations_report('waybills',
   '{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)::text)=0
@@ -167,7 +256,14 @@ select pg_temp.report_assert(position('Sensitive Account' in public.get_operatio
 create temp table report_export as select public.export_operations_report('waybills',
   '{"date_from":"2000-01-01","date_to":"2000-01-01"}','xlsx') value;
 select pg_temp.report_assert((select (value->>'row_count')::integer=1 and value->>'format'='xlsx'
-  and jsonb_array_length(value->'items')=1 from report_export),'export returns the exact bounded dataset');
+  and jsonb_array_length(value->'items')=1
+  and value->'items'->0->>'driver_pdf_status'='pending'
+  and value->'items'->0->>'company_pdf_status'='blocked_bank_details_unverified'
+  and value->'items'->0->>'driver_delivery_status'='sent'
+  and value->'items'->0->>'company_delivery_status'='sent'
+  and not (value->'items'->0 ? 'pdf_status')
+  and not (value->'items'->0 ? 'payout_status') from report_export,
+  'XLSX export uses the secure-copy and audience-specific report projection');
 select pg_temp.report_assert((select count(*)=1 from public.audit_log where entity_name='operations_report_export'
   and entity_id=(select (value->>'export_id')::uuid from report_export)
   and actor_id='f7310000-0000-0000-0000-000000000001' and new_value->>'row_count'='1'

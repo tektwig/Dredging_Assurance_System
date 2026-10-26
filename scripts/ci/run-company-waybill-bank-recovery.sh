@@ -5,16 +5,27 @@ umask 077
 repo_root="$GITHUB_WORKSPACE"
 runner_temp="$RUNNER_TEMP"
 secure_email_cutover="${RUN_SECURE_EMAIL_CUTOVER:-false}"
+secure_waybill_reports="${RUN_SECURE_WAYBILL_REPORTS:-false}"
 project_prefix="cwbr"
 expected_branch="refs/heads/feature/company-waybill-bank-recovery"
 if [[ "$secure_email_cutover" == true ]]; then
   project_prefix="sedc"
   expected_branch="refs/heads/feature/secure-email-delivery-cutover"
-  if [[ "$GITHUB_REF" == "refs/heads/fix/company-registration-bank-pdf-eligibility" ]]; then
+  if [[ "$GITHUB_REF" == "refs/heads/fix/company-registration-bank-pdf-eligibility" \
+    || "$GITHUB_REF" == "refs/heads/fix/waybill-secure-report-statuses-ci" ]]; then
     expected_branch="$GITHUB_REF"
   fi
 elif [[ "$secure_email_cutover" != false ]]; then
   printf 'ERROR: RUN_SECURE_EMAIL_CUTOVER must be true or false.\n' >&2
+  exit 1
+fi
+if [[ "$secure_waybill_reports" != true && "$secure_waybill_reports" != false ]]; then
+  printf 'ERROR: RUN_SECURE_WAYBILL_REPORTS must be true or false.\n' >&2
+  exit 1
+fi
+if [[ "$secure_waybill_reports" == true \
+  && ("$secure_email_cutover" != true || "$GITHUB_REF" != "refs/heads/fix/waybill-secure-report-statuses-ci") ]]; then
+  printf 'ERROR: Secure Waybill report integration is restricted to its isolated feature branch and 30-migration prerequisite suite.\n' >&2
   exit 1
 fi
 project_id="$project_prefix-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
@@ -176,7 +187,14 @@ validate_migration_sources() {
     [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate_cleanup.sql" ]] || fail "Synthetic email concurrency gate cleanup is missing."
     [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/company_verified_bank_attempt_cleanup_seed.sql" ]] || fail "Verified-bank attempt-cleanup fixture is missing."
     [[ -f "$repo_root/supabase/tests/database/company_waybill_verified_bank_eligibility.sql" ]] || fail "Verified-bank eligibility SQL suite is missing."
-    [[ "$validated_source_count" == 30 ]] || fail "Expected 30 migration sources for secure email and registration-capture eligibility hardening, validated $validated_source_count."
+    if [[ "$secure_waybill_reports" == true ]]; then
+      validate_migration_group "$repo_root/supabase/migrations" "20261026120000_operations_secure_waybill_report_statuses.sql"
+      validated_source_count=$((validated_source_count + 1))
+      [[ -f "$repo_root/supabase/tests/database/operations_reports.sql" ]] || fail "Operations Reports SQL suite is missing."
+      [[ "$validated_source_count" == 31 ]] || fail "Expected 31 migration sources through secure Waybill report statuses, validated $validated_source_count."
+    else
+      [[ "$validated_source_count" == 30 ]] || fail "Expected 30 migration sources for secure email and registration-capture eligibility hardening, validated $validated_source_count."
+    fi
   else
     [[ "$validated_source_count" == 26 ]] || fail "Expected 26 migration sources, validated $validated_source_count."
   fi
@@ -209,6 +227,9 @@ validate_sql_sources() {
     [[ -f "$repo_root/supabase/tests/database/secure_synthetic_email_canary.sql" ]] || fail "Synthetic email canary SQL suite is missing."
     [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate.sql" ]] || fail "Synthetic email concurrency gate fixture is missing."
     [[ -f "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate_cleanup.sql" ]] || fail "Synthetic email concurrency gate cleanup is missing."
+  fi
+  if [[ "$secure_waybill_reports" == true ]]; then
+    required_sql_files+=("$repo_root/supabase/tests/database/operations_reports.sql")
   fi
   printf 'PASS preflight: validated all %s SQL fixtures and test suites before database startup.\n' "${#required_sql_files[@]}"
 }
@@ -931,7 +952,19 @@ SQL
 
   run_sql "canary concurrency gate cleanup" "$repo_root/supabase/tests/fixtures/secure_email_delivery_cutover/canary_concurrency_gate_cleanup.sql"
   apply_migrations "$all_versions,20261021000000,20261021133526,20261022085737,20261024173258"
-  printf 'PASS complete 30-migration secure email, synthetic canary, and Company registration eligibility SQL integration completed in isolated PostgreSQL 17 (project=%s, migrations=30).\n' "$project_id"
+  if [[ "$secure_waybill_reports" == true ]]; then
+    report_migration_before=$(secure_email_hardening_fingerprint)
+    copy_migration "$repo_root/supabase/migrations" 20261026120000_operations_secure_waybill_report_statuses.sql
+    assert_staged_count 31
+    apply_migrations "$all_versions,20261021000000,20261021133526,20261022085737,20261024173258,20261026120000"
+    report_migration_after=$(secure_email_hardening_fingerprint)
+    [[ "$report_migration_before" == "$report_migration_after" ]] || fail "Operations report migration changed existing operational, financial, bank, PDF, notification, canary, audit, or Storage records."
+    printf 'PASS secure Waybill report migration preserved all existing rows and Storage objects.\n'
+    run_transactional_suite "Operations secure Waybill report status assertions" "$repo_root/supabase/tests/database/operations_reports.sql"
+    printf 'PASS complete 31-migration secure email, synthetic canary, Company registration eligibility, and Operations report SQL integration completed in isolated PostgreSQL 17 (project=%s, migrations=31).\n' "$project_id"
+  else
+    printf 'PASS complete 30-migration secure email, synthetic canary, and Company registration eligibility SQL integration completed in isolated PostgreSQL 17 (project=%s, migrations=30).\n' "$project_id"
+  fi
 else
   printf 'PASS all disposable Company Waybill bank-recovery SQL suites completed (project=%s, migrations=26).\n' "$project_id"
 fi

@@ -5,6 +5,11 @@ export const OPERATIONS_REPORT_KINDS = ['trips', 'performance', 'waybills', 'exc
 export type OperationsReportKind = typeof OPERATIONS_REPORT_KINDS[number];
 export type ReportFilters = Record<string, string | boolean>;
 export type ReportRow = Record<string, string | number | boolean | null>;
+export const WAYBILL_PDF_STATUSES = ['unavailable', 'pending', 'processing', 'ready', 'failed'] as const;
+export const COMPANY_WAYBILL_PDF_STATUSES = [...WAYBILL_PDF_STATUSES,
+  'blocked_missing_bank_details', 'blocked_bank_details_unverified'] as const;
+export const WAYBILL_DELIVERY_STATUSES = ['not_queued', 'pending', 'processing', 'sent', 'failed',
+  'blocked_missing_email', 'blocked_configuration'] as const;
 export type OperationsReportPage = {
   summary: Record<string, number>;
   items: ReportRow[];
@@ -49,8 +54,9 @@ const reportColumns: Record<OperationsReportKind, readonly [string, string][]> =
   performance: [['label', 'Truck / Driver / Site'], ['trip_count', 'Trips'], ['closed_count', 'Closed Trips'],
     ['tonnage_tonnes', 'Tonnage']],
   waybills: [['waybill_number', 'Waybill #'], ['trip_number', 'Trip #'], ['truck_plate', 'Truck'],
-    ['driver_name', 'Driver'], ['tonnage_tonnes', 'Tonnage'], ['issued_at', 'Issued At'], ['pdf_status', 'Legacy PDF Status'],
-    ['driver_delivery_status', 'Driver Delivery'], ['company_delivery_status', 'Company Delivery']],
+    ['driver_name', 'Driver'], ['tonnage_tonnes', 'Tonnage'], ['issued_at', 'Issued At'],
+    ['driver_pdf_status', 'Driver PDF Status'], ['company_pdf_status', 'Company PDF Status'],
+    ['driver_delivery_status', 'Driver Delivery Status'], ['company_delivery_status', 'Company Delivery Status']],
   exceptions: [['exception_type', 'Type'], ['status', 'Status'], ['blocks_operations', 'Blocking'],
     ['count', 'Count'], ['first_raised_at', 'First Raised'], ['last_raised_at', 'Last Raised']],
 };
@@ -80,10 +86,17 @@ function validateRows(kind: OperationsReportKind, value: unknown): value is Repo
       'estimated_tonnage_tonnes', 'tonnage_tonnes', 'status'],
     performance: ['entity_id', 'label', 'trip_count', 'closed_count', 'tonnage_tonnes'],
     waybills: ['invoice_id', 'invoice_number', 'trip_number', 'truck_plate', 'driver_name', 'tonnage_tonnes',
-      'issued_at', 'pdf_status', 'driver_delivery_status', 'company_delivery_status'],
+      'issued_at', 'driver_pdf_status', 'company_pdf_status', 'driver_delivery_status', 'company_delivery_status'],
     exceptions: ['exception_type', 'status', 'blocks_operations', 'count', 'first_raised_at', 'last_raised_at'],
   };
-  return value.every(row => record(row) && exactKeys(row, keys[kind]) && Object.values(row).every(safeCell));
+  return value.every(row => {
+    if (!record(row) || !exactKeys(row, keys[kind]) || !Object.values(row).every(safeCell)) return false;
+    if (kind !== 'waybills') return true;
+    return WAYBILL_PDF_STATUSES.includes(row.driver_pdf_status as typeof WAYBILL_PDF_STATUSES[number])
+      && COMPANY_WAYBILL_PDF_STATUSES.includes(row.company_pdf_status as typeof COMPANY_WAYBILL_PDF_STATUSES[number])
+      && WAYBILL_DELIVERY_STATUSES.includes(row.driver_delivery_status as typeof WAYBILL_DELIVERY_STATUSES[number])
+      && WAYBILL_DELIVERY_STATUSES.includes(row.company_delivery_status as typeof WAYBILL_DELIVERY_STATUSES[number]);
+  });
 }
 
 function mapReportRows(kind: OperationsReportKind, rows: ReportRow[]): ReportRow[] {
@@ -102,7 +115,9 @@ function validSummary(kind: OperationsReportKind, value: unknown): value is Reco
   const keys: Record<OperationsReportKind, readonly string[]> = {
     trips: ['rows', 'trips_opened', 'trips_closed', 'trips_cancelled', 'open_trips', 'tonnage_tonnes'],
     performance: ['entities', 'trip_count', 'closed_count', 'tonnage_tonnes'],
-    waybills: ['waybills', 'pdf_failed', 'delivery_failed', 'blocked_missing_email', 'blocked_configuration'],
+    waybills: ['waybills', 'driver_pdf_failed', 'company_pdf_failed',
+      'company_pdf_blocked_missing_bank_details', 'company_pdf_blocked_bank_details_unverified',
+      'driver_delivery_failed', 'company_delivery_failed', 'blocked_missing_email', 'blocked_configuration'],
     exceptions: ['groups', 'exceptions', 'requiring_attention', 'blocking'],
   };
   return validateSummary(value) && exactKeys(value, keys[kind]);
@@ -123,7 +138,8 @@ export function validateReportPage(kind: OperationsReportKind, value: unknown): 
 const reportFilterKeys: Record<OperationsReportKind, readonly string[]> = {
   trips: ['basis', 'date_from', 'date_to', 'status', 'truck_id', 'driver_id', 'loading_site_id', 'offloading_site_id'],
   performance: ['dimension', 'direction', 'date_from', 'date_to', 'truck_id', 'driver_id', 'site_id'],
-  waybills: ['date_from', 'date_to', 'pdf_status', 'delivery_status'],
+  waybills: ['date_from', 'date_to', 'driver_pdf_status', 'company_pdf_status',
+    'driver_delivery_status', 'company_delivery_status'],
   exceptions: ['date_from', 'date_to', 'exception_type', 'status', 'blocks_operations'],
 };
 
@@ -135,13 +151,16 @@ function validateFilters(filters: ReportFilters, kind: OperationsReportKind): Re
     if (typeof value === 'string' && (value.length > 100 || /[\r\n\0]/.test(value))) {
       throw new OperationsReportError('invalid_request');
     }
-    if (kind === 'waybills' && key === 'pdf_status'
-      && (typeof value !== 'string' || !['pending', 'processing', 'ready', 'failed'].includes(value))) {
+    if (kind === 'waybills' && key === 'driver_pdf_status'
+      && (typeof value !== 'string' || !WAYBILL_PDF_STATUSES.includes(value as typeof WAYBILL_PDF_STATUSES[number]))) {
       throw new OperationsReportError('invalid_request');
     }
-    if (kind === 'waybills' && key === 'delivery_status'
-      && (typeof value !== 'string' || !['pending', 'processing', 'sent', 'failed', 'blocked_missing_email',
-        'blocked_configuration', 'not_queued'].includes(value))) {
+    if (kind === 'waybills' && key === 'company_pdf_status'
+      && (typeof value !== 'string' || !COMPANY_WAYBILL_PDF_STATUSES.includes(value as typeof COMPANY_WAYBILL_PDF_STATUSES[number]))) {
+      throw new OperationsReportError('invalid_request');
+    }
+    if (kind === 'waybills' && (key === 'driver_delivery_status' || key === 'company_delivery_status')
+      && (typeof value !== 'string' || !WAYBILL_DELIVERY_STATUSES.includes(value as typeof WAYBILL_DELIVERY_STATUSES[number]))) {
       throw new OperationsReportError('invalid_request');
     }
     valid[key] = value;

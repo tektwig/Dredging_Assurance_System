@@ -1,0 +1,227 @@
+name: OPM secure Waybill report validation
+
+on:
+  push:
+    branches:
+      - fix/waybill-secure-report-statuses-ci
+    paths:
+      - .github/workflows/waybill-secure-report-statuses.yml
+      - package.json
+      - package-lock.json
+      - scripts/ci/run-company-waybill-bank-recovery.sh
+      - scripts/test-company-registration-company-pdf-eligibility.mjs
+      - scripts/test-company-waybill-bank-autopreparation.mjs
+      - scripts/test-operations-reports.mjs
+      - src/features/operations/reports/OperationsReports.tsx
+      - src/features/operations/services/operationsReports.ts
+      - supabase/migrations/**
+      - supabase/tests/database/company_waybill_verified_bank_eligibility.sql
+      - supabase/tests/database/operations_reports.sql
+      - supabase/tests/database/secure_email_delivery_cutover.sql
+      - supabase/tests/database/secure_synthetic_email_canary.sql
+      - supabase/tests/fixtures/secure_email_delivery_cutover/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: waybill-secure-report-statuses-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/fix/waybill-secure-report-statuses-ci'
+    name: Frontend and disposable PostgreSQL 17 validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      SUPABASE_TELEMETRY_DISABLED: "true"
+      RUN_SECURE_EMAIL_CUTOVER: "true"
+      RUN_SECURE_WAYBILL_REPORTS: "true"
+    steps:
+      - name: Initialize private test log paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_dir="$RUNNER_TEMP/waybill-secure-report-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -m 700 -p "$report_dir"
+          printf 'REPORT_DIR=%s\n' "$report_dir" >> "$GITHUB_ENV"
+          printf 'FRONT_RAW_LOG=%s/frontend.raw.log\n' "$report_dir" >> "$GITHUB_ENV"
+          printf 'SQL_RAW_LOG=%s/sql.raw.log\n' "$report_dir" >> "$GITHUB_ENV"
+          printf 'FRONT_EXIT_FILE=%s/frontend-exit.txt\n' "$report_dir" >> "$GITHUB_ENV"
+          printf 'SQL_EXIT_FILE=%s/sql-exit.txt\n' "$report_dir" >> "$GITHUB_ENV"
+          printf 'Workflow ref: %s\nCommit: %s\nExpected migrations: 31\n' "$GITHUB_REF" "$GITHUB_SHA" > "$report_dir/frontend.raw.log"
+          printf 'Workflow ref: %s\nCommit: %s\nExpected migrations: 31\n' "$GITHUB_REF" "$GITHUB_SHA" > "$report_dir/sql.raw.log"
+          printf 'npm_ci=not-run\nreport_test=not-run\nautopreparation_test=not-run\ncompany_eligibility_test=not-run\ntypecheck=not-run\nbuild=not-run\n' > "$report_dir/frontend-exit.txt"
+          printf 'preflight=not-run\nintegration=not-run\n' > "$report_dir/sql-exit.txt"
+
+      - name: Check out feature source
+        id: source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out checksum-pinned SQL baseline and fixtures
+        id: support
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 16bf4ec5286f8ed5efc225da5456b95fbb7ba4dd
+          path: .ci-sql-support
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up pinned Node.js
+        id: node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.14.0
+        continue-on-error: true
+
+      - name: Install and validate frontend
+        id: frontend
+        if: always() && steps.source.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          overall=0
+          run_check() {
+            key="$1"
+            shift
+            printf '\n--- %s ---\n' "$key" >> "$FRONT_RAW_LOG"
+            "$@" >> "$FRONT_RAW_LOG" 2>&1
+            result=$?
+            printf '%s=%s\n' "$key" "$result" >> "$FRONT_EXIT_FILE"
+            if [[ "$result" -ne 0 ]]; then overall=1; fi
+          }
+          run_check npm_ci npm ci
+          if grep -q '^npm_ci=0$' "$FRONT_EXIT_FILE"; then
+            run_check report_test node scripts/test-operations-reports.mjs
+            run_check autopreparation_test node scripts/test-company-waybill-bank-autopreparation.mjs
+            run_check company_eligibility_test node scripts/test-company-registration-company-pdf-eligibility.mjs
+            run_check typecheck npm run typecheck
+            run_check build npm run build
+          else
+            printf 'report_test=skipped\nautopreparation_test=skipped\ncompany_eligibility_test=skipped\ntypecheck=skipped\nbuild=skipped\n' >> "$FRONT_EXIT_FILE"
+            overall=1
+          fi
+          exit "$overall"
+
+      - name: Install pinned Supabase CLI
+        id: supabase_cli
+        uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+        with:
+          version: 2.120.0
+        continue-on-error: true
+
+      - name: Validate isolated SQL prerequisites
+        id: sql_preflight
+        if: always() && steps.source.outcome == 'success' && steps.support.outcome == 'success' && steps.supabase_cli.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          (
+            set -euo pipefail
+            test "$GITHUB_REF" = "refs/heads/fix/waybill-secure-report-statuses-ci"
+            test "$RUN_SECURE_EMAIL_CUTOVER" = "true"
+            test "$RUN_SECURE_WAYBILL_REPORTS" = "true"
+            test "$(supabase --version)" = "2.120.0"
+            docker info --format '{{.ServerVersion}}' >/dev/null
+            test "$(git -C .ci-sql-support rev-parse HEAD)" = "16bf4ec5286f8ed5efc225da5456b95fbb7ba4dd"
+            (cd .ci-sql-support && awk '{ sub(/\r$/, ""); print }' supabase/tests/fixtures/trakflit-ci/MIGRATION_SHA256SUMS | sha256sum --check >/dev/null)
+            bash -n scripts/ci/run-company-waybill-bank-recovery.sh
+          ) >> "$SQL_RAW_LOG" 2>&1
+          result=$?
+          printf 'preflight_exit_code=%s\n' "$result" >> "$SQL_RAW_LOG"
+          printf 'preflight=%s\n' "$result" > "$SQL_EXIT_FILE"
+          exit "$result"
+
+      - name: Run 31-migration PostgreSQL 17 integration suite
+        id: sql_runner
+        if: always() && steps.sql_preflight.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          RUN_SECURE_EMAIL_CUTOVER: "true"
+          RUN_SECURE_WAYBILL_REPORTS: "true"
+        run: |
+          set -uo pipefail
+          set +e
+          bash scripts/ci/run-company-waybill-bank-recovery.sh >> "$SQL_RAW_LOG" 2>&1
+          result=$?
+          printf 'integration_runner_exit_code=%s\n' "$result" >> "$SQL_RAW_LOG"
+          printf 'integration=%s\n' "$result" >> "$SQL_EXIT_FILE"
+          exit "$result"
+
+      - name: Sanitize logs and summarize results
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          sanitize() {
+            perl -pe '
+              s/\bBearer\s+\S+/Bearer [REDACTED]/ig;
+              s/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/[REDACTED_JWT]/g;
+              s/\bsb_(?:publishable|secret)_[A-Za-z0-9_-]+/[REDACTED_SUPABASE_KEY]/g;
+              s/((?:password|secret|token|api[_ -]?key|anon[_ -]?key|service[_ -]?role[_ -]?key)\s*[:=]\s*)[^\s,;]+/$1[REDACTED]/ig;
+              s{(postgres(?:ql)?://)[^\s]+}{$1[REDACTED_CONNECTION_STRING]}ig;
+              s/\b\d{10}\b/[REDACTED_ACCOUNT_NUMBER]/g;
+              s/[[:alnum:]._%+-]+\@[[:alnum:].-]+\.[[:alpha:]]{2,}/[REDACTED_EMAIL]/g;
+              s/CI Concurrent Bank/[REDACTED_BANK_NAME]/ig;
+              s/CI Synthetic Bank/[REDACTED_BANK_NAME]/ig;
+              s/CI Synthetic Account/[REDACTED_ACCOUNT_NAME]/ig;
+              s/Synthetic recovery driver 43/[REDACTED_ACCOUNT_NAME]/ig;
+            ' "$1" > "$2"
+          }
+          sanitize "$FRONT_RAW_LOG" "$REPORT_DIR/frontend.log"
+          sanitize "$SQL_RAW_LOG" "$REPORT_DIR/sql.log"
+          assertions=$(grep -Eo 'assertions(_passed_before_failure)?=[0-9]+' "$REPORT_DIR/sql.log" | awk -F= '{ total += $2 } END { print total + 0 }' || true)
+          failures=$(grep -Eic 'assertion failed:' "$REPORT_DIR/sql.log" || true)
+          migration_count=$(grep -Eo 'migrations=31|PASS migration ledger \([0-9]+ versions\)' "$REPORT_DIR/sql.log" | grep -Eo '[0-9]+' | sort -n | tail -n 1 || true)
+          migration_count=${migration_count:-0}
+          {
+            printf 'Expected migration count: 31\n'
+            printf 'Verified migration count: %s\n' "$migration_count"
+            printf 'SQL assertions passed or passed before first failure: %s\n' "$assertions"
+            printf 'Explicit assertion failure diagnostics: %s\n' "$failures"
+            printf '\nNode setup outcome: %s\nFrontend step outcome: %s\nSQL preflight outcome: %s\nSQL runner outcome: %s\n' \
+              '${{ steps.node.outcome }}' '${{ steps.frontend.outcome }}' '${{ steps.sql_preflight.outcome }}' '${{ steps.sql_runner.outcome }}'
+            printf '\nFrontend exit codes:\n'
+            cat "$FRONT_EXIT_FILE"
+            printf '\nSQL exit codes:\n'
+            cat "$SQL_EXIT_FILE"
+          } > "$REPORT_DIR/summary.txt"
+          cat "$REPORT_DIR/summary.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized validation artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: waybill-secure-report-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/waybill-secure-report-${{ github.run_id }}-${{ github.run_attempt }}/frontend.log
+            ${{ runner.temp }}/waybill-secure-report-${{ github.run_id }}-${{ github.run_attempt }}/sql.log
+            ${{ runner.temp }}/waybill-secure-report-${{ github.run_id }}-${{ github.run_attempt }}/summary.txt
+            ${{ runner.temp }}/waybill-secure-report-${{ github.run_id }}-${{ github.run_attempt }}/frontend-exit.txt
+            ${{ runner.temp }}/waybill-secure-report-${{ github.run_id }}-${{ github.run_attempt }}/sql-exit.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Fail if any frontend or SQL validation failed
+        if: always()
+        shell: bash
+        env:
+          NODE_OUTCOME: ${{ steps.node.outcome }}
+          FRONTEND_OUTCOME: ${{ steps.frontend.outcome }}
+          PREFLIGHT_OUTCOME: ${{ steps.sql_preflight.outcome }}
+          SQL_OUTCOME: ${{ steps.sql_runner.outcome }}
+        run: |
+          set -euo pipefail
+          printf 'node=%s frontend=%s preflight=%s sql=%s\n' "$NODE_OUTCOME" "$FRONTEND_OUTCOME" "$PREFLIGHT_OUTCOME" "$SQL_OUTCOME"
+          test "$NODE_OUTCOME" = success
+          test "$FRONTEND_OUTCOME" = success
+          test "$PREFLIGHT_OUTCOME" = success
+          test "$SQL_OUTCOME" = success

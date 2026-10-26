@@ -3,7 +3,8 @@ import { ListResultState } from '../../../components/data/ListResultState';
 import { PaginationControls } from '../../../components/data/PaginationControls';
 import { DEFAULT_PAGE_SIZE } from '../../../types/listQuery';
 import { downloadReport, exportOperationsReport, loadOperationsReport, OPERATIONS_REPORT_KINDS,
-  OperationsReportError, reportColumnsFor, type OperationsReportKind, type OperationsReportPage, type ReportFilters } from '../services/operationsReports';
+  COMPANY_WAYBILL_PDF_STATUSES, WAYBILL_DELIVERY_STATUSES, WAYBILL_PDF_STATUSES, OperationsReportError, reportColumnsFor,
+  type OperationsReportKind, type OperationsReportPage, type ReportFilters } from '../services/operationsReports';
 import './reports.css';
 
 const labels: Record<OperationsReportKind, string> = {
@@ -35,6 +36,18 @@ function formatValue(value: unknown): string {
     return new Intl.DateTimeFormat('en-NG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Lagos' }).format(new Date(value));
   }
   return String(value);
+}
+
+const summaryLabels: Record<string, string> = {
+  waybills: 'Waybills', driver_pdf_failed: 'Driver PDFs failed', company_pdf_failed: 'Company PDFs failed',
+  company_pdf_blocked_missing_bank_details: 'Company PDFs blocked: bank details missing',
+  company_pdf_blocked_bank_details_unverified: 'Company PDFs blocked: bank details unverified',
+  driver_delivery_failed: 'Driver deliveries failed', company_delivery_failed: 'Company deliveries failed',
+  blocked_missing_email: 'Driver emails blocked: missing email', blocked_configuration: 'Company emails blocked: configuration',
+};
+
+function summaryTitle(key: string): string {
+  return summaryLabels[key] ?? key.replace(/_/g, ' ');
 }
 
 function Filters({ kind, filters, change }: { kind: OperationsReportKind; filters: ReportFilters; change: (key: string, value: string | boolean) => void }) {
@@ -75,11 +88,18 @@ function Filters({ kind, filters, change }: { kind: OperationsReportKind; filter
     </>}
     {kind === 'performance' && filters.dimension === 'site' && <label>Site ID<input value={String(filters.site_id ?? '')} onChange={event => change('site_id', event.currentTarget.value)} /></label>}
     {kind === 'waybills' && <>
-      <label>PDF status<select value={String(filters.pdf_status ?? '')} onChange={event => change('pdf_status', event.currentTarget.value)}>
-        <option value="">All</option>{['pending', 'processing', 'ready', 'failed'].map(value => <option key={value} value={value}>{value}</option>)}
+      <label>Driver PDF status<select value={String(filters.driver_pdf_status ?? '')} onChange={event => change('driver_pdf_status', event.currentTarget.value)}>
+        <option value="">All</option>{WAYBILL_PDF_STATUSES.map(value => <option key={value} value={value}>{value.replace(/_/g, ' ')}</option>)}
       </select></label>
-      <label>Delivery status<select value={String(filters.delivery_status ?? '')} onChange={event => change('delivery_status', event.currentTarget.value)}>
-        <option value="">All</option>{['pending', 'processing', 'sent', 'failed', 'blocked_missing_email', 'blocked_configuration', 'not_queued']
+      <label>Company PDF status<select value={String(filters.company_pdf_status ?? '')} onChange={event => change('company_pdf_status', event.currentTarget.value)}>
+        <option value="">All</option>{COMPANY_WAYBILL_PDF_STATUSES.map(value => <option key={value} value={value}>{value.replace(/_/g, ' ')}</option>)}
+      </select></label>
+      <label>Driver delivery status<select value={String(filters.driver_delivery_status ?? '')} onChange={event => change('driver_delivery_status', event.currentTarget.value)}>
+        <option value="">All</option>{WAYBILL_DELIVERY_STATUSES
+          .map(value => <option key={value} value={value}>{value.replace(/_/g, ' ')}</option>)}
+      </select></label>
+      <label>Company delivery status<select value={String(filters.company_delivery_status ?? '')} onChange={event => change('company_delivery_status', event.currentTarget.value)}>
+        <option value="">All</option>{WAYBILL_DELIVERY_STATUSES
           .map(value => <option key={value} value={value}>{value.replace(/_/g, ' ')}</option>)}
       </select></label>
     </>}
@@ -129,7 +149,7 @@ export function OperationsReportsView({ kind, onKindChange, filters, changeFilte
       {state.status === 'loading' ? <ListResultState status="loading" /> : state.status === 'error'
         ? <ListResultState status="error" message={state.message} onRetry={onRetry} /> : <>
         <div className="report-summary" aria-label="Report summary">{Object.entries(state.data.summary).map(([key, value]) =>
-          <div className="card" key={key}><span>{key.replace(/_/g, ' ')}</span><strong>{value.toLocaleString('en-NG')}</strong></div>)}</div>
+          <div className="card" key={key}><span>{summaryTitle(key)}</span><strong>{value.toLocaleString('en-NG')}</strong></div>)}</div>
         {state.data.items.length === 0 ? <p className="empty-state">No report results match these filters.</p> : <ReportTable kind={kind} page={state.data} />}
         <PaginationControls page={page} pageSize={DEFAULT_PAGE_SIZE} totalCount={state.data.totalCount} onPageChange={onPageChange} />
       </>}

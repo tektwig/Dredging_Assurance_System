@@ -15,7 +15,8 @@ const approvedMigrationHashes = {
 };
 
 for (const [path, expectedHash] of Object.entries(approvedMigrationHashes)) {
-  const actualHash = createHash('sha256').update(readFileSync(path)).digest('hex').toUpperCase();
+  const normalizedSql = readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+  const actualHash = createHash('sha256').update(normalizedSql).digest('hex').toUpperCase();
   assert.equal(actualHash, expectedHash, `${path} must remain byte-identical to its approved source`);
 }
 

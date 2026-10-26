@@ -40,6 +40,44 @@ overrides.set(resolve('src/lib/supabase.ts'), { supabase: {
 const service = load('src/features/operations/services/operationsReports.ts');
 const writer = load('src/features/operations/services/xlsxWriter.ts');
 const view = load('src/features/operations/reports/OperationsReports.tsx');
+const reportMigrationSql = readFileSync('supabase/migrations/20261026120000_operations_secure_waybill_report_statuses.sql', 'utf8');
+const reportDatabaseTest = readFileSync('supabase/tests/database/operations_reports.sql', 'utf8');
+const reportRunner = readFileSync('scripts/ci/run-company-waybill-bank-recovery.sh', 'utf8');
+const reportWorkflow = readFileSync('.github/workflows/waybill-secure-report-statuses.yml', 'utf8');
+
+assert(reportMigrationSql.includes("coalesce(driver_copy.status,'unavailable')"));
+assert(reportMigrationSql.includes("coalesce(company_copy.status,'unavailable')"));
+assert(reportMigrationSql.includes('copy.copy_version desc,copy.created_at desc,copy.id desc'));
+assert.equal((reportMigrationSql.match(/order by notification\.delivery_sequence desc,notification\.updated_at desc/g) ?? []).length, 2);
+assert.equal((reportMigrationSql.match(/notification\.payload->>'invoice_id'=invoice\.id::text/g) ?? []).length, 2);
+assert(!reportMigrationSql.includes('trip_closure_invoice_documents'));
+assert(reportDatabaseTest.includes('secure Driver and latest Company copy states'));
+assert(reportDatabaseTest.includes('Waybills without secure copies or audience notifications'));
+assert(reportDatabaseTest.includes('status filters apply to latest secure copy and latest delivery state'));
+assert(reportDatabaseTest.includes("raise notice 'ASSERTION PASS: %',message")
+  && reportDatabaseTest.includes("raise notice 'ASSERTION PASS: expected SQLSTATE %',state"));
+const reportMigrationApply = reportRunner.indexOf('apply_migrations "$all_versions,20261021000000,20261021133526,20261022085737,20261024173258,20261026120000"');
+const reportSuiteRun = reportRunner.indexOf('run_transactional_suite "Operations secure Waybill report status assertions"');
+assert(reportMigrationApply >= 0 && reportSuiteRun > reportMigrationApply,
+  'the report SQL suite must run after migration 31 is applied');
+assert(reportRunner.includes('assert_staged_count 31') && reportRunner.includes('validated_source_count" == 31'));
+assert(reportRunner.includes('RUN_SECURE_WAYBILL_REPORTS')
+  && reportRunner.includes('refs/heads/fix/waybill-secure-report-statuses-ci'));
+assert(reportWorkflow.includes('fix/waybill-secure-report-statuses-ci')
+  && reportWorkflow.includes('RUN_SECURE_EMAIL_CUTOVER: "true"')
+  && reportWorkflow.includes('RUN_SECURE_WAYBILL_REPORTS: "true"')
+  && reportWorkflow.includes('16bf4ec5286f8ed5efc225da5456b95fbb7ba4dd')
+  && reportWorkflow.includes('version: 2.120.0')
+  && reportWorkflow.includes('npm ci')
+  && reportWorkflow.includes('npm run typecheck')
+  && reportWorkflow.includes('npm run build')
+  && reportWorkflow.includes('node scripts/test-operations-reports.mjs'));
+assert(reportWorkflow.includes('contents: read') && !reportWorkflow.includes('secrets.'));
+assert(reportWorkflow.includes("if: github.ref == 'refs/heads/fix/waybill-secure-report-statuses-ci'"));
+assert(reportWorkflow.includes('actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1')
+  && reportWorkflow.includes('actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9'));
+assert(reportWorkflow.includes('NODE_OUTCOME: ${{ steps.node.outcome }}')
+  && reportWorkflow.includes('test "$NODE_OUTCOME" = success'));
 
 const timestamp = '2000-01-01T00:00:00.000Z';
 const tripRow = { trip_id: 'trip-1', trip_number: 'TRP-001', truck_id: 'truck-1', truck_plate: 'RPT-001',
@@ -48,11 +86,13 @@ const tripRow = { trip_id: 'trip-1', trip_number: 'TRP-001', truck_id: 'truck-1'
   cancelled_at: null, estimated_tonnage_tonnes: 10.25, tonnage_tonnes: 12.5, status: 'closed' };
 const page = { summary: { rows: 1, trips_opened: 0, trips_closed: 1, trips_cancelled: 0, open_trips: 0, tonnage_tonnes: 12.5 },
   items: [tripRow], total_count: 1, page: 1, page_size: 25, has_next: false };
-const waybillSummary = { waybills: 1, pdf_failed: 0, delivery_failed: 0,
-  blocked_missing_email: 0, blocked_configuration: 0 };
+const waybillSummary = { waybills: 1, driver_pdf_failed: 0, company_pdf_failed: 0,
+  company_pdf_blocked_missing_bank_details: 0, company_pdf_blocked_bank_details_unverified: 1,
+  driver_delivery_failed: 0, company_delivery_failed: 0, blocked_missing_email: 0, blocked_configuration: 0 };
 const waybillRow = { invoice_id: 'waybill-1', invoice_number: 'INV-2026-000001', trip_number: 'TRP-001',
   truck_plate: 'RPT-001', driver_name: 'Driver', tonnage_tonnes: 12.5, issued_at: timestamp,
-  pdf_status: 'ready', driver_delivery_status: 'sent', company_delivery_status: 'sent' };
+  driver_pdf_status: 'ready', company_pdf_status: 'blocked_bank_details_unverified',
+  driver_delivery_status: 'sent', company_delivery_status: 'pending' };
 const waybillPage = { summary: waybillSummary, items: [waybillRow], total_count: 1,
   page: 1, page_size: 25, has_next: false };
 assert.equal(service.validateReportPage('trips', page).items.length, 1);
@@ -63,13 +103,29 @@ const parsedWaybillPage = service.validateReportPage('waybills', waybillPage);
 assert.equal(parsedWaybillPage.items[0].waybill_id, 'waybill-1');
 assert.equal(parsedWaybillPage.items[0].waybill_number, 'INV-2026-000001');
 assert(!('invoice_number' in parsedWaybillPage.items[0]) && !('invoice_id' in parsedWaybillPage.items[0]));
+assert.equal(parsedWaybillPage.items[0].driver_pdf_status, 'ready');
+assert.equal(parsedWaybillPage.items[0].company_pdf_status, 'blocked_bank_details_unverified');
+assert.equal(parsedWaybillPage.items[0].company_delivery_status, 'pending');
+const unavailableWaybill = service.validateReportPage('waybills', { ...waybillPage, items: [{ ...waybillRow,
+  driver_pdf_status: 'unavailable', company_pdf_status: 'unavailable',
+  driver_delivery_status: 'not_queued', company_delivery_status: 'not_queued' }] });
+assert.equal(unavailableWaybill.items[0].driver_pdf_status, 'unavailable');
+assert.equal(unavailableWaybill.items[0].company_delivery_status, 'not_queued');
 assert(service.buildCsv('waybills', parsedWaybillPage.items).includes('"INV-2026-000001"'));
 const waybillCsv = service.buildCsv('waybills', parsedWaybillPage.items);
-assert(waybillCsv.includes('"Company Delivery"') && !waybillCsv.includes('Payout'));
+assert(waybillCsv.includes('"Driver PDF Status"') && waybillCsv.includes('"Company PDF Status"'));
+assert(waybillCsv.includes('"Driver Delivery Status"') && waybillCsv.includes('"Company Delivery Status"'));
+assert(!waybillCsv.includes('Legacy PDF') && !waybillCsv.includes('Payout'));
 assert.throws(() => service.validateReportPage('waybills', { ...waybillPage,
   summary: { ...waybillSummary, payout_total: 1 } }), /Invalid/);
 assert.throws(() => service.validateReportPage('waybills', { ...waybillPage,
   items: [{ ...waybillRow, internal_delivery_status: 'sent' }] }), /Invalid/);
+for (const sensitiveField of ['bank_name', 'account_number', 'account_name', 'recipients', 'payload', 'storage_path']) {
+  assert.throws(() => service.validateReportPage('waybills', { ...waybillPage,
+    items: [{ ...waybillRow, [sensitiveField]: 'must-not-pass' }] }), /Invalid/);
+}
+assert.throws(() => service.validateReportPage('waybills', { ...waybillPage,
+  items: [{ ...waybillRow, company_pdf_status: 'ready-ish' }] }), /Invalid/);
 assert.equal(service.validateReportPage('waybills', { ...waybillPage, items: [], total_count: 0 }).items.length, 0);
 console.log('PASS fixed report projections, bounded pagination and sensitive-field rejection');
 
@@ -91,14 +147,24 @@ assert.equal(waybillReport.items[0].waybill_number, 'INV-2026-000001');
 const waybillExport = await service.exportOperationsReport('waybills', {}, 'csv');
 assert.equal(waybillExport.items[0].waybill_id, 'waybill-1');
 assert.equal(waybillExport.items[0].waybill_number, 'INV-2026-000001');
-assert.equal(waybillExport.summary.blocked_configuration, 0);
+assert.equal(waybillExport.summary.company_pdf_blocked_bank_details_unverified, 1);
 assert.equal(calls.at(-1).args.p_filters.payout_status, undefined);
-const allowedDeliveryStatuses = ['pending', 'processing', 'sent', 'failed', 'blocked_missing_email', 'blocked_configuration', 'not_queued'];
-for (const status of allowedDeliveryStatuses) {
-  await service.loadOperationsReport('waybills', { delivery_status: status }, 1);
-  assert.deepEqual(calls.at(-1).args.p_filters, { delivery_status: status });
+for (const status of ['unavailable', 'pending', 'processing', 'ready', 'failed']) {
+  await service.loadOperationsReport('waybills', { driver_pdf_status: status }, 1);
+  assert.deepEqual(calls.at(-1).args.p_filters, { driver_pdf_status: status });
 }
-await service.loadOperationsReport('waybills', { pdf_status: 'ready' }, 2);
+for (const status of ['unavailable', 'pending', 'processing', 'ready', 'failed',
+  'blocked_missing_bank_details', 'blocked_bank_details_unverified']) {
+  await service.loadOperationsReport('waybills', { company_pdf_status: status }, 1);
+  assert.deepEqual(calls.at(-1).args.p_filters, { company_pdf_status: status });
+}
+for (const status of ['pending', 'processing', 'sent', 'failed', 'blocked_missing_email', 'blocked_configuration', 'not_queued']) {
+  for (const key of ['driver_delivery_status', 'company_delivery_status']) {
+    await service.loadOperationsReport('waybills', { [key]: status }, 1);
+    assert.deepEqual(calls.at(-1).args.p_filters, { [key]: status });
+  }
+}
+await service.loadOperationsReport('waybills', { company_pdf_status: 'ready' }, 2);
 assert.equal(calls.at(-1).args.p_page, 2, 'Pagination sends the selected page to the report RPC');
 const callsBeforeInvalidFilter = calls.length;
 await assert.rejects(() => service.loadOperationsReport('waybills', { payout_status: 'paid' }, 1), error => {
@@ -111,11 +177,13 @@ await assert.rejects(() => service.loadOperationsReport('trips', { raw: 'any' },
 await assert.rejects(() => service.exportOperationsReport('waybills', { payout_status: 'paid' }, 'csv'),
   error => error.code === 'invalid_request');
 for (const deliveryStatus of ['not_applicable', 'unknown']) {
-  await assert.rejects(() => service.loadOperationsReport('waybills', { delivery_status: deliveryStatus }, 1),
+  await assert.rejects(() => service.loadOperationsReport('waybills', { company_delivery_status: deliveryStatus }, 1),
     error => error.code === 'invalid_request');
 }
-await assert.rejects(() => service.loadOperationsReport('waybills', { pdf_status: 'not_queued' }, 1),
-  error => error.code === 'invalid_request');
+for (const obsoleteFilter of [{ pdf_status: 'ready' }, { delivery_status: 'sent' }]) {
+  await assert.rejects(() => service.loadOperationsReport('waybills', obsoleteFilter, 1),
+    error => error.code === 'invalid_request');
+}
 rpcHandler = async () => ({ data: null, error: { code: 'P0001', details: 'EXPORT_LIMIT_EXCEEDED' } });
 await assert.rejects(() => service.exportOperationsReport('trips', {}, 'csv'), error => error.code === 'export_limit');
 rpcHandler = async () => ({ data: null, error: { code: '42501', message: 'sensitive database detail', details: 'private value' } });
@@ -146,8 +214,9 @@ const xlsxExport = await service.exportOperationsReport('waybills', {}, 'xlsx');
 assert.equal(xlsxExport.format, 'xlsx');
 const waybillXlsxBytes = writer.createXlsxBytes('waybills', xlsxExport.items);
 const waybillSheet = new TextDecoder().decode(waybillXlsxBytes);
-assert(waybillSheet.includes('Company Delivery') && !waybillSheet.includes('Payout Status'));
-assert(waybillSheet.includes('Legacy PDF Status'));
+assert(waybillSheet.includes('Driver PDF Status') && waybillSheet.includes('Company PDF Status'));
+assert(waybillSheet.includes('Driver Delivery Status') && waybillSheet.includes('Company Delivery Status'));
+assert(!waybillSheet.includes('Legacy PDF Status') && !waybillSheet.includes('Payout Status'));
 console.log('PASS server-side RPC calls, safe authorization failures and export-limit handling');
 
 const malicious = { ...tripRow, driver_name: ' =HYPERLINK("https://bad.invalid")' };
@@ -193,9 +262,14 @@ assert.match(render({ status: 'ready', data: { ...service.validateReportPage('tr
 const ready = render({ status: 'ready', data: service.validateReportPage('trips', page) });
 assert(ready.includes('Export CSV') && ready.includes('Export Excel') && ready.includes('Tonnage'));
 const waybillUi = render({ status: 'ready', data: service.validateReportPage('waybills', waybillPage) }, 'waybills');
-assert(waybillUi.includes('Waybills &amp; Delivery') && waybillUi.includes('Company Delivery'));
+assert(waybillUi.includes('Waybills &amp; Delivery') && waybillUi.includes('Driver PDF Status')
+  && waybillUi.includes('Company PDF Status') && waybillUi.includes('Driver Delivery Status')
+  && waybillUi.includes('Company Delivery Status'));
+assert(!waybillUi.includes('Legacy PDF Status') && !waybillUi.includes('<label>PDF status<select'));
 assert(!waybillUi.includes('Payout Status') && !waybillUi.includes('not_applicable'));
 for (const status of ['blocked_missing_email', 'blocked_configuration', 'not_queued']) assert(waybillUi.includes(status));
+for (const status of ['blocked_missing_bank_details', 'blocked_bank_details_unverified', 'unavailable']) assert(waybillUi.includes(status));
+assert(waybillUi.includes('Driver PDFs failed') && waybillUi.includes('Company PDFs failed'));
 assert(waybillUi.includes('Clear filters') && waybillUi.includes('Next'));
 const busy = renderToStaticMarkup(React.createElement(router.MemoryRouter, null,
   React.createElement(view.OperationsReportsView, { kind: 'trips', onKindChange() {}, filters: { basis: 'opened' }, changeFilter() {},
