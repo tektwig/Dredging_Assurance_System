@@ -87,11 +87,14 @@ alter table public.trips enable trigger user;
 
 insert into public.trip_closure_invoices(id,invoice_number,trip_id,trip_number,truck_id,truck_registration,
   driver_id,driver_name,driver_email,loading_site_id,loading_site_name,offloading_site_id,offloading_site_name,
+  loading_officer_id,loading_officer_name,offloading_officer_id,offloading_officer_name,
   quantity_tonnes,opened_at,closed_at,issued_at)
 values ('f7370000-0000-0000-0000-000000000001','INV-2026-999991','f7360000-0000-0000-0000-000000000001',
   'RPT-TRIP-CLOSED','f7340000-0000-0000-0000-000000000001','RPT-001','f7330000-0000-0000-0000-000000000002',
   'Actual Trip Driver','actual@example.invalid','f7320000-0000-0000-0000-000000000001','Reports Loading',
-  'f7320000-0000-0000-0000-000000000002','Reports Offloading',12.50,
+  'f7320000-0000-0000-0000-000000000002','Reports Offloading',
+  'f7310000-0000-0000-0000-000000000002','Reports Loading Officer',
+  'f7310000-0000-0000-0000-000000000003','Reports Offloading Officer',12.50,
   timestamp with time zone '1999-12-31 22:59:00+00',timestamp with time zone '1999-12-31 23:00:00+00',
   timestamp with time zone '2000-01-01 00:30:00+00');
 insert into public.trip_closure_invoice_bank_submissions(
@@ -109,11 +112,14 @@ where invoice_id='f7370000-0000-0000-0000-000000000001';
 alter table public.trip_closure_invoices disable trigger queue_secure_waybill_pdf_copies;
 insert into public.trip_closure_invoices(id,invoice_number,trip_id,trip_number,truck_id,truck_registration,
   driver_id,driver_name,driver_email,loading_site_id,loading_site_name,offloading_site_id,offloading_site_name,
+  loading_officer_id,loading_officer_name,offloading_officer_id,offloading_officer_name,
   quantity_tonnes,opened_at,closed_at,issued_at)
 values ('f7370000-0000-0000-0000-000000000002','INV-2026-999992','f7360000-0000-0000-0000-000000000004',
   'RPT-TRIP-NO-SECURE-COPY','f7340000-0000-0000-0000-000000000002','RPT-002','f7330000-0000-0000-0000-000000000002',
   'Actual Trip Driver','actual@example.invalid','f7320000-0000-0000-0000-000000000001','Reports Loading',
-  'f7320000-0000-0000-0000-000000000002','Reports Offloading',14.25,
+  'f7320000-0000-0000-0000-000000000002','Reports Offloading',
+  'f7310000-0000-0000-0000-000000000002','Reports Loading Officer',
+  'f7310000-0000-0000-0000-000000000003','Reports Offloading Officer',14.25,
   timestamp with time zone '2000-01-02 09:00+00',timestamp with time zone '2000-01-02 10:00+00',
   timestamp with time zone '2000-01-02 10:30+00');
 alter table public.trip_closure_invoices enable trigger queue_secure_waybill_pdf_copies;
