@@ -131,27 +131,6 @@ insert into public.trip_closure_invoice_pdf_copies(
 values ('f7370000-0000-0000-0000-000000000001','f7360000-0000-0000-0000-000000000001',
   'INV-2026-999991','company',2,'blocked_bank_details_unverified','waybill-company-copies',
   private.secure_waybill_copy_storage_path('INV-2026-999991','company',2));
-insert into public.notification_outbox(trip_id,event_type,audience,recipients,payload,status,delivery_sequence)
-values ('f7360000-0000-0000-0000-000000000001','waybill_ready','driver',array['actual@example.invalid'],
-  jsonb_build_object('invoice_id','f7370000-0000-0000-0000-000000000001','invoice_number','INV-2026-999991'),
-  'pending',0);
-insert into public.notification_outbox(trip_id,event_type,audience,recipients,payload,status,delivery_sequence,
-  resend_request_id,requested_by,requested_reason_code,sent_at)
-values ('f7360000-0000-0000-0000-000000000001','waybill_ready','driver',array['actual@example.invalid'],
-  jsonb_build_object('invoice_id','f7370000-0000-0000-0000-000000000001','invoice_number','INV-2026-999991'),
-  'sent',1,'f7380000-0000-0000-0000-000000000001','f7310000-0000-0000-0000-000000000001',
-  'DRIVER_REQUEST',clock_timestamp());
-insert into public.notification_outbox(trip_id,event_type,audience,recipients,payload,status,delivery_sequence)
-values ('f7360000-0000-0000-0000-000000000001','waybill_ready','client',array['reports-company@example.invalid'],
-  jsonb_build_object('invoice_id','f7370000-0000-0000-0000-000000000001','invoice_number','INV-2026-999991'),
-  'pending',0);
-insert into public.notification_outbox(trip_id,event_type,audience,recipients,payload,status,delivery_sequence,
-  resend_request_id,requested_by,requested_reason_code,sent_at)
-values ('f7360000-0000-0000-0000-000000000001','waybill_ready','client',array['reports-company@example.invalid'],
-  jsonb_build_object('invoice_id','f7370000-0000-0000-0000-000000000001','invoice_number','INV-2026-999991'),
-  'sent',1,'f7380000-0000-0000-0000-000000000002','f7310000-0000-0000-0000-000000000001',
-  'INTERNAL_REQUEST',clock_timestamp());
-
 set local role authenticated;
 select set_config('request.jwt.claim.sub','f7310000-0000-0000-0000-000000000002',true);
 select set_config('test.exception_id',public.raise_trip_exception('dispute','EXCEPTION-FREE-TEXT-SECRET',
@@ -202,14 +181,26 @@ select pg_temp.report_assert((public.get_operations_report('waybills',
     #>>'{items,0,pdf_status}') is null,
   'secure Driver and latest Company copy states replace the ready legacy document status');
 select pg_temp.report_assert((public.get_operations_report('waybills',
-  '{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)#>>'{items,0,driver_delivery_status}')='sent'
+  '{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)#>>'{items,0,driver_delivery_status}')='not_queued'
   and (public.get_operations_report('waybills','{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)
-    #>>'{items,0,company_delivery_status}')='sent'
+    #>>'{items,0,company_delivery_status}')='not_queued'
   and (public.get_operations_report('waybills','{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)
     #>>'{summary,driver_delivery_failed}')::integer=0
   and (public.get_operations_report('waybills','{"date_from":"2000-01-01","date_to":"2000-01-01"}',1,25)
     #>>'{summary,company_delivery_failed}')::integer=0,
-  'each audience reports its newest invoice-matched delivery sequence');
+  'blocked synthetic Waybill has no fabricated delivery records');
+select pg_temp.report_assert((select count(*)=1 and bool_and(
+    report_item.item->>'driver_delivery_status'='pending'
+    and report_item.item->>'company_delivery_status'='sent')
+  from jsonb_array_elements(public.get_operations_report('waybills',
+    '{"date_from":"2026-10-16","date_to":"2026-10-16"}',1,100)->'items') as report_item(item)
+  where report_item.item->>'invoice_number'='WB-2026-000040'),
+  'persisted historical delivery records report pending Driver and sent Company states');
+select pg_temp.report_assert((select count(*)=1
+  from jsonb_array_elements(public.get_operations_report('waybills',
+    '{"date_from":"2026-10-16","date_to":"2026-10-16","company_delivery_status":"sent"}',1,100)->'items') as report_item(item)
+  where report_item.item->>'invoice_number'='WB-2026-000040'),
+  'Company delivery filter includes the persisted sent notification');
 select pg_temp.report_assert((public.get_operations_report('waybills',
   '{"date_from":"2000-01-02","date_to":"2000-01-02"}',1,25)#>>'{items,0,driver_pdf_status}')='unavailable'
   and (public.get_operations_report('waybills','{"date_from":"2000-01-02","date_to":"2000-01-02"}',1,25)
@@ -227,7 +218,7 @@ select pg_temp.report_assert((public.get_operations_report('waybills',
     ->>'total_count')::integer=0
   and (public.get_operations_report('waybills',
   '{"date_from":"2000-01-01","date_to":"2000-01-01","company_delivery_status":"sent"}',1,25)
-    ->>'total_count')::integer=1,
+    ->>'total_count')::integer=0,
   'status filters apply to latest secure copy and latest delivery state');
 select pg_temp.report_assert((public.get_operations_report('waybills',
   '{"date_from":"2000-01-02","date_to":"2000-01-02","driver_pdf_status":"unavailable","company_delivery_status":"not_queued"}',1,25)
@@ -274,8 +265,8 @@ select pg_temp.report_assert((select (value->>'row_count')::integer=1 and value-
   and jsonb_array_length(value->'items')=1
   and value->'items'->0->>'driver_pdf_status'='pending'
   and value->'items'->0->>'company_pdf_status'='blocked_bank_details_unverified'
-  and value->'items'->0->>'driver_delivery_status'='sent'
-  and value->'items'->0->>'company_delivery_status'='sent'
+  and value->'items'->0->>'driver_delivery_status'='not_queued'
+  and value->'items'->0->>'company_delivery_status'='not_queued'
   and position('Sensitive Account' in value::text)=0
   and position('Sensitive Bank' in value::text)=0
   and position('1111111111' in value::text)=0
