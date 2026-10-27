@@ -267,7 +267,7 @@ select pg_temp.report_assert((select (value->>'row_count')::integer=1 and value-
   and position('Sensitive Bank' in value::text)=0
   and position('1111111111' in value::text)=0
   and not (value->'items'->0 ? 'pdf_status')
-  and not (value->'items'->0 ? 'payout_status') from report_export,
+  and not (value->'items'->0 ? 'payout_status') from report_export),
   'XLSX export uses the secure-copy and audience-specific report projection');
 select pg_temp.report_assert((select count(*)=1 from public.audit_log where entity_name='operations_report_export'
   and entity_id=(select (value->>'export_id')::uuid from report_export)
