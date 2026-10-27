@@ -189,12 +189,12 @@ select pg_temp.report_assert((select count(*)=1 and bool_and(
     report_item.item->>'driver_delivery_status'='pending'
     and report_item.item->>'company_delivery_status'='sent')
   from jsonb_array_elements(public.get_operations_report('waybills',
-    '{"date_from":"2026-10-16","date_to":"2026-10-16"}',1,100)->'items') as report_item(item)
+    '{"date_from":"2026-10-15","date_to":"2026-10-15"}',1,100)->'items') as report_item(item)
   where report_item.item->>'invoice_number'='WB-2026-000040'),
   'persisted historical delivery records report pending Driver and sent Company states');
 select pg_temp.report_assert((select count(*)=1
   from jsonb_array_elements(public.get_operations_report('waybills',
-    '{"date_from":"2026-10-16","date_to":"2026-10-16","company_delivery_status":"sent"}',1,100)->'items') as report_item(item)
+    '{"date_from":"2026-10-15","date_to":"2026-10-15","company_delivery_status":"sent"}',1,100)->'items') as report_item(item)
   where report_item.item->>'invoice_number'='WB-2026-000040'),
   'Company delivery filter includes the persisted sent notification');
 select pg_temp.report_assert((public.get_operations_report('waybills',
