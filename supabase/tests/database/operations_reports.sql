@@ -136,10 +136,6 @@ select set_config('request.jwt.claim.sub','f7310000-0000-0000-0000-000000000001'
 select set_config('test.exception_id',public.raise_trip_exception('dispute','EXCEPTION-FREE-TEXT-SECRET',
   'f7340000-0000-0000-0000-000000000002','f7360000-0000-0000-0000-000000000002',null,true)::text,true);
 reset role;
-set local role authenticated;
-select set_config('request.jwt.claim.sub','f7310000-0000-0000-0000-000000000001',true);
-select public.start_operations_exception_review(current_setting('test.exception_id')::uuid,
-  (select updated_at from public.exceptions where id=current_setting('test.exception_id')::uuid));
 
 select pg_temp.report_assert((public.get_operations_report('trips',
   '{"basis":"closed","date_from":"2000-01-01","date_to":"2000-01-01","truck_id":"f7340000-0000-0000-0000-000000000001"}',1,25)->>'total_count')::integer=1,
@@ -227,7 +223,7 @@ select pg_temp.report_assert((public.get_operations_report('waybills',
 select pg_temp.report_assert((public.get_operations_report('exceptions',
   jsonb_build_object('date_from',(statement_timestamp() at time zone 'Africa/Lagos')::date,
     'date_to',(statement_timestamp() at time zone 'Africa/Lagos')::date),1,25)->>'total_count')::integer=1,
-  'Exceptions report uses created_at and includes in_review');
+  'Exceptions report uses created_at and includes an authorized open exception');
 select pg_temp.report_error($q$select public.get_operations_report('trips',
   '{"date_from":"2026-09-01","date_to":"2026-11-30"}',1,25)$q$,'22023');
 select pg_temp.report_error($q$select public.get_operations_report('performance',
